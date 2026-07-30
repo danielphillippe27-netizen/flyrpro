@@ -11,6 +11,14 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { getWorkspacePowerDialerAddon } from '@/app/lib/billing/workspace-addons';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
+import {
+  getTrialDaysRemaining,
+  isWorkspaceTrialActive,
+} from '@/lib/demo/demo44TeamTrial';
+import {
+  resolveWorkspaceIdForUser,
+  type MinimalSupabaseClient,
+} from '@/app/api/_utils/workspace';
 
 type WorkspaceBilling = {
   id?: string;
@@ -22,40 +30,23 @@ function workspaceHasAccess(workspace: WorkspaceBilling | null): boolean {
   if (!workspace) return false;
 
   const status = (workspace.subscription_status ?? '').toLowerCase();
-  return status === 'active';
+  return status === 'active' || isWorkspaceTrialActive(status, workspace.trial_ends_at);
 }
 
 async function resolvePrimaryWorkspaceBilling(userId: string): Promise<WorkspaceBilling | null> {
   const admin = createAdminClient();
-
-  const { data: ownedWorkspace } = await admin
-    .from('workspaces')
-    .select('id, subscription_status, trial_ends_at')
-    .eq('owner_id', userId)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (ownedWorkspace) {
-    return ownedWorkspace;
-  }
-
-  const { data: membership } = await admin
-    .from('workspace_members')
-    .select('workspace_id')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!membership?.workspace_id) {
+  const resolution = await resolveWorkspaceIdForUser(
+    admin as unknown as MinimalSupabaseClient,
+    userId
+  );
+  if (!resolution.workspaceId) {
     return null;
   }
 
   const { data: workspace } = await admin
     .from('workspaces')
     .select('id, subscription_status, trial_ends_at')
-    .eq('id', membership.workspace_id)
+    .eq('id', resolution.workspaceId)
     .maybeSingle();
 
   return workspace ?? null;
@@ -78,9 +69,18 @@ export async function GET(request: NextRequest) {
     const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, requestUser.email);
     const isAmbassador = !!approvedAmbassador;
     const workspace = await resolvePrimaryWorkspaceBilling(requestUser.id);
+    const activeWorkspaceTrial = isWorkspaceTrialActive(
+      workspace?.subscription_status,
+      workspace?.trial_ends_at
+    );
+    const trialDaysRemaining = activeWorkspaceTrial
+      ? getTrialDaysRemaining(workspace?.trial_ends_at)
+      : null;
     const workspaceAccess = workspaceHasAccess(workspace);
     const effectiveAccess = entitlement.is_active || workspaceAccess || isAmbassador;
-    const effectivePeriodEnd = entitlement.current_period_end ?? null;
+    const effectivePeriodEnd =
+      entitlement.current_period_end ??
+      (activeWorkspaceTrial ? workspace?.trial_ends_at ?? null : null);
     const dialerOffer = getPowerDialerAddonOffer(getRequestBillingCurrency(request));
     const workspaceId = workspace?.id ?? null;
     let dialerAddon = null;
@@ -109,6 +109,8 @@ export async function GET(request: NextRequest) {
       plan:
         isAmbassador
           ? 'ambassador'
+          : activeWorkspaceTrial && entitlement.plan === 'free'
+          ? 'team'
           : workspaceAccess && entitlement.plan === 'free'
           ? 'pro'
           : entitlement.plan,
@@ -117,7 +119,7 @@ export async function GET(request: NextRequest) {
       current_period_end: effectivePeriodEnd,
       subscription_status: workspace?.subscription_status ?? null,
       trial_ends_at: workspace?.trial_ends_at ?? null,
-      trial_days_remaining: null,
+      trial_days_remaining: trialDaysRemaining,
       dialer_offer: {
         price_id: dialerOffer.priceId || null,
         amount: dialerOffer.amount,
@@ -143,7 +145,11 @@ export async function GET(request: NextRequest) {
       dialer_number_status: (dialerNumberStatus as EntitlementSnapshot['dialer_number_status']) ?? null,
       dialer_uses_shared_default: !dialerNumber,
       isAmbassador,
-      planBadgeLabel: isAmbassador ? 'AMBASSADOR' : null,
+      planBadgeLabel: isAmbassador
+        ? 'AMBASSADOR'
+        : activeWorkspaceTrial
+          ? `TRIAL · ${trialDaysRemaining ?? 0}D LEFT`
+          : null,
       canUsePro: effectiveAccess,
       reason: effectiveAccess ? null : 'inactive',
     };

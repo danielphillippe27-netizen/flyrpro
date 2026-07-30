@@ -6,6 +6,8 @@ import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
 import { isPmtilesGeometryProvider } from '@/lib/map/campaignMapManifest';
 
+const MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
+
 export type RenderingMode = '3d' | '2d';
 
 type CampaignMapManifest = {
@@ -242,7 +244,7 @@ export function BuildingLayers({
               minzoom: manifest.minzoom ?? 13,
               filter: ['==', '$type', 'Polygon'],
               layout: {
-                'fill-extrusion-edge-radius': 0.6,
+                'fill-extrusion-edge-radius': 0,
               },
               paint: {
                 'fill-extrusion-color': [
@@ -253,12 +255,14 @@ export function BuildingLayers({
                 ],
                 'fill-extrusion-opacity': 0.85,
                 'fill-extrusion-height': [
-                  'case',
-                  ['has', 'height'],
-                  ['get', 'height'],
-                  ['has', 'render_height'],
-                  ['get', 'render_height'],
-                  8,
+                  'max',
+                  [
+                    'coalesce',
+                    ['get', 'height'],
+                    ['get', 'render_height'],
+                    MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
+                  ],
+                  MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
                 ],
                 'fill-extrusion-base': [
                   'case',
@@ -268,6 +272,7 @@ export function BuildingLayers({
                 ],
                 'fill-extrusion-vertical-gradient': true,
                 'fill-extrusion-rounded-roof': false,
+                'fill-extrusion-cast-shadows': false,
               },
             });
           }

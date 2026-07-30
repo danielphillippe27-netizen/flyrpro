@@ -34,6 +34,13 @@
     "test:ambassador-payout": "npx tsx scripts/test-ambassador-payout.ts",
     "test:salesperson-payout": "npx tsx scripts/test-salesperson-payout.ts",
     "test:campaign-polygon-parity": "npx tsx scripts/campaign-polygon-parity-e2e.ts",
+    "test:townhouse-identity": "npx tsx lib/services/__tests__/TownhouseUnitIdentity.test.ts",
+    "test:map-reconciliation-rules": "npx tsx lib/services/__tests__/CampaignMapReconciliationRules.test.ts",
+    "test:map-reconciliation-mississauga": "DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/test-map-reconciliation-mississauga.ts",
+    "test:territory-iq": "npx tsx lib/territory-iq/__tests__/scoring.test.ts && npx tsx lib/territory-iq/__tests__/response.test.ts",
+    "territory-iq:catalogue": "cd ../municipal_data/territory_iq_canada && python3 -m acquisition.catalogue --output-dir output/catalogue/current",
+    "territory-iq:inventory": "cd ../municipal_data/territory_iq_canada && python3 -m acquisition.inventory --output-dir output/inventory/current",
+    "test:territory-iq-data": "cd ../municipal_data/territory_iq_canada && python3 -m unittest discover -s acquisition/tests -v",
     "test:crm-integrations": "npx tsx scripts/test-crm-integrations.ts"
   },
   "dependencies": {

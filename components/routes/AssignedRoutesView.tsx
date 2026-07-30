@@ -626,7 +626,7 @@ export function AssignedRoutesView({
         source: 'assigned-routes-footprints-source',
         minzoom: 12,
         layout: {
-          'fill-extrusion-edge-radius': 0.6,
+          'fill-extrusion-edge-radius': 0,
         },
         paint: {
           'fill-extrusion-color': footprintColorExpression,
@@ -636,6 +636,7 @@ export function AssignedRoutesView({
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
           'fill-extrusion-rounded-roof': false,
+          'fill-extrusion-cast-shadows': false,
         },
       });
     }
@@ -664,6 +665,7 @@ export function AssignedRoutesView({
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.85,
           'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-cast-shadows': false,
         },
       });
     }

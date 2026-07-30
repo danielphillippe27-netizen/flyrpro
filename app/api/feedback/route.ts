@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { sendFeedbackNotificationEmail } from '@/lib/email/feedbackNotifications';
 
 const MIN_MESSAGE_LENGTH = 5;
 const MAX_MESSAGE_LENGTH = 3000;
@@ -215,6 +216,26 @@ export async function POST(request: NextRequest) {
         { error: legacyInsertError.message || 'Failed to save feedback' },
         { status: 500 }
       );
+    }
+
+    try {
+      const notification = await sendFeedbackNotificationEmail({
+        message,
+        submitterEmail: user.email ?? null,
+        submitterUserId: user.id,
+        workspaceId,
+        role,
+        page,
+        threadId,
+        requestOrigin: request.nextUrl.origin,
+      });
+      if (notification.skipped) {
+        console.warn('[api/feedback] email notification skipped: RESEND_API_KEY is not configured');
+      }
+    } catch (notificationError) {
+      // The database inbox remains the source of record. Email delivery must not
+      // make a successfully stored feedback submission appear to have failed.
+      console.error('[api/feedback] failed to send email notification:', notificationError);
     }
 
     return NextResponse.json({ ok: true });

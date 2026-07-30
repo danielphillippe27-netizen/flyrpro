@@ -17,23 +17,23 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://wolfgrid.app"),
   manifest: '/manifest.webmanifest',
   title: {
-    default: "WolfGrid",
+    default: "WolfGrid — Field Prospecting, Connected",
     template: "%s | WolfGrid",
   },
-  description: "3D prospecting map",
+  description: "Plan territories, guide field reps, record every conversation, and turn prospecting activity into a connected system.",
   icons: {
     icon: "/favicon.png",
     apple: "/apple-touch-icon.png",
   },
   openGraph: {
-    title: "WolfGrid",
-    description: "3D prospecting map",
+    title: "WolfGrid — Field Prospecting, Connected",
+    description: "Plan territories, guide field reps, record every conversation, and turn prospecting activity into a connected system.",
     images: ["/opengraph-image"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "WolfGrid",
-    description: "3D prospecting map",
+    title: "WolfGrid — Field Prospecting, Connected",
+    description: "Plan territories, guide field reps, record every conversation, and turn prospecting activity into a connected system.",
     images: ["/twitter-image"],
   },
 };

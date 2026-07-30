@@ -43,6 +43,11 @@ import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService
 import { CalendarDays, CircleAlert, Map, Minus, Pencil, Plus, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
+import {
+  DEMO_44_REFERRAL_CAMPAIGN,
+  DEMO_44_TEAM_TRIAL_OFFER,
+  isDemo44TeamTrialOffer,
+} from '@/lib/demo/demo44TeamTrial';
 
 const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimizing', 'optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -245,11 +250,14 @@ function clearSelfServeCampaignDraft() {
 }
 
 function buildSelfServeOnboardingPath(searchParams: { get(name: string): string | null }): string {
+  const offer = searchParams.get('offer');
+  const isDemo44TeamTrial = isDemo44TeamTrialOffer(offer);
   const onboardingParams = new URLSearchParams({
     source: 'self-serve-demo',
-    campaign: 'self-serve-campaign',
+    campaign: isDemo44TeamTrial ? DEMO_44_REFERRAL_CAMPAIGN : 'self-serve-campaign',
     resumeCampaign: '1',
   });
+  if (isDemo44TeamTrial) onboardingParams.set('offer', DEMO_44_TEAM_TRIAL_OFFER);
   const referralCode = searchParams.get('referralCode') ?? searchParams.get('ref');
   if (referralCode) onboardingParams.set('referralCode', referralCode);
   return `/onboarding?${onboardingParams.toString()}`;
@@ -1671,7 +1679,9 @@ export default function CreateCampaignPage() {
       if (isSelfServeDemo) {
         clearSelfServeCampaignDraft();
       }
-      router.push(`/campaigns/${campaign.id}${isSelfServeDemo ? '?source=self-serve-demo' : ''}`);
+      const campaignParams = new URLSearchParams({ campaignPanel: 'hidden' });
+      if (isSelfServeDemo) campaignParams.set('source', 'self-serve-demo');
+      router.push(`/campaigns/${campaign.id}?${campaignParams.toString()}`);
       window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
     } catch (error: unknown) {
       console.error('Error creating campaign:', error);

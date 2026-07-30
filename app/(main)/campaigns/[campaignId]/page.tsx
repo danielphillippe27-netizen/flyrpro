@@ -40,6 +40,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
 import { MapOptimizationStatus } from '@/components/campaigns/MapOptimizationStatus';
+import { TerritoryIQPanel } from '@/components/campaigns/TerritoryIQPanel';
 import { FinancePanel } from '@/components/finance/FinancePanel';
 import {
   buildLegacyCampaignText,
@@ -100,7 +101,7 @@ type CampaignWithLegacyDescription = CampaignV2 & {
   description?: string | null;
 };
 
-const CAMPAIGN_TAB_VALUES = ['map', 'activity', 'addresses', 'contacts', 'qr', 'finance', 'assignments', 'notes'] as const;
+const CAMPAIGN_TAB_VALUES = ['map', 'activity', 'addresses', 'contacts', 'qr', 'finance', 'assignments', 'territory-iq', 'notes'] as const;
 type CampaignTabValue = (typeof CAMPAIGN_TAB_VALUES)[number];
 
 const SELF_SERVE_DEMO_NEXT_STEPS = [
@@ -558,13 +559,18 @@ export default function CampaignDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const campaignId = params.campaignId as string;
-  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, currentWorkspace, membershipsByWorkspaceId, isFounder } = useWorkspace();
   const { setTheme } = useTheme();
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
+  const showTerritoryIQ =
+    isFounder ||
+    currentWorkspace?.territory_iq_enabled === true ||
+    process.env.NEXT_PUBLIC_TERRITORY_IQ_PREVIEW === '1';
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const requestedTab = searchParams.get('tab');
   const initialTab: CampaignTabValue =
     requestedTab && CAMPAIGN_TAB_VALUES.includes(requestedTab as CampaignTabValue)
+      && (requestedTab !== 'territory-iq' || showTerritoryIQ)
       ? (requestedTab as CampaignTabValue)
       : 'map';
 
@@ -1527,6 +1533,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="finance">Finance</TabsTrigger>
             <TabsTrigger value="assignments">Assignments</TabsTrigger>
+            {showTerritoryIQ ? <TabsTrigger value="territory-iq">Territory IQ</TabsTrigger> : null}
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -1801,6 +1808,15 @@ export default function CampaignDetailPage() {
               onDemoSplitComplete={handleDemoSplitComplete}
             />
           </TabsContent>
+
+          {showTerritoryIQ ? (
+            <TabsContent value="territory-iq" className="mt-4">
+              <TerritoryIQPanel
+                campaignId={campaignId}
+                canRefresh={currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin' || isFounder}
+              />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="notes" className="mt-4 space-y-4">
             <div className="bg-card p-4 rounded-xl border border-border">

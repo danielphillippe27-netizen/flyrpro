@@ -496,7 +496,7 @@ function Beat3Map({
             source: BUILDINGS_SOURCE_ID,
             filter: ['all', BUILDING_GEOMETRY_FILTER, ['!=', ['get', 'fresh'], true]],
             layout: {
-              'fill-extrusion-edge-radius': 0.6,
+              'fill-extrusion-edge-radius': 0,
             },
             paint: {
               'fill-extrusion-color': ADDRESS_HIGHLIGHT_COLOR,
@@ -506,6 +506,7 @@ function Beat3Map({
               'fill-extrusion-vertical-gradient': true,
               'fill-extrusion-emissive-strength': 0.45,
               'fill-extrusion-rounded-roof': false,
+              'fill-extrusion-cast-shadows': false,
             },
           });
           map.addLayer({
@@ -514,7 +515,7 @@ function Beat3Map({
             source: BUILDINGS_SOURCE_ID,
             filter: ['all', BUILDING_GEOMETRY_FILTER, ['==', ['get', 'fresh'], true]],
             layout: {
-              'fill-extrusion-edge-radius': 0.6,
+              'fill-extrusion-edge-radius': 0,
             },
             paint: {
               'fill-extrusion-color': ADDRESS_HIGHLIGHT_COLOR,
@@ -524,6 +525,7 @@ function Beat3Map({
               'fill-extrusion-vertical-gradient': true,
               'fill-extrusion-emissive-strength': 0.65,
               'fill-extrusion-rounded-roof': false,
+              'fill-extrusion-cast-shadows': false,
             },
           });
 

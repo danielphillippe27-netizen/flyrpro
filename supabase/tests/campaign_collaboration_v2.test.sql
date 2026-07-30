@@ -17,12 +17,19 @@ INSERT INTO public.workspaces(id, name, owner_id)
 VALUES ('10000000-0000-0000-0000-000000000001', 'Collaboration test', '00000000-0000-0000-0000-000000000001');
 
 INSERT INTO public.campaigns(id, owner_id, workspace_id, title, name, description, status)
-VALUES (
-  '20000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000001',
-  '10000000-0000-0000-0000-000000000001',
-  'Cross-platform contract', 'Cross-platform contract', 'pgTAP fixture', 'active'
-);
+VALUES
+  (
+    '20000000-0000-0000-0000-000000000001',
+    '00000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'Cross-platform contract', 'Cross-platform contract', 'pgTAP fixture', 'active'
+  ),
+  (
+    '20000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'Unassigned count control', 'Unassigned count control', 'pgTAP fixture', 'active'
+  );
 
 INSERT INTO public.campaign_assignments(
   id, campaign_id, workspace_id, assigned_to_user_id, assigned_by_user_id,
@@ -36,7 +43,8 @@ INSERT INTO public.campaign_addresses(
   id, campaign_id, formatted, address, source, geom, visited
 ) VALUES
   ('30000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '1 Test Street', '1 Test Street', 'mapbox', st_setsrid(st_makepoint(-79.38, 43.65), 4326), false),
-  ('30000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', '4 Test Street', '4 Test Street', 'mapbox', st_setsrid(st_makepoint(-79.37, 43.65), 4326), false);
+  ('30000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000001', '4 Test Street', '4 Test Street', 'mapbox', st_setsrid(st_makepoint(-79.37, 43.65), 4326), false),
+  ('30000000-0000-0000-0000-000000000005', '20000000-0000-0000-0000-000000000002', '5 Private Street', '5 Private Street', 'mapbox', st_setsrid(st_makepoint(-79.36, 43.65), 4326), false);
 
 INSERT INTO public.campaign_assignment_homes(assignment_id, campaign_address_id, sequence)
 VALUES ('40000000-0000-0000-0000-000000000004', '30000000-0000-0000-0000-000000000001', 1);
@@ -55,6 +63,21 @@ WHERE platform IN ('ios', 'android', 'legacy');
 
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 SELECT set_config('request.jwt.claims', '{"sub":"00000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
+
+INSERT INTO collaboration_tap_results
+SELECT is(
+  (SELECT address_count::text FROM public.get_campaign_address_counts()
+   WHERE campaign_id = '20000000-0000-0000-0000-000000000001'),
+  '2',
+  'campaign address count returns the assigned campaign total'
+);
+INSERT INTO collaboration_tap_results
+SELECT is(
+  (SELECT count(*)::text FROM public.get_campaign_address_counts()
+   WHERE campaign_id = '20000000-0000-0000-0000-000000000002'),
+  '0',
+  'campaign address count omits campaigns the caller cannot view'
+);
 
 INSERT INTO collaboration_results VALUES (
   'pin_create',
@@ -81,6 +104,29 @@ INSERT INTO collaboration_results VALUES (
 );
 INSERT INTO collaboration_tap_results SELECT is((SELECT payload->>'replayed' FROM collaboration_results WHERE name = 'pin_replay'), 'true', 'repeated pin creation replays the original result');
 INSERT INTO collaboration_tap_results SELECT is((SELECT count(*)::text FROM public.campaign_home_events WHERE client_mutation_id = 'pin-create-ios'), '1', 'pin replay creates one permanent event');
+
+-- A teammate-created manual pin is protected before it has any status row.
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000003', true);
+INSERT INTO collaboration_results VALUES (
+  'teammate_pin_status_locked',
+  public.v2_record_campaign_address_outcome(
+    p_campaign_id => '20000000-0000-0000-0000-000000000001',
+    p_campaign_address_id => '30000000-0000-0000-0000-000000000002',
+    p_status => 'delivered', p_client_mutation_id => 'android-teammate-pin-status',
+    p_base_revision => 0, p_origin_platform => 'android', p_client_build => 100
+  )
+);
+INSERT INTO collaboration_tap_results SELECT is(
+  (SELECT payload->>'error_code' FROM collaboration_results WHERE name = 'teammate_pin_status_locked'),
+  'TEAMMATE_STATUS_LOCKED',
+  'ordinary teammate cannot set the first status on another actor manual pin'
+);
+INSERT INTO collaboration_tap_results SELECT is(
+  (SELECT count(*)::text FROM public.address_statuses WHERE campaign_address_id = '30000000-0000-0000-0000-000000000002'),
+  '0',
+  'rejected teammate pin status leaves canonical state untouched'
+);
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 
 INSERT INTO collaboration_results VALUES (
   'mutation_reused',

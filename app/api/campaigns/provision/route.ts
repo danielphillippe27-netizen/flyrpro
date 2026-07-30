@@ -31,6 +31,7 @@ import {
   CampaignMapModeService,
 } from '@/lib/services/CampaignMapModeService';
 import { CampaignMapReconciliationService } from '@/lib/services/CampaignMapReconciliationService';
+import { TerritoryIQService } from '@/lib/territory-iq/TerritoryIQService';
 import {
   prebuildCampaignMapBundle,
   resolveScopedCampaignMapGeometry,
@@ -1188,7 +1189,9 @@ async function runCampaignPostProcessing(params: {
     };
 
     const mapModeService = new CampaignMapModeService(supabase);
-    const effectiveParcelCount = Math.max(parcelPreparation?.parcelCount ?? 0, staticParcelCount);
+    const effectiveParcelCount = parcelPreparation?.status === 'ready'
+      ? parcelPreparation.parcelCount
+      : staticParcelCount;
     const mapModeAssessment = await timedStage('map_mode', () =>
       mapModeService.computeAndPersist(campaignId, {
         totalAddresses: effectiveInsertedCount,
@@ -1563,6 +1566,8 @@ export async function POST(request: NextRequest) {
             },
           });
           const scopedBuildingCount = scopedGeometry.buildings?.features.length ?? null;
+          const scopedParcelCount = scopedGeometry.parcels?.features.length ?? 0;
+          const hasResidentialParcels = scopedParcelCount > 0;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
 
           if (finalAddressCount === 0 && (scopedGeometry.buildings?.features.length ?? 0) > 0) {
@@ -1597,7 +1602,6 @@ export async function POST(request: NextRequest) {
 	          let mapMode = 'standard_pins';
 	          let linkedBuildingCount = 0;
 	          const effectiveBuildingCount = snapshot.counts.buildings;
-	          const staticParcelCount = staticParcelCountFromSnapshot(snapshot);
 	          const parcelEnrichmentStatus = isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
 
           if (parcelEnrichmentStatus === 'queued') {
@@ -1609,27 +1613,26 @@ export async function POST(request: NextRequest) {
             provision_phase: finalAddressCount > 0 ? 'addresses_ready' : 'source_probed',
             provision_source: dbProvisionSource(addressSource),
             provisioned_at: readyAt,
-            has_parcels: staticParcelCount > 0,
+            has_parcels: hasResidentialParcels,
             building_link_confidence: buildingLinkConfidence,
-            map_mode: staticParcelCount > 0 ? 'hybrid' : mapMode,
+            map_mode: hasResidentialParcels ? 'hybrid' : mapMode,
             parcel_enrichment_status: parcelEnrichmentStatus,
             data_quality_reason: homeCapNotice,
           });
 
           const initialMapReadyAt = new Date().toISOString();
-          const scopedParcelCount = scopedGeometry.parcels?.features.length ?? 0;
           await prewarmCanonicalMapBundle(supabase, campaignId!, scopedGeometry, {
             linksStatusOverride: 'pending_provision',
-            parcelDisplayMode: 'raw',
+            parcelDisplayMode: 'filtered',
           });
           await updateCampaignProvision(supabase, campaignId!, {
             provision_status: 'ready',
             provision_phase: 'map_ready',
             provisioned_at: initialMapReadyAt,
             map_ready_at: initialMapReadyAt,
-            has_parcels: staticParcelCount > 0 || scopedParcelCount > 0,
+            has_parcels: hasResidentialParcels,
             building_link_confidence: 0,
-            map_mode: (staticParcelCount > 0 || scopedParcelCount > 0) ? 'hybrid' : mapMode,
+            map_mode: hasResidentialParcels ? 'hybrid' : mapMode,
             data_quality_reason: homeCapNotice,
           });
 
@@ -1695,9 +1698,9 @@ export async function POST(request: NextRequest) {
             source: addressSource,
             links_created: linkedBuildingCount,
             units_created: 0,
-            has_parcels: staticParcelCount > 0,
+            has_parcels: hasResidentialParcels,
             building_link_confidence: buildingLinkConfidence,
-            map_mode: staticParcelCount > 0 ? 'hybrid' : mapMode,
+            map_mode: hasResidentialParcels ? 'hybrid' : mapMode,
             linked_address_count: linkedAddressCount,
             total_campaign_addresses: finalAddressCount,
             provision_status: 'ready',
@@ -1741,6 +1744,29 @@ export async function POST(request: NextRequest) {
             campaignId,
             provision_source: result.provision_source,
           });
+        }
+      }
+
+      if (campaign.workspace_id) {
+        const { data: territoryIQWorkspace } = await supabase
+          .from('workspaces')
+          .select('territory_iq_enabled')
+          .eq('id', campaign.workspace_id)
+          .maybeSingle();
+        if (
+          territoryIQWorkspace?.territory_iq_enabled === true ||
+          process.env.TERRITORY_IQ_FORCE_ENABLED === '1'
+        ) {
+          try {
+            await new TerritoryIQService(supabase).enqueue(campaignId!, requestUser.id);
+          } catch (territoryIQError) {
+            console.warn('[Provision] Territory IQ post-processing deferred:', {
+              campaignId,
+              message: territoryIQError instanceof Error
+                ? territoryIQError.message
+                : String(territoryIQError),
+            });
+          }
         }
       }
 

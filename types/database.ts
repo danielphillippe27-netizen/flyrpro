@@ -46,6 +46,7 @@ export interface Workspace {
   brokerage_id: string | null;
   brokerage_name: string | null;
   movie_map_controls_enabled: boolean;
+  territory_iq_enabled?: boolean;
 }
 
 /** Entitlements: source of truth for plan/status (web + iOS). */

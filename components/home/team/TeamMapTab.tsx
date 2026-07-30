@@ -7,6 +7,14 @@ import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getMapboxToken } from '@/lib/mapbox';
 import { applyPresetVisualTweaks, applyResolvedMapStyle, getResolvedMapInitOptions, resolveMapStyle } from '@/lib/map-styles';
+import {
+  buildDemoLiveChoreography,
+  completedAssignedHomes,
+  demoBuildingPhase,
+  type DemoBuildingCandidate,
+  type DemoChoreographyBuilding,
+  type DemoLiveChoreography,
+} from '@/lib/demo/team-live-map-choreography';
 import { Card, CardContent } from '@/components/ui/card';
 
 const ROUTES_SOURCE_ID = 'team-routes';
@@ -16,15 +24,13 @@ const KNOCKS_LAYER_ID = 'team-knocks-layer';
 const LIVE_SOURCE_ID = 'team-live-presence';
 const LIVE_LAYER_ID = 'team-live-presence-layer';
 const LIVE_LABEL_LAYER_ID = 'team-live-presence-labels';
-const DEMO_ASSIGNMENT_ROUTES_SOURCE_ID = 'team-demo-assignment-routes';
-const DEMO_ASSIGNMENT_ROUTES_LAYER_ID = 'team-demo-assignment-routes-layer';
+const LEGACY_DEMO_ASSIGNMENT_ROUTES_SOURCE_ID = 'team-demo-assignment-routes';
+const LEGACY_DEMO_ASSIGNMENT_ROUTES_LAYER_ID = 'team-demo-assignment-routes-layer';
 const DEMO_ASSIGNMENT_HOMES_SOURCE_ID = 'team-demo-assignment-homes';
-const DEMO_ASSIGNMENT_HOMES_FILL_LAYER_ID = 'team-demo-assignment-homes-fill';
-const DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID = 'team-demo-assignment-homes-line';
-const DEMO_HOME_VISIT_DURATION_MS = 900;
+const DEMO_ASSIGNMENT_HOMES_EXTRUSION_LAYER_ID = 'team-demo-assignment-homes-extrusion';
+const LEGACY_DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID = 'team-demo-assignment-homes-line';
 const DEMO_ANIMATION_FRAME_MS = 120;
 const DEMO_COMPLETED_COLOR = '#16A34A';
-const MAX_DEMO_ASSIGNMENT_HOMES = 96;
 
 type MapMember = { user_id: string; display_name: string; color: string };
 type MapSession = {
@@ -76,16 +82,6 @@ type DemoPathMember = {
   display_name: string;
   color: string;
   path: Array<[number, number]>;
-};
-
-type DemoAssignmentHome = {
-  id: string;
-  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
-  center: [number, number];
-  assigneeId: string;
-  assigneeName: string;
-  assigneeColor: string;
-  sequence: number;
 };
 
 type DemoMapBundle = {
@@ -276,34 +272,8 @@ function fallbackDemoHomeCandidates(area?: DemoArea | null) {
   return candidates;
 }
 
-function orderNearestHomes<T extends { center: [number, number] }>(homes: T[]): T[] {
-  if (homes.length <= 2) return homes;
-  const remaining = [...homes].sort((a, b) => b.center[1] - a.center[1]);
-  const ordered = [remaining.shift()!];
-  while (remaining.length > 0) {
-    const previous = ordered[ordered.length - 1].center;
-    let closestIndex = 0;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    remaining.forEach((home, index) => {
-      const lngDelta = home.center[0] - previous[0];
-      const latDelta = home.center[1] - previous[1];
-      const distance = lngDelta * lngDelta + latDelta * latDelta;
-      if (distance < closestDistance) {
-        closestIndex = index;
-        closestDistance = distance;
-      }
-    });
-    ordered.push(remaining.splice(closestIndex, 1)[0]);
-  }
-  return ordered;
-}
-
-function buildDemoAssignmentHomes(bundle?: DemoMapBundle | null, area?: DemoArea | null): DemoAssignmentHome[] {
-  let candidates: Array<{
-    id: string;
-    geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
-    center: [number, number];
-  }> = [];
+function buildDemoChoreography(bundle?: DemoMapBundle | null, area?: DemoArea | null): DemoLiveChoreography {
+  let candidates: DemoBuildingCandidate[] = [];
 
   if (Array.isArray(bundle?.buildings?.features)) {
     candidates = bundle.buildings.features.flatMap((feature, index) => {
@@ -312,7 +282,18 @@ function buildDemoAssignmentHomes(bundle?: DemoMapBundle | null, area?: DemoArea
       if (!center || !pointInDemoArea(center, area)) return [];
       const properties = feature.properties ?? {};
       const id = String(properties.id ?? properties.building_id ?? feature.id ?? `bundle-home-${index}`);
-      return [{ id, geometry: feature.geometry, center }];
+      return [{
+        id,
+        geometry: feature.geometry,
+        center,
+        streetName: typeof properties.street_name === 'string' ? properties.street_name : null,
+        houseNumber:
+          typeof properties.house_number === 'string' || typeof properties.house_number === 'number'
+            ? properties.house_number
+            : typeof properties.house_number_label === 'string' || typeof properties.house_number_label === 'number'
+              ? properties.house_number_label
+              : null,
+      }];
     });
   }
 
@@ -326,43 +307,23 @@ function buildDemoAssignmentHomes(bundle?: DemoMapBundle | null, area?: DemoArea
       if (!pointInDemoArea(center, area)) return [];
       const properties = feature.properties ?? {};
       const id = String(properties.id ?? properties.address_id ?? feature.id ?? `bundle-address-home-${index}`);
-      return [{ id, center, geometry: homePolygonAround(center, bbox) }];
+      return [{
+        id,
+        center,
+        geometry: homePolygonAround(center, bbox),
+        streetName: typeof properties.street_name === 'string' ? properties.street_name : null,
+        houseNumber:
+          typeof properties.house_number === 'string' || typeof properties.house_number === 'number'
+            ? properties.house_number
+            : typeof properties.house_number_label === 'string' || typeof properties.house_number_label === 'number'
+              ? properties.house_number_label
+              : null,
+      }];
     });
   }
 
   if (candidates.length === 0) candidates = fallbackDemoHomeCandidates(area);
-
-  const spatiallySorted = [...candidates].sort(
-    (a, b) => a.center[0] - b.center[0] || b.center[1] - a.center[1],
-  );
-  const sampled =
-    spatiallySorted.length <= MAX_DEMO_ASSIGNMENT_HOMES
-      ? spatiallySorted
-      : Array.from({ length: MAX_DEMO_ASSIGNMENT_HOMES }, (_, index) =>
-          spatiallySorted[Math.floor((index * spatiallySorted.length) / MAX_DEMO_ASSIGNMENT_HOMES)],
-        );
-
-  return DEMO_LIVE_MEMBERS.flatMap((member, memberIndex) => {
-    const start = Math.floor((memberIndex * sampled.length) / DEMO_LIVE_MEMBERS.length);
-    const end = Math.floor(((memberIndex + 1) * sampled.length) / DEMO_LIVE_MEMBERS.length);
-    return orderNearestHomes(sampled.slice(start, end)).map((home, sequence) => ({
-      ...home,
-      assigneeId: member.user_id,
-      assigneeName: member.display_name,
-      assigneeColor: member.color,
-      sequence,
-    }));
-  });
-}
-
-function completedDemoHomesForMember(homes: DemoAssignmentHome[], memberId: string, elapsedMs: number): number {
-  return homes.filter(
-    (home) => home.assigneeId === memberId && elapsedMs >= (home.sequence + 1) * DEMO_HOME_VISIT_DURATION_MS,
-  ).length;
-}
-
-function isDemoHomeComplete(home: DemoAssignmentHome, elapsedMs: number): boolean {
-  return elapsedMs >= (home.sequence + 1) * DEMO_HOME_VISIT_DURATION_MS;
+  return buildDemoLiveChoreography(candidates, DEMO_LIVE_MEMBERS);
 }
 
 function buildDemoPaths(area?: DemoArea | null): DemoPathMember[] {
@@ -394,7 +355,7 @@ function buildDemoPaths(area?: DemoArea | null): DemoPathMember[] {
 
 function buildDemoLivePresence(
   elapsedMs: number,
-  homes: DemoAssignmentHome[],
+  homes: DemoChoreographyBuilding[],
   area?: DemoArea | null,
 ): LivePresence[] {
   const now = new Date().toISOString();
@@ -402,15 +363,20 @@ function buildDemoLivePresence(
   return DEMO_LIVE_MEMBERS.map((member, index) => {
     const assignment = homes
       .filter((home) => home.assigneeId === member.user_id)
-      .sort((a, b) => a.sequence - b.sequence);
-    const rawStep = elapsedMs / DEMO_HOME_VISIT_DURATION_MS;
-    const hasFinishedAssignment = assignment.length > 0 && rawStep >= assignment.length;
-    const step = Math.min(Math.floor(rawStep), Math.max(assignment.length - 1, 0));
+      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+    const activeIndex = assignment.findIndex((home) => elapsedMs < (home.completeAtMs ?? 0));
+    const hasFinishedAssignment = assignment.length > 0 && activeIndex === -1;
+    const step = hasFinishedAssignment
+      ? Math.max(assignment.length - 1, 0)
+      : Math.max(activeIndex, 0);
+    const activeHome = assignment[step];
+    const activeFromMs = activeHome?.activeFromMs ?? 0;
+    const completeAtMs = activeHome?.completeAtMs ?? activeFromMs;
     const progress = hasFinishedAssignment
       ? 1
-      : Math.min(1, Math.max(0, rawStep - Math.floor(rawStep)));
+      : Math.min(1, Math.max(0, (elapsedMs - activeFromMs) / Math.max(completeAtMs - activeFromMs, 1)));
     const eased = progress * progress * (3 - 2 * progress);
-    const target = assignment[step]?.center ?? fallbackPaths[index].path[0];
+    const target = activeHome?.center ?? fallbackPaths[index].path[0];
     const previous =
       hasFinishedAssignment
         ? target
@@ -419,7 +385,9 @@ function buildDemoLivePresence(
         : fallbackPaths[index].path[0] ?? target;
     const lng = lerp(previous[0], target[0], eased);
     const lat = lerp(previous[1], target[1], eased);
-    const completedHomes = completedDemoHomesForMember(homes, member.user_id, elapsedMs);
+    const completedHomes = assignment.filter(
+      (home) => home.completeAtMs !== null && elapsedMs >= home.completeAtMs,
+    ).length;
     const assignmentComplete = assignment.length > 0 && completedHomes >= assignment.length;
     return {
       user_id: member.user_id,
@@ -440,24 +408,6 @@ function buildDemoLivePresence(
       flyers_delivered: completedHomes,
     };
   });
-}
-
-function buildDemoAssignmentRoutes(homes: DemoAssignmentHome[]): GeoJSON.FeatureCollection<GeoJSON.LineString> {
-  return {
-    type: 'FeatureCollection',
-    features: DEMO_LIVE_MEMBERS.flatMap((member) => {
-      const coordinates = homes
-        .filter((home) => home.assigneeId === member.user_id)
-        .sort((a, b) => a.sequence - b.sequence)
-        .map((home) => home.center);
-      if (coordinates.length < 2) return [];
-      return [{
-        type: 'Feature' as const,
-        properties: { color: member.color, display_name: member.display_name },
-        geometry: { type: 'LineString' as const, coordinates },
-      }];
-    }),
-  };
 }
 
 function buildRoutesGeoJSON(
@@ -509,13 +459,17 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   const [knockEvents, setKnockEvents] = useState<Array<{ payload?: { lat?: number; lng?: number; [k: string]: unknown }; display_name?: string; user_id?: string }>>([]);
   const [livePresence, setLivePresence] = useState<LivePresence[]>([]);
   const [demoArea, setDemoArea] = useState<DemoArea | null>(null);
-  const [demoAssignmentHomes, setDemoAssignmentHomes] = useState<DemoAssignmentHome[]>([]);
+  const [demoChoreography, setDemoChoreography] = useState<DemoLiveChoreography | null>(null);
   const [demoElapsedMs, setDemoElapsedMs] = useState(0);
   const [demoReplayKey, setDemoReplayKey] = useState(0);
   const [demoAreaResolved, setDemoAreaResolved] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const demoAssignmentHomes = useMemo(
+    () => demoChoreography?.assignedHomes ?? [],
+    [demoChoreography],
+  );
 
   const fetchMapData = useCallback(async () => {
     if (demoLive) {
@@ -584,14 +538,14 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   useEffect(() => {
     if (!demoLive || !campaignId) {
       setDemoArea(null);
-      setDemoAssignmentHomes(demoLive ? buildDemoAssignmentHomes(null, null) : []);
+      setDemoChoreography(demoLive ? buildDemoChoreography(null, null) : null);
       setDemoAreaResolved(demoLive);
       return;
     }
 
     let cancelled = false;
     setDemoAreaResolved(false);
-    setDemoAssignmentHomes([]);
+    setDemoChoreography(null);
     Promise.all([
       fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`, {
         credentials: 'include',
@@ -607,7 +561,7 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         if (cancelled) return;
         if (!campaign) {
           setDemoArea(null);
-          setDemoAssignmentHomes(buildDemoAssignmentHomes(bundle, null));
+          setDemoChoreography(buildDemoChoreography(bundle, null));
           setDemoAreaResolved(true);
           return;
         }
@@ -618,20 +572,20 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         const bbox = normalizeBbox(campaign.bbox) ?? bboxFromPolygon(polygon);
         if (!bbox) {
           setDemoArea(null);
-          setDemoAssignmentHomes(buildDemoAssignmentHomes(bundle, null));
+          setDemoChoreography(buildDemoChoreography(bundle, null));
           setDemoAreaResolved(true);
           return;
         }
         const area = { bbox, polygon } satisfies DemoArea;
         setDemoArea(area);
-        setDemoAssignmentHomes(buildDemoAssignmentHomes(bundle, area));
+        setDemoChoreography(buildDemoChoreography(bundle, area));
         setDemoAreaResolved(true);
         liveFitKeyRef.current = null;
       })
       .catch(() => {
         if (!cancelled) {
           setDemoArea(null);
-          setDemoAssignmentHomes(buildDemoAssignmentHomes(null, null));
+          setDemoChoreography(buildDemoChoreography(null, null));
           setDemoAreaResolved(true);
         }
       });
@@ -644,10 +598,9 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   useEffect(() => {
     if (!demoLive || mapMode !== 'live') return;
     if (campaignId && !demoAreaResolved) return;
-    if (demoAssignmentHomes.length === 0) return;
+    if (!demoChoreography || demoAssignmentHomes.length === 0) return;
 
-    const assignmentRounds = Math.max(...demoAssignmentHomes.map((home) => home.sequence + 1), 1);
-    const duration = assignmentRounds * DEMO_HOME_VISIT_DURATION_MS;
+    const duration = demoChoreography.totalDurationMs;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduceMotion) {
       setDemoElapsedMs(duration);
@@ -662,7 +615,7 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
       if (elapsed >= duration) window.clearInterval(interval);
     }, DEMO_ANIMATION_FRAME_MS);
     return () => window.clearInterval(interval);
-  }, [campaignId, demoAreaResolved, demoAssignmentHomes, demoLive, demoReplayKey, mapMode]);
+  }, [campaignId, demoAreaResolved, demoAssignmentHomes.length, demoChoreography, demoLive, demoReplayKey, mapMode]);
 
   useEffect(() => {
     if (!demoLive || mapMode !== 'live' || demoAssignmentHomes.length === 0) return;
@@ -736,12 +689,25 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !demoLive || !demoArea) return;
-    const [minLng, minLat, maxLng, maxLat] = demoArea.bbox;
-    const bounds = new mapboxgl.LngLatBounds([minLng, minLat], [maxLng, maxLat]);
+    if (!map || !mapLoaded || !demoLive) return;
+    const bounds = new mapboxgl.LngLatBounds();
+    // Hidden context buildings can span a much larger campaign search area.
+    // Fit the cinematic camera to the four visible street runs instead.
+    demoChoreography?.assignedHomes.forEach((home) => bounds.extend(home.center));
+    if (bounds.isEmpty() && demoArea) {
+      const [minLng, minLat, maxLng, maxLat] = demoArea.bbox;
+      bounds.extend([minLng, minLat]);
+      bounds.extend([maxLng, maxLat]);
+    }
     if (bounds.isEmpty()) return;
-    map.fitBounds(bounds, { padding: 64, maxZoom: 15, duration: 0 });
-  }, [demoArea, demoLive, mapLoaded]);
+    map.fitBounds(bounds, {
+      padding: 76,
+      maxZoom: 16.8,
+      pitch: 55,
+      bearing: -18,
+      duration: 0,
+    });
+  }, [demoArea, demoChoreography, demoLive, mapLoaded]);
 
   // Routes layer
   useEffect(() => {
@@ -843,14 +809,15 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     else map.once('style.load', ensureKnocksLayer);
   }, [mapLoaded, mapMode, knockEvents, members]);
 
-  // Self-serve assignment demo: every home is assigned to a rep, then turns green on arrival.
+  // Self-serve assignment demo: reveal homes only when they belong to an active
+  // street run, then turn them green as the rep reaches them.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded) return;
+    if (!map || !mapLoaded || !demoChoreography) return;
 
     const homesGeoJSON: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon> = {
       type: 'FeatureCollection',
-      features: demoAssignmentHomes.map((home) => ({
+      features: demoChoreography.buildings.map((home) => ({
         type: 'Feature',
         id: home.id,
         properties: {
@@ -858,35 +825,23 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
           assignee_name: home.assigneeName,
           assignee_color: home.assigneeColor,
           sequence: home.sequence,
-          completed: isDemoHomeComplete(home, demoElapsedMs),
+          street_key: home.streetKey,
+          phase: demoBuildingPhase(home, demoElapsedMs),
         },
         geometry: home.geometry,
       })),
     };
-    const routesGeoJSON = buildDemoAssignmentRoutes(demoAssignmentHomes);
     const visible = demoLive && mapMode === 'live' ? 'visible' : 'none';
 
     const ensureDemoAssignmentLayers = () => {
+      if (!map.isStyleLoaded()) return;
       try {
-        const existingRoutes = map.getSource(DEMO_ASSIGNMENT_ROUTES_SOURCE_ID);
-        if (existingRoutes && 'setData' in existingRoutes) {
-          (existingRoutes as mapboxgl.GeoJSONSource).setData(routesGeoJSON);
-        } else if (!existingRoutes) {
-          map.addSource(DEMO_ASSIGNMENT_ROUTES_SOURCE_ID, { type: 'geojson', data: routesGeoJSON });
+        // Remove the old dashed breadcrumb layer during Fast Refresh and style reloads.
+        if (map.getLayer(LEGACY_DEMO_ASSIGNMENT_ROUTES_LAYER_ID)) {
+          map.removeLayer(LEGACY_DEMO_ASSIGNMENT_ROUTES_LAYER_ID);
         }
-        if (!map.getLayer(DEMO_ASSIGNMENT_ROUTES_LAYER_ID)) {
-          map.addLayer({
-            id: DEMO_ASSIGNMENT_ROUTES_LAYER_ID,
-            type: 'line',
-            source: DEMO_ASSIGNMENT_ROUTES_SOURCE_ID,
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-            paint: {
-              'line-color': ['get', 'color'],
-              'line-width': 2,
-              'line-opacity': 0.42,
-              'line-dasharray': [2, 2],
-            },
-          });
+        if (map.getSource(LEGACY_DEMO_ASSIGNMENT_ROUTES_SOURCE_ID)) {
+          map.removeSource(LEGACY_DEMO_ASSIGNMENT_ROUTES_SOURCE_ID);
         }
 
         const existingHomes = map.getSource(DEMO_ASSIGNMENT_HOMES_SOURCE_ID);
@@ -895,59 +850,73 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         } else if (!existingHomes) {
           map.addSource(DEMO_ASSIGNMENT_HOMES_SOURCE_ID, { type: 'geojson', data: homesGeoJSON });
         }
-        if (!map.getLayer(DEMO_ASSIGNMENT_HOMES_FILL_LAYER_ID)) {
+        // Remove the former flat layer during hot reloads and persisted style transitions.
+        if (map.getLayer('team-demo-assignment-homes-fill')) {
+          map.removeLayer('team-demo-assignment-homes-fill');
+        }
+        if (map.getLayer(LEGACY_DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID)) {
+          map.removeLayer(LEGACY_DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID);
+        }
+        if (!map.getLayer(DEMO_ASSIGNMENT_HOMES_EXTRUSION_LAYER_ID)) {
           map.addLayer({
-            id: DEMO_ASSIGNMENT_HOMES_FILL_LAYER_ID,
-            type: 'fill',
+            id: DEMO_ASSIGNMENT_HOMES_EXTRUSION_LAYER_ID,
+            type: 'fill-extrusion',
             source: DEMO_ASSIGNMENT_HOMES_SOURCE_ID,
+            layout: {
+              'fill-extrusion-edge-radius': 0,
+            },
             paint: {
-              'fill-color': [
+              'fill-extrusion-color': [
                 'case',
-                ['==', ['get', 'completed'], true],
+                ['==', ['get', 'phase'], 'completed'],
                 DEMO_COMPLETED_COLOR,
                 ['get', 'assignee_color'],
               ],
-              'fill-opacity': [
+              'fill-extrusion-opacity': 0.92,
+              'fill-extrusion-height': [
                 'case',
-                ['==', ['get', 'completed'], true],
-                0.88,
-                0.2,
+                ['==', ['get', 'phase'], 'completed'], 17,
+                ['==', ['get', 'phase'], 'context'], 10,
+                14,
               ],
+              'fill-extrusion-base': 0,
+              'fill-extrusion-vertical-gradient': true,
+              'fill-extrusion-emissive-strength': [
+                'case',
+                ['==', ['get', 'phase'], 'completed'], 0.24,
+                0.08,
+              ],
+              'fill-extrusion-rounded-roof': false,
+              'fill-extrusion-cast-shadows': false,
             },
           });
         }
-        if (!map.getLayer(DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID)) {
-          map.addLayer({
-            id: DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID,
-            type: 'line',
-            source: DEMO_ASSIGNMENT_HOMES_SOURCE_ID,
-            paint: {
-              'line-color': [
-                'case',
-                ['==', ['get', 'completed'], true],
-                '#15803D',
-                ['get', 'assignee_color'],
-              ],
-              'line-width': ['case', ['==', ['get', 'completed'], true], 1.8, 1.2],
-              'line-opacity': 0.95,
-            },
-          });
-        }
-
-        map.setLayoutProperty(DEMO_ASSIGNMENT_ROUTES_LAYER_ID, 'visibility', visible);
-        map.setLayoutProperty(DEMO_ASSIGNMENT_HOMES_FILL_LAYER_ID, 'visibility', visible);
-        map.setLayoutProperty(DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID, 'visibility', visible);
+        // Context buildings used to create a gray base outline across the full
+        // territory. Keep them hidden until their street segment is completed.
+        map.setFilter(DEMO_ASSIGNMENT_HOMES_EXTRUSION_LAYER_ID, [
+          '!=',
+          ['get', 'phase'],
+          'context',
+        ]);
+        map.setLayoutProperty(DEMO_ASSIGNMENT_HOMES_EXTRUSION_LAYER_ID, 'visibility', visible);
       } catch (error) {
         console.error('TeamMapTab demo assignment layers:', error);
       }
     };
 
+    const restoreDemoAssignmentLayers = () => {
+      ensureDemoAssignmentLayers();
+      map.once('idle', ensureDemoAssignmentLayers);
+    };
+
     ensureDemoAssignmentLayers();
     map.once('idle', ensureDemoAssignmentLayers);
+    map.on('style.load', restoreDemoAssignmentLayers);
     return () => {
       map.off('idle', ensureDemoAssignmentLayers);
+      map.off('style.load', restoreDemoAssignmentLayers);
     };
-  }, [demoAssignmentHomes, demoElapsedMs, demoLive, mapLoaded, mapMode]);
+  }, [demoChoreography, demoElapsedMs, demoLive, mapLoaded, mapMode]);
 
   // Live agent puck layer
   useEffect(() => {
@@ -1041,7 +1010,7 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || mapMode !== 'live' || livePresence.length === 0) return;
+    if (!map || !mapLoaded || demoLive || mapMode !== 'live' || livePresence.length === 0) return;
     const fitKey = livePresence
       .map((row) => row.user_id)
       .sort()
@@ -1053,7 +1022,7 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     if (!bounds.isEmpty()) {
       map.fitBounds(bounds, { padding: 72, maxZoom: 15, duration: 600 });
     }
-  }, [livePresence, mapLoaded, mapMode]);
+  }, [demoLive, livePresence, mapLoaded, mapMode]);
 
   // Route click popup
   useEffect(() => {
@@ -1128,11 +1097,13 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     };
   }, [mapLoaded, mapMode]);
 
-  const completedDemoHomeCount = demoAssignmentHomes.filter((home) =>
-    isDemoHomeComplete(home, demoElapsedMs),
-  ).length;
+  const completedDemoHomeCount = demoChoreography
+    ? completedAssignedHomes(demoChoreography, demoElapsedMs)
+    : 0;
   const demoAssignmentComplete =
     demoAssignmentHomes.length > 0 && completedDemoHomeCount >= demoAssignmentHomes.length;
+  const demoTerritoryComplete =
+    Boolean(demoChoreography) && demoElapsedMs >= (demoChoreography?.totalDurationMs ?? 0);
   const demoProgressPercent =
     demoAssignmentHomes.length > 0
       ? Math.round((completedDemoHomeCount / demoAssignmentHomes.length) * 100)
@@ -1162,11 +1133,13 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
                 </p>
                 <p className="mt-0.5 text-sm font-semibold text-foreground" aria-live="polite">
                   {demoAssignmentComplete
-                    ? 'Every assigned home completed'
+                    ? demoTerritoryComplete
+                      ? 'Every campaign home completed'
+                      : `${demoAssignmentHomes.length} assigned homes completed · finishing territory`
                     : `${completedDemoHomeCount} of ${demoAssignmentHomes.length} homes completed`}
                 </p>
               </div>
-              {demoAssignmentComplete ? (
+              {demoTerritoryComplete ? (
                 <button
                   type="button"
                   className="shrink-0 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm hover:bg-muted"
@@ -1189,7 +1162,12 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-muted-foreground">
               {DEMO_LIVE_MEMBERS.map((member) => {
                 const assigned = demoAssignmentHomes.filter((home) => home.assigneeId === member.user_id).length;
-                const completed = completedDemoHomesForMember(demoAssignmentHomes, member.user_id, demoElapsedMs);
+                const completed = demoAssignmentHomes.filter(
+                  (home) =>
+                    home.assigneeId === member.user_id &&
+                    home.completeAtMs !== null &&
+                    demoElapsedMs >= home.completeAtMs,
+                ).length;
                 return (
                   <span key={member.user_id} className="inline-flex items-center gap-1">
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: member.color }} />

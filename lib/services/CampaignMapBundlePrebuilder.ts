@@ -9,6 +9,7 @@ import {
   fetchScopedPmtilesParcels,
   flattenPositions,
   isDisplayableParcelFeature,
+  isResidentialParcelFeature,
   normalizeParcelGeoJsonPolygon,
   parcelTilesFromSnapshot,
   parseParcelBbox,
@@ -391,11 +392,10 @@ async function filterBundleParcelsForDisplay(
     .limit(5000);
 
   if (error) {
-    console.warn('[CampaignMapBundlePrebuilder] Parcel display filter metadata skipped:', {
+    console.warn('[CampaignMapBundlePrebuilder] Parcel display filter metadata unavailable; filtering feature properties only:', {
       campaignId,
       message: error.message,
     });
-    return collection;
   }
 
   const metadataById = new Map<string, Record<string, unknown>>();
@@ -418,8 +418,6 @@ async function filterBundleParcelsForDisplay(
     }
   }
 
-  if (metadataById.size === 0) return collection;
-
   const features = collection.features.filter((feature) => {
     const externalId = parcelFeatureExternalId(feature);
     const metadata = externalId ? metadataById.get(externalId) : null;
@@ -427,7 +425,7 @@ async function filterBundleParcelsForDisplay(
       ...(feature.properties ?? {}),
       ...(metadata ?? {}),
     };
-    return isDisplayableParcelFeature({
+    return isResidentialParcelFeature({
       ...feature,
       properties: filterProperties,
     });
@@ -435,7 +433,7 @@ async function filterBundleParcelsForDisplay(
 
   const removed = collection.features.length - features.length;
   if (removed > 0) {
-    console.log('[CampaignMapBundlePrebuilder] Filtered non-doorable parcel polygons:', {
+    console.log('[CampaignMapBundlePrebuilder] Filtered non-residential parcel polygons:', {
       campaignId,
       removed,
       kept: features.length,
@@ -1582,7 +1580,14 @@ async function extractScopedMapGeometry(params: {
     parcelBbox && parcelTiles
       ? measure('scoped_parcels', recordTiming, async () => {
           try {
-            const scopedParcels = await fetchScopedPmtilesParcels(campaignId, snapshot, parcelTiles, parcelBbox, parcelBoundary);
+            const scopedParcels = await fetchScopedPmtilesParcels(
+              campaignId,
+              snapshot,
+              parcelTiles,
+              parcelBbox,
+              parcelBoundary,
+              { residentialOnly: true }
+            );
             return scopedParcels.parcels.length
               ? parcelRowsToFeatureCollection(scopedParcels.parcels)
               : null;

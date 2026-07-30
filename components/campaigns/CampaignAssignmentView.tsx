@@ -28,6 +28,7 @@ import {
   X,
 } from 'lucide-react';
 import type { CampaignAddress } from '@/types/database';
+import type { BuildingFeatureCollection } from '@/types/map-buildings';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useMovieMapControlsEnabled } from '@/lib/hooks/useMovieMapControlsEnabled';
@@ -130,9 +131,6 @@ const ASSIGNMENT_LIVE_DEMO_ROUTE_LAYER_ID = 'assignment-live-demo-route-lines';
 const ASSIGNMENT_LIVE_DEMO_REP_SOURCE_ID = 'assignment-live-demo-reps';
 const ASSIGNMENT_LIVE_DEMO_REP_LAYER_ID = 'assignment-live-demo-rep-pucks';
 const ASSIGNMENT_LIVE_DEMO_REP_LABEL_LAYER_ID = 'assignment-live-demo-rep-labels';
-const ASSIGNMENT_ZONE_LABEL_SOURCE_ID = 'assignment-zone-labels';
-const ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID = 'assignment-zone-label-circles';
-const ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID = 'assignment-zone-label-text';
 const ASSIGNMENT_LASSO_SOURCE_ID = 'assignment-editor-lasso';
 const ASSIGNMENT_LASSO_FILL_LAYER_ID = 'assignment-editor-lasso-fill';
 const ASSIGNMENT_LASSO_LINE_LAYER_ID = 'assignment-editor-lasso-line';
@@ -538,49 +536,6 @@ function didSetAppointment(address?: CampaignAddress | null): boolean {
 function formatAssignmentPercent(value: number, total: number): string {
   if (total <= 0) return '0%';
   return `${Math.round((value / total) * 100)}%`;
-}
-
-function campaignAddressLabel(address: AssignmentAddress | CampaignAddress): string {
-  return address.formatted || address.street_name || ('address' in address ? address.address : '') || address.id.slice(0, 8);
-}
-
-function buildZoneLabelFeatureCollection(
-  members: ZonePreviewMember[],
-  zones: Map<string, AssignmentAddress[]>
-): GeoJSON.FeatureCollection<GeoJSON.Point> {
-  const features = members.flatMap((member, index) => {
-    const zoneHomes = (zones.get(member.user_id) ?? []).filter((address) => {
-      return Number.isFinite(address.lon) && Number.isFinite(address.lat) && !(address.lon === 0 && address.lat === 0);
-    });
-    if (zoneHomes.length === 0) return [];
-
-    const center = zoneHomes.reduce(
-      (sum, address) => ({
-        lon: sum.lon + address.lon / zoneHomes.length,
-        lat: sum.lat + address.lat / zoneHomes.length,
-      }),
-      { lon: 0, lat: 0 }
-    );
-
-    return [{
-      type: 'Feature' as const,
-      id: member.user_id,
-      properties: {
-        user_id: member.user_id,
-        display_name: member.display_name,
-        homes: zoneHomes.length,
-        label: `${member.display_name}\n${zoneHomes.length} homes`,
-        color: member.color,
-        zone: `Zone ${index + 1}`,
-      },
-      geometry: {
-        type: 'Point' as const,
-        coordinates: [center.lon, center.lat],
-      },
-    }];
-  });
-
-  return { type: 'FeatureCollection', features };
 }
 
 function syncMapSize(map: mapboxgl.Map) {
@@ -1657,9 +1612,13 @@ function CampaignAssignmentZonePreviewMap({
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
+  const [prefetchedBuildings, setPrefetchedBuildings] = useState<BuildingFeatureCollection | undefined>({
+    type: 'FeatureCollection',
+    features: [],
+  } as BuildingFeatureCollection);
+  const [prefetchedBuildingDataKey, setPrefetchedBuildingDataKey] = useState<string | null>(null);
   const [expandedOpen, setExpandedOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [selectedZoneMemberId, setSelectedZoneMemberId] = useState<string | null>(null);
   const addressById = useMemo(() => new Map(addresses.map((address) => [address.id, address])), [addresses]);
 
   const previewPoints = useMemo<ZonePreviewPoint[]>(
@@ -1708,30 +1667,72 @@ function CampaignAssignmentZonePreviewMap({
   const assignmentMapColorOverrides = liveCampaignDemo.colorOverrides ?? demoCamera.demoColorByAddressId;
   const playLiveCampaignDemo = liveCampaignDemo.play;
   const stopDemoCameraPlayback = demoCamera.stopDemoCamera;
-  const zoneLabelFeatures = useMemo(
-    () => buildZoneLabelFeatureCollection(members, zones),
-    [members, zones]
-  );
   const previewAddresses = useMemo(
     () => buildAssignmentPreviewAddresses(addressById, assignmentAddresses, zones, members),
     [addressById, assignmentAddresses, members, zones]
   );
-  const selectedZoneMember = selectedZoneMemberId
-    ? members.find((member) => member.user_id === selectedZoneMemberId) ?? null
-    : null;
-  const selectedZoneAddresses = selectedZoneMember ? zones.get(selectedZoneMember.user_id) ?? [] : [];
 
   const initialPoint = previewPoints[0] ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
   const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
   const showMapError = Boolean(mapError && !hasRenderableAssignmentMap);
+  const showHomesLoading = Boolean(
+    mapLoaded &&
+    !buildingRenderState?.hasData &&
+    !buildingRenderState?.buildingsUnavailable
+  );
 
   useEffect(() => {
     if (buildingRenderState?.hasVisibleFeatures) {
       setMapError(null);
     }
   }, [buildingRenderState?.hasVisibleFeatures]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    setPrefetchedBuildings({
+      type: 'FeatureCollection',
+      features: [],
+    } as BuildingFeatureCollection);
+    setPrefetchedBuildingDataKey(null);
+
+    void fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/map-bundle`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Map bundle returned ${response.status}`);
+        return response.json() as Promise<{
+          asset_signature?: string | null;
+          source_version?: string | null;
+          buildings?: BuildingFeatureCollection | null;
+        }>;
+      })
+      .then((bundle) => {
+        if (cancelled) return;
+        const buildings = bundle.buildings;
+        if (buildings?.type === 'FeatureCollection' && buildings.features.length > 0) {
+          setPrefetchedBuildings(buildings);
+          setPrefetchedBuildingDataKey(bundle.asset_signature ?? bundle.source_version ?? null);
+          return;
+        }
+        // Let MapBuildingsLayer use its provisioning retry path for an empty bundle.
+        setPrefetchedBuildings(undefined);
+      })
+      .catch((error: unknown) => {
+        if (cancelled || (error instanceof DOMException && error.name === 'AbortError')) return;
+        // Fall back to the layer's authenticated request path.
+        setPrefetchedBuildings(undefined);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [campaignId]);
 
   useEffect(() => {
     const container = mapContainerRef.current;
@@ -1839,93 +1840,6 @@ function CampaignAssignmentZonePreviewMap({
       });
     }
   }, [mapLoaded, previewPoints]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-
-    const addOrUpdateZoneLabels = () => {
-      if (!map.isStyleLoaded()) return;
-      try {
-        setMapGeoJsonSource(map, ASSIGNMENT_ZONE_LABEL_SOURCE_ID, zoneLabelFeatures);
-
-        if (!map.getLayer(ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID)) {
-          map.addLayer({
-            id: ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID,
-            type: 'circle',
-            source: ASSIGNMENT_ZONE_LABEL_SOURCE_ID,
-            paint: {
-              'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 18, 16, 28],
-              'circle-color': ['get', 'color'],
-              'circle-opacity': 0.92,
-              'circle-stroke-width': 3,
-              'circle-stroke-color': '#ffffff',
-            },
-          });
-        }
-
-        if (!map.getLayer(ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID)) {
-          map.addLayer({
-            id: ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID,
-            type: 'symbol',
-            source: ASSIGNMENT_ZONE_LABEL_SOURCE_ID,
-            layout: {
-              'text-field': ['get', 'label'],
-              'text-size': ['interpolate', ['linear'], ['zoom'], 10, 10, 16, 13],
-              'text-line-height': 1.08,
-              'text-anchor': 'center',
-              'text-allow-overlap': true,
-            },
-            paint: {
-              'text-color': '#111827',
-              'text-halo-color': '#ffffff',
-              'text-halo-width': 1.3,
-            },
-          });
-        }
-      } catch (error) {
-        console.error('Assignment zone labels:', error);
-      }
-    };
-
-    const handleClick = (event: mapboxgl.MapLayerMouseEvent) => {
-      const userId = event.features?.[0]?.properties?.user_id;
-      if (typeof userId === 'string') setSelectedZoneMemberId(userId);
-    };
-    const handleMouseEnter = () => {
-      map.getCanvas().style.cursor = 'pointer';
-    };
-    const handleMouseLeave = () => {
-      map.getCanvas().style.cursor = '';
-    };
-
-    addOrUpdateZoneLabels();
-    map.on('style.load', addOrUpdateZoneLabels);
-    map.on('click', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleClick);
-    map.on('click', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleClick);
-    map.on('mouseenter', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseEnter);
-    map.on('mouseenter', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseEnter);
-    map.on('mouseleave', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseLeave);
-    map.on('mouseleave', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseLeave);
-
-    return () => {
-      try {
-        map.off('style.load', addOrUpdateZoneLabels);
-        if (map.getLayer(ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID)) {
-          map.off('click', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleClick);
-          map.off('mouseenter', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseEnter);
-          map.off('mouseleave', ASSIGNMENT_ZONE_LABEL_CIRCLE_LAYER_ID, handleMouseLeave);
-        }
-        if (map.getLayer(ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID)) {
-          map.off('click', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleClick);
-          map.off('mouseenter', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseEnter);
-          map.off('mouseleave', ASSIGNMENT_ZONE_LABEL_TEXT_LAYER_ID, handleMouseLeave);
-        }
-      } catch {
-        // Mapbox can be mid-style teardown when the roster changes.
-      }
-    };
-  }, [mapLoaded, zoneLabelFeatures]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2056,6 +1970,8 @@ function CampaignAssignmentZonePreviewMap({
             <MapBuildingsLayer
               map={mapRef.current}
               campaignId={campaignId}
+              buildingFeatures={prefetchedBuildings}
+              buildingDataKey={prefetchedBuildingDataKey}
               addressStateOverrides={previewAddresses}
               assignmentColorByAddressId={assignmentMapColorOverrides}
               visibleAddressIds={assignmentAddresses.map((address) => address.id)}
@@ -2093,30 +2009,10 @@ function CampaignAssignmentZonePreviewMap({
             {liveCampaignDemo.hitHomes}/{liveCampaignDemo.totalHomes} homes green
           </div>
         ) : null}
-        {selectedZoneMember ? (
-          <div className="absolute bottom-3 left-3 z-20 max-h-[min(300px,calc(100%-1.5rem))] w-[min(360px,calc(100%-1.5rem))] overflow-hidden rounded-lg border border-border bg-background/95 shadow-xl backdrop-blur">
-            <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{selectedZoneMember.display_name}</p>
-                <p className="text-xs text-muted-foreground">{selectedZoneAddresses.length} homes assigned</p>
-              </div>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedZoneMemberId(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="max-h-56 overflow-y-auto px-3 py-2">
-              {selectedZoneAddresses.slice(0, 24).map((address, index) => (
-                <div key={address.id} className="flex items-start gap-2 py-1.5 text-xs">
-                  <span className="mt-0.5 w-5 shrink-0 text-muted-foreground">{index + 1}</span>
-                  <span className="min-w-0 truncate">{campaignAddressLabel(address)}</span>
-                </div>
-              ))}
-              {selectedZoneAddresses.length > 24 ? (
-                <p className="py-1 text-xs text-muted-foreground">
-                  +{selectedZoneAddresses.length - 24} more homes
-                </p>
-              ) : null}
-            </div>
+        {showHomesLoading ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-20 inline-flex items-center gap-2 rounded-md border border-border/80 bg-background/92 px-3 py-2 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading {assignmentAddresses.length.toLocaleString()} homes…
           </div>
         ) : null}
         {showMapError ? (
@@ -3526,7 +3422,7 @@ export function CampaignAssignmentView({
           memberIds: selectedMemberIds,
           dueAt: dueAt ? `${dueAt}T23:59:59` : null,
           notes: notes || null,
-          splitMode,
+          splitMode: mode === 'zone_split' ? splitMode : undefined,
           zoneAssignments,
         }),
       });
@@ -3644,27 +3540,22 @@ export function CampaignAssignmentView({
             </div>
 
             <div className="space-y-2">
-              <Label>Split</Label>
-              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Split type">
+              <Label>Assignments</Label>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Assignment type">
                 {[
-                  { id: 'smart', label: 'Smart zones', active: mode === 'zone_split' && splitMode === 'smart' },
-                  { id: 'balanced', label: 'Even split', active: mode === 'zone_split' && splitMode === 'balanced' },
-                  { id: 'shared', label: 'Shared map', active: mode === 'whole_team' },
+                  { id: 'split', label: 'Split', active: mode === 'zone_split' },
+                  { id: 'shared', label: 'Shared', active: mode === 'whole_team' },
                 ].map((option) => (
                   <button
                     key={option.id}
                     type="button"
                     role="radio"
                     aria-checked={option.active}
+                    disabled={saving}
                     onClick={() => {
-                      if (option.id === 'shared') {
-                        setMode('whole_team');
-                        return;
-                      }
-                      setMode('zone_split');
-                      setSplitMode(option.id === 'balanced' ? 'balanced' : 'smart');
+                      setMode(option.id === 'shared' ? 'whole_team' : 'zone_split');
                     }}
-                    className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-xs font-medium transition-colors ${
+                    className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                       option.active
                         ? 'border-foreground bg-muted/60 text-foreground'
                         : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
@@ -3675,6 +3566,38 @@ export function CampaignAssignmentView({
                   </button>
                 ))}
               </div>
+
+              {mode === 'zone_split' ? (
+                <div className="space-y-2 pt-2">
+                  <Label>Split mode</Label>
+                  <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Split mode">
+                    {[
+                      { id: 'smart', label: 'Smart zones' },
+                      { id: 'balanced', label: 'Even split' },
+                    ].map((option) => {
+                      const active = splitMode === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          disabled={saving}
+                          onClick={() => setSplitMode(option.id as CampaignAssignmentSplitMode)}
+                          className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                            active
+                              ? 'border-foreground bg-muted/60 text-foreground'
+                              : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
+                          }`}
+                        >
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full border ${active ? 'border-foreground bg-foreground' : 'border-muted-foreground'}`} />
+                          <span className="truncate">{option.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-2">

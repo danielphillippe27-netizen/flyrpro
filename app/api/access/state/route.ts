@@ -6,6 +6,10 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { getApprovedAmbassadorByEmail } from '@/app/lib/billing/ambassador-access';
 import { resolveSalespersonForUser } from '@/lib/dialer/salesperson-settings';
 import { getSeatUsage } from '@/app/api/team/_lib/manage';
+import {
+  getTrialDaysRemaining,
+  isWorkspaceTrialActive,
+} from '@/lib/demo/demo44TeamTrial';
 
 /**
  * GET /api/access/state
@@ -36,7 +40,7 @@ export async function GET(request: NextRequest) {
     const { data: workspaceRows } = workspaceIds.length
       ? await admin
         .from('workspaces')
-          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at, referral_code_used')
+          .select('id, name, industry, subscription_status, trial_ends_at, max_seats, onboarding_completed_at, referral_code_used, territory_iq_enabled')
           .in('id', workspaceIds)
       : { data: [] };
     const workspaceOptions = (workspaceRows ?? []).map((workspace) => {
@@ -159,7 +163,11 @@ export async function GET(request: NextRequest) {
 
     const status = workspace.subscription_status ?? 'inactive';
     const isSelfServeDemoWorkspace = workspace.referral_code_used === 'SELF_SERVE_DEMO';
-    const paidWorkspaceAccess = status === 'active';
+    const activeTrial = isWorkspaceTrialActive(status, workspace.trial_ends_at);
+    const trialDaysRemaining = activeTrial
+      ? getTrialDaysRemaining(workspace.trial_ends_at)
+      : null;
+    const paidWorkspaceAccess = status === 'active' || activeTrial;
     const hasAccess = true;
     const billableSeats = await getSeatUsage(admin, workspace.id, {
       maxSeats: workspace.max_seats ?? null,
@@ -172,6 +180,8 @@ export async function GET(request: NextRequest) {
     const planBadgeLabel =
       isAmbassador
         ? 'AMBASSADOR'
+        : activeTrial
+          ? `TRIAL · ${trialDaysRemaining ?? 0}D LEFT`
         : isSelfServeDemoWorkspace
           ? 'FREE'
         : status === 'active'
@@ -198,6 +208,7 @@ export async function GET(request: NextRequest) {
       workspace_id: workspace.id,
       workspaceName: workspace.name,
       industry: workspace.industry ?? null,
+      territoryIQEnabled: workspace.territory_iq_enabled === true,
       maxSeats: workspace.max_seats ?? 1,
       billableSeats: Math.max(1, workspace.max_seats ?? 1, billableSeats),
       hasAccess,
@@ -219,7 +230,7 @@ export async function GET(request: NextRequest) {
       },
       subscriptionStatus: status,
       trialEndsAt: workspace.trial_ends_at ?? null,
-      trialDaysRemaining: null,
+      trialDaysRemaining,
       planBadgeLabel,
       isFounder: access.isFounder,
       isAmbassador,

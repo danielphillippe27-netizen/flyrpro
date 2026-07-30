@@ -126,7 +126,7 @@ function shouldForwardToAddress(forwardTo: string | null, routableAddresses: str
 async function verifyResendWebhook(request: NextRequest, payload: string): Promise<WebhookEventPayload | null> {
   const webhookSecret = getEnv('RESEND_WEBHOOK_SECRET');
   if (!webhookSecret) {
-    return JSON.parse(payload) as WebhookEventPayload;
+    throw new Error('RESEND_WEBHOOK_SECRET is not configured');
   }
 
   const resend = new Resend(getEnv('RESEND_API_KEY') ?? 're_');
@@ -383,6 +383,7 @@ export async function POST(request: NextRequest) {
     priority: 'normal',
     occurred_at: occurredAt,
     raw_payload: {
+      direction: 'inbound',
       event,
       fullEmail: fullEmail
         ? {

@@ -48,10 +48,19 @@ const PARCEL_TILE_FETCH_CONCURRENCY = Math.max(
 );
 const NON_RESIDENTIAL_PARCEL_TERMS = [
   'access',
+  'access way',
+  'access ways',
   'accessway',
+  'accessways',
   'alley',
+  'alleyway',
   'allowance',
   'arterial',
+  'bike path',
+  'bike paths',
+  'bikeway',
+  'bikeways',
+  'bridge',
   'busway',
   'cemetery',
   'channel',
@@ -59,58 +68,214 @@ const NON_RESIDENTIAL_PARCEL_TERMS = [
   'conservation',
   'corridor',
   'creek',
+  'cycle path',
+  'cycle paths',
+  'cycleway',
+  'cycleways',
   'ditch',
   'domain',
   'drain',
   'drainage',
+  'drainage corridor',
+  'drainage reserve',
   'easement',
   'environmental',
   'esplanade',
   'expressway',
   'fire route',
+  'foot path',
+  'foot paths',
   'footpath',
+  'footpaths',
+  'footway',
+  'footways',
+  'freeway',
+  'freeways',
   'greenbelt',
   'greenspace',
   'highway',
+  'highways',
   'hydro',
+  'lane way',
   'laneway',
   'local purpose',
+  'median',
   'motorway',
+  'motorways',
+  'multi use path',
+  'multi use paths',
   'open space',
   'park',
   'parkette',
   'parkland',
   'path',
+  'paths',
   'pathway',
+  'pathways',
+  'pedestrian',
+  'pedestrian access',
+  'pedestrian accessway',
+  'pedestrian path',
+  'pedestrian way',
+  'pedestrian walkway',
   'pipeline',
   'pond',
+  'public path',
+  'public road',
+  'public walkway',
   'rail',
+  'rail corridor',
   'railway',
+  'railroad',
   'ravine',
   'recreation',
   'reserve',
   'right of way',
+  'right of way road',
   'right-of-way',
+  'right-of-way road',
+  'right_of_way',
+  'rightofway',
   'road',
+  'road allowance',
+  'road corridor',
+  'road parcel',
+  'road reserve',
+  'road right of way',
   'roadway',
+  'roadways',
+  'roads',
   'roundabout',
   'school',
+  'service lane',
+  'shared path',
+  'shared paths',
+  'shared use path',
+  'shared use paths',
   'sidewalk',
+  'sidewalk easement',
+  'sidewalk parcel',
+  'sidewalk reserve',
+  'sidewalks',
+  'storm sewer',
   'storm',
   'stormwater',
-  'transport',
   'street',
+  'streets',
   'substation',
   'trail',
   'transit',
+  'transport',
+  'transportation',
+  'tunnel',
   'utility',
+  'utility corridor',
+  'verge',
   'walkway',
+  'walkway easement',
+  'walkway reserve',
+  'walkways',
   'wastewater',
   'watercourse',
   'waterway',
   'river',
   'stream',
 ];
+
+const PARCEL_CLASSIFICATION_PROPERTY_KEYS = [
+  'agency',
+  'appellation',
+  'asset_type',
+  'category',
+  'class',
+  'class_name',
+  'description',
+  'designation',
+  'feature_class',
+  'feature_type',
+  'land_type',
+  'land_use',
+  'land_use_description',
+  'landuse',
+  'landuse_description',
+  'legal_type',
+  'lot_type',
+  'maintainer',
+  'municipal_use',
+  'name',
+  'owner',
+  'owner_type',
+  'ownership',
+  'parcel_class',
+  'parcel_intent',
+  'parcel_purpose',
+  'parcel_type',
+  'property_class',
+  'property_type',
+  'property_use',
+  'public_use',
+  'purpose',
+  'reserve_type',
+  'site_type',
+  'status',
+  'statutory_actions',
+  'sub_type',
+  'subtype',
+  'title_type',
+  'transport',
+  'transportation',
+  'type',
+  'use',
+  'use_code',
+  'use_description',
+  'use_type',
+  'zone',
+  'zoning',
+  'zoning_code',
+  'zoning_description',
+];
+
+const ROAD_INDICATOR_PROPERTY_KEYS = [
+  'highway',
+  'highway_type',
+  'access_way',
+  'accessway',
+  'bikeway',
+  'corridor',
+  'cycleway',
+  'easement',
+  'footpath',
+  'footway',
+  'linear_feature',
+  'path',
+  'path_type',
+  'pathway',
+  'pedestrian',
+  'railway',
+  'railway_type',
+  'right-of-way',
+  'right_of_way',
+  'rightofway',
+  'road',
+  'road_class',
+  'road_classification',
+  'road_type',
+  'roads',
+  'sidewalk',
+  'sidewalks',
+  'trail',
+  'trail_type',
+  'transportation_corridor',
+  'utility_corridor',
+  'walkway',
+];
+
+const FALSEY_PARCEL_TEXT_VALUES = new Set(['0', 'false', 'n', 'no', 'none', 'null', 'unknown']);
+const NORMALIZED_NON_RESIDENTIAL_PARCEL_TERMS = Array.from(new Set(
+  NON_RESIDENTIAL_PARCEL_TERMS
+    .map(normalizedResidentialParcelText)
+    .filter(Boolean)
+));
 
 const parcelResponseCache = new Map<string, { expiresAt: number; value: ScopedParcelResult }>();
 const parcelResponseInflight = new Map<string, Promise<ScopedParcelResult>>();
@@ -379,6 +544,62 @@ function normalizedParcelText(value: unknown): string {
   return '';
 }
 
+function normalizedResidentialParcelText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[_/\\-]+/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return '';
+}
+
+function parcelPropertyResolver(properties: Record<string, unknown>): (key: string) => unknown {
+  const propertiesByLowercaseKey = new Map<string, unknown>();
+  for (const [key, value] of Object.entries(properties)) {
+    const lowerKey = key.toLowerCase();
+    if (!propertiesByLowercaseKey.has(lowerKey)) {
+      propertiesByLowercaseKey.set(lowerKey, value);
+    }
+  }
+
+  return (key: string) =>
+    Object.prototype.hasOwnProperty.call(properties, key)
+      ? properties[key]
+      : propertiesByLowercaseKey.get(key.toLowerCase());
+}
+
+function residentialParcelTextValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(residentialParcelTextValues);
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).flatMap(residentialParcelTextValues);
+  }
+
+  const text = normalizedResidentialParcelText(value);
+  return text ? [text] : [];
+}
+
+function hasResidentialExclusionTerm(value: unknown): boolean {
+  return residentialParcelTextValues(value).some((text) =>
+    NORMALIZED_NON_RESIDENTIAL_PARCEL_TERMS.some((term) => ` ${text} `.includes(` ${term} `))
+  );
+}
+
+function hasTruthyRoadIndicatorProperty(propertyValue: (key: string) => unknown): boolean {
+  return ROAD_INDICATOR_PROPERTY_KEYS.some((key) => {
+    const value = propertyValue(key);
+    if (value === null || value === undefined) return false;
+    const values = residentialParcelTextValues(value);
+    if (values.length === 0) return false;
+    return values.some((text) => !FALSEY_PARCEL_TEXT_VALUES.has(text));
+  });
+}
+
 function hasNonResidentialParcelTerm(value: unknown): boolean {
   const text = normalizedParcelText(value);
   if (!text) return false;
@@ -459,22 +680,19 @@ export function isDisplayableParcelFeature(feature: GeoJSON.Feature): boolean {
 
 export function isResidentialParcelFeature(feature: GeoJSON.Feature): boolean {
   const properties = (feature.properties ?? {}) as Record<string, unknown>;
-  const topologyType = normalizedParcelText(properties.topology_type);
+  const propertyValue = parcelPropertyResolver(properties);
+  const topologyType = normalizedResidentialParcelText(propertyValue('topology_type'));
   if (topologyType && topologyType !== 'primary') return false;
 
-  if (
-    hasNonResidentialParcelTerm(properties.parcel_intent) ||
-    hasNonResidentialParcelTerm(properties.appellation) ||
-    hasNonResidentialParcelTerm(properties.statutory_actions) ||
-    hasNonResidentialParcelTerm(properties.status) ||
-    hasNonResidentialParcelTerm(properties.zoning) ||
-    hasNonResidentialParcelTerm(properties.land_use) ||
-    hasNonResidentialParcelTerm(properties.use)
-  ) {
+  if (hasTruthyRoadIndicatorProperty(propertyValue)) return false;
+
+  if (PARCEL_CLASSIFICATION_PROPERTY_KEYS.some((key) =>
+    hasResidentialExclusionTerm(propertyValue(key))
+  )) {
     return false;
   }
 
-  const intent = normalizedParcelText(properties.parcel_intent);
+  const intent = normalizedResidentialParcelText(propertyValue('parcel_intent'));
   if (!intent) return true;
   return intent === 'fee simple title' || intent === 'dcdb' || intent.includes('residential');
 }

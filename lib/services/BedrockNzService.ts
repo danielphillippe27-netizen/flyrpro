@@ -9,6 +9,7 @@ import {
 import { fetchScopedPmtilesBuildingFeatures } from '@/app/api/campaigns/_utils/scoped-pmtiles-buildings';
 import {
   fetchScopedPmtilesParcels,
+  isResidentialParcelFeature,
   parcelTilesFromSnapshot,
 } from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
@@ -80,38 +81,6 @@ export type BedrockNzLinkGeometry = {
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const DEFAULT_PREFIX = 'bedrock/new-zealand/current';
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
-const NON_RESIDENTIAL_PARCEL_TERMS = [
-  'road',
-  'street',
-  'motorway',
-  'highway',
-  'rail',
-  'railway',
-  'sidewalk',
-  'footpath',
-  'walkway',
-  'accessway',
-  'right of way',
-  'right-of-way',
-  'drain',
-  'drainage',
-  'stormwater',
-  'wastewater',
-  'watercourse',
-  'river',
-  'stream',
-  'creek',
-  'esplanade',
-  'reserve',
-  'recreation',
-  'park',
-  'domain',
-  'local purpose',
-  'utility',
-  'substation',
-  'school',
-];
-
 let resolvedAwsCredentials:
   | {
       accessKeyId: string;
@@ -401,37 +370,6 @@ function numberProperty(properties: GeoJSON.GeoJsonProperties | null | undefined
   return null;
 }
 
-function parcelText(value: unknown): string {
-  return typeof value === 'string' ? value.trim().toLowerCase() : '';
-}
-
-function hasNonResidentialParcelTerm(value: unknown): boolean {
-  const text = parcelText(value);
-  if (!text) return false;
-  return NON_RESIDENTIAL_PARCEL_TERMS.some((term) => text.includes(term));
-}
-
-function isResidentialParcelFeature(feature: GeoJSON.Feature): boolean {
-  const properties = feature.properties ?? {};
-  const topologyType = parcelText(properties.topology_type);
-  if (topologyType && topologyType !== 'primary') return false;
-
-  if (
-    hasNonResidentialParcelTerm(properties.parcel_intent) ||
-    hasNonResidentialParcelTerm(properties.appellation) ||
-    hasNonResidentialParcelTerm(properties.statutory_actions) ||
-    hasNonResidentialParcelTerm(properties.zoning) ||
-    hasNonResidentialParcelTerm(properties.land_use) ||
-    hasNonResidentialParcelTerm(properties.use)
-  ) {
-    return false;
-  }
-
-  const intent = parcelText(properties.parcel_intent);
-  if (!intent) return true;
-  return intent === 'fee simple title' || intent === 'dcdb' || intent.includes('residential');
-}
-
 function scopedBuildingFeature(feature: GeoJSON.Feature): BedrockScopedBuildingFeature | null {
   if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') return null;
   const properties = feature.properties ?? {};
@@ -540,7 +478,14 @@ export class BedrockNzService {
           }),
       }),
       fetchScopedPmtilesBuildingFeatures(snapshotRow, bbox, new Set(), options.polygon),
-      fetchScopedPmtilesParcels(options.campaignId, snapshotRow, parcelTiles, bbox, options.polygon),
+      fetchScopedPmtilesParcels(
+        options.campaignId,
+        snapshotRow,
+        parcelTiles,
+        bbox,
+        options.polygon,
+        { residentialOnly: true }
+      ),
     ]);
 
     if (!buildingCollection?.features.length) {

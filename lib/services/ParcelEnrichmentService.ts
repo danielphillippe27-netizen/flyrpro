@@ -10,6 +10,7 @@ import { TownhouseSplitterService } from '@/lib/services/TownhouseSplitterServic
 import { CampaignMapModeService } from '@/lib/services/CampaignMapModeService';
 import {
   fetchScopedPmtilesParcels,
+  isResidentialParcelFeature,
   parcelTilesFromSnapshot,
 } from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
@@ -510,6 +511,7 @@ export class ParcelEnrichmentService {
 
   private preparePreloadedParcels(preloadedParcels: GeoJSON.FeatureCollection): ParcelPreparationResult {
     const parcels = preloadedParcels.features
+      .filter(isResidentialParcelFeature)
       .map((parcel) => normalizeParcelLine(parcel))
       .filter((parcel): parcel is NormalizedParcelRecord => Boolean(parcel));
 
@@ -714,7 +716,8 @@ export class ParcelEnrichmentService {
         snapshot,
         parcelTiles,
         bbox as [number, number, number, number],
-        campaignPolygon as GeoJSON.Polygon
+        campaignPolygon as GeoJSON.Polygon,
+        { residentialOnly: true }
       );
       const parcels = scoped.parcels
         .map((parcel) => normalizeParcelLine({

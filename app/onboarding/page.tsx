@@ -18,6 +18,12 @@ import { getClientAsync } from '@/lib/supabase/client';
 import { COUNTRY_OPTIONS } from '@/lib/countries';
 import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
 import { WolfGridLogo } from '@/components/brand/WolfGridLogo';
+import {
+  DEMO_44_CLIENT_SOURCE,
+  DEMO_44_REFERRAL_CAMPAIGN,
+  DEMO_44_TEAM_TRIAL_OFFER,
+  isDemo44TeamTrialOffer,
+} from '@/lib/demo/demo44TeamTrial';
 
 type BrokerageSuggestion = { id: string; name: string };
 type SalespersonInviteHint = {
@@ -299,6 +305,7 @@ function OnboardingContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
+  const isDemo44TeamTrial = isDemo44TeamTrialOffer(offerType);
   const partnerOfferToken = searchParams.get('partnerOfferToken');
   const salespersonInviteToken = searchParams.get('salespersonInvite');
   const handoffCode = searchParams.get('code')?.trim() ?? '';
@@ -389,6 +396,8 @@ function OnboardingContent() {
 
   const isExclusivePartnerTeamLayout =
     isExclusivePartnerOnboarding && resolvedPartnerExclusiveLayout === 'team';
+  const isTeamOfferOnboarding =
+    isExclusivePartnerTeamLayout || isDemo44TeamTrial;
 
   const hideExclusiveStep1Demo = challenge30FromUrl || hintChallenge30 === true;
   const shouldShowReferralStep =
@@ -589,10 +598,10 @@ function OnboardingContent() {
   }, [referralCode, referralValidation?.referralCode]);
 
   useEffect(() => {
-    if (!isExclusivePartnerTeamLayout) return;
+    if (!isTeamOfferOnboarding) return;
     setUseCase('team');
     setSeats((previous) => Math.max(TEAM_MIN_SEATS, previous));
-  }, [isExclusivePartnerTeamLayout]);
+  }, [isTeamOfferOnboarding]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -721,49 +730,72 @@ function OnboardingContent() {
   }, [countrySearchQuery]);
   const billingCurrency = getBillingCurrency();
   const seatPricing = getSeatPricing();
-  const selectedSeatCount = SOLO_SEATS;
-  const pricingCards = [
-    {
-      id: 'free',
-      title: 'Free',
-      seatCount: SOLO_SEATS,
-      priceLabel: '$0',
-      priceSuffix: '',
-      billingLabel: 'No credit card required.',
-      description: '1 free campaign to build your first map and try WolfGrid.',
-      features: [
-        '1 Free campaign',
-        'Invite team',
-        'iOS and Android mobile apps',
-        'Lead capture',
-        'Track performance',
-        '3D prospecting map',
-      ],
-      buttonLabel: 'Start free',
-      showLaunchPricing: false,
-    },
-    {
-      id: 'simple-pro',
-      title: 'WolfGrid',
-      seatCount: selectedSeatCount,
-      priceLabel: formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency),
-      priceSuffix: '/workspace/month',
-      billingLabel: 'Your whole team is included. Billed monthly.',
-      description: 'Unlimited campaigns to run your team, track routes, and follow up with leads.',
-      features: [
-        'Unlimited campaigns',
-        '3D prospecting maps',
-        'GPS door tracking',
-        'Rep assignments',
-        'Lead capture',
-        'Team dashboard',
-        'QR code tools',
-        '& much more',
-      ],
-      buttonLabel: 'Select Pro',
-      showLaunchPricing: true,
-    },
-  ] as const;
+  const selectedSeatCount = isDemo44TeamTrial ? TEAM_MIN_SEATS : SOLO_SEATS;
+  const pricingCards = isDemo44TeamTrial
+    ? ([
+        {
+          id: 'demo-44-team-trial',
+          title: '90-Day Team Trial',
+          seatCount: TEAM_MIN_SEATS,
+          priceLabel: '$0',
+          priceSuffix: ' for 90 days',
+          billingLabel: 'No credit card required. Your whole team is included.',
+          description:
+            'Use every WolfGrid team feature for 90 days. Invite your team, run real campaigns, and tell us what would make it better.',
+          features: [
+            'Unlimited campaigns for 90 days',
+            'Invite your whole team',
+            'iOS and Android mobile apps',
+            'GPS door tracking and assignments',
+            'Lead capture and team dashboard',
+            'In-app feedback sent directly to WolfGrid',
+          ],
+          buttonLabel: 'Start my 90-day team trial',
+          showLaunchPricing: false,
+        },
+      ] as const)
+    : ([
+        {
+          id: 'free',
+          title: 'Free',
+          seatCount: SOLO_SEATS,
+          priceLabel: '$0',
+          priceSuffix: '',
+          billingLabel: 'No credit card required.',
+          description: '1 free campaign to build your first map and try WolfGrid.',
+          features: [
+            '1 Free campaign',
+            'Invite team',
+            'iOS and Android mobile apps',
+            'Lead capture',
+            'Track performance',
+            '3D prospecting map',
+          ],
+          buttonLabel: 'Start free',
+          showLaunchPricing: false,
+        },
+        {
+          id: 'simple-pro',
+          title: 'WolfGrid',
+          seatCount: selectedSeatCount,
+          priceLabel: formatPlanPrice(seatPricing.seatMonthlyDisplay, billingCurrency),
+          priceSuffix: '/seat/month',
+          billingLabel: 'Billed monthly per seat.',
+          description: 'Unlimited campaigns to run your team, track routes, and follow up with leads.',
+          features: [
+            'Unlimited campaigns',
+            '3D prospecting maps',
+            'GPS door tracking',
+            'Rep assignments',
+            'Lead capture',
+            'Team dashboard',
+            'QR code tools',
+            '& much more',
+          ],
+          buttonLabel: 'Select Pro',
+          showLaunchPricing: true,
+        },
+      ] as const);
 
   const buildResumePath = useCallback(() => {
     const resumeParams = new URLSearchParams(searchParams.toString());
@@ -997,24 +1029,28 @@ function OnboardingContent() {
             ? 'self-serve-demo'
             : draft?.referralSource ?? referralSource,
           referralCampaign: isSelfServeDemoOnboarding
-            ? 'self-serve-campaign'
+            ? isDemo44TeamTrial
+              ? DEMO_44_REFERRAL_CAMPAIGN
+              : 'self-serve-campaign'
             : draft?.referralCampaign ?? referralCampaign,
           brokerage: (draft?.brokerage ?? brokerage).trim() || undefined,
           brokerageId: draft?.brokerageId ?? brokerageId ?? undefined,
-          useCase: isExclusivePartnerTeamLayout
+          useCase: isTeamOfferOnboarding
             ? 'team'
             : completionUseCase,
-          maxSeats: completionUseCase === 'team' || isExclusivePartnerTeamLayout
+          maxSeats: completionUseCase === 'team' || isTeamOfferOnboarding
             ? Math.max(TEAM_MIN_SEATS, normalizedInviteEmails.length + 1, completionSeats)
             : SOLO_SEATS,
           partnerOfferToken: isExclusivePartnerOnboarding ? partnerOfferToken : undefined,
           salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
-          clientSource: isSelfServeDemoOnboarding
-            ? 'self-serve-demo'
+          clientSource: isDemo44TeamTrial
+            ? DEMO_44_CLIENT_SOURCE
+            : isSelfServeDemoOnboarding
+              ? 'self-serve-demo'
             : searchParams.get('source') ?? undefined,
           selfServeCampaignDraft,
           teamMemberEmails:
-            completionUseCase === 'team' || isExclusivePartnerTeamLayout
+            completionUseCase === 'team' || isTeamOfferOnboarding
               ? normalizedInviteEmails
               : undefined,
           openAppAfterCompletion: true,
@@ -1298,7 +1334,13 @@ function OnboardingContent() {
       const nextQs = new URLSearchParams();
       if (isSelfServeDemoOnboarding) {
         nextQs.set('source', 'self-serve-demo');
-        nextQs.set('campaign', 'self-serve-campaign');
+        nextQs.set(
+          'campaign',
+          isDemo44TeamTrial ? DEMO_44_REFERRAL_CAMPAIGN : 'self-serve-campaign'
+        );
+        if (isDemo44TeamTrial) {
+          nextQs.set('offer', DEMO_44_TEAM_TRIAL_OFFER);
+        }
         if (searchParams.get('resumeCampaign') === '1') {
           nextQs.set('resumeCampaign', '1');
         }
@@ -1364,6 +1406,7 @@ function OnboardingContent() {
     hasAuthenticatedOnboardingSession,
     requiresOnboardingAuth,
     isDialerOnboarding,
+    isDemo44TeamTrial,
     isSalespersonOnboarding,
     isSelfServeDemoOnboarding,
     lastName,
@@ -1436,28 +1479,38 @@ function OnboardingContent() {
   const heading =
     step === 1
       ? isSelfServeDemoOnboarding
-        ? searchParams.get('resumeCampaign') === '1'
+        ? isDemo44TeamTrial
+          ? 'Start your team\'s 90-day trial'
+          : searchParams.get('resumeCampaign') === '1'
           ? 'Your 3D map is building'
           : 'Build your first 3D prospecting map'
         : 'Help us personalize your experience'
       : step === 2
-        ? 'How will you use WolfGrid?'
+        ? isDemo44TeamTrial
+          ? 'Bring your team with you'
+          : 'How will you use WolfGrid?'
         : step === 3
           ? 'Set up your workspace'
           : step === 4
             ? 'Ambassador referral code'
-            : 'Reach your potential with WolfGrid';
+            : isDemo44TeamTrial
+              ? 'Your whole team. 90 days. Free.'
+              : 'Reach your potential with WolfGrid';
 
   const subheading =
     step === 1
       ? isSelfServeDemoOnboarding
-        ? searchParams.get('resumeCampaign') === '1'
+        ? isDemo44TeamTrial
+          ? 'Create your account while we prepare the prospecting map you just drew.'
+          : searchParams.get('resumeCampaign') === '1'
           ? 'Create your free account while we prepare the homes in your neighborhood.'
           : 'Create a free account to get started'
         : null
       : step === 2
-        ? isExclusivePartnerTeamLayout
-          ? 'Team mode is pre-selected for this exclusive offer.'
+        ? isTeamOfferOnboarding
+          ? isDemo44TeamTrial
+            ? 'Invite teammates now, or add the rest from your dashboard during the trial.'
+            : 'Team mode is pre-selected for this exclusive offer.'
           : 'Choose solo or team so we can tailor your workspace.'
       : step === 3
         ? isSelfServeDemoOnboarding
@@ -1465,7 +1518,9 @@ function OnboardingContent() {
           : 'Name your business and tell us your industry.'
           : step === 4
             ? 'Enter an ambassador code to unlock your offer, or skip this step.'
-            : 'Select a plan based on your needs';
+            : isDemo44TeamTrial
+              ? 'Try everything, then use the feedback button in WolfGrid to tell us what your team thinks.'
+              : 'Select a plan based on your needs';
 
   useEffect(() => {
     if (step > onboardingFinalStep) {
@@ -1536,26 +1591,34 @@ function OnboardingContent() {
           </div>
         </div>
 
-        {(isExclusivePartnerOnboarding || isSalespersonOnboarding) && step === 1 ? (
+        {(isExclusivePartnerOnboarding || isSalespersonOnboarding || isDemo44TeamTrial) && step === 1 ? (
           <div className="mb-6 rounded-xl border border-[#d9dce2] bg-[#fafafa] p-4 text-center">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#6f7480]">
               {isSalespersonOnboarding
                 ? 'Salesperson onboarding'
+                : isDemo44TeamTrial
+                  ? 'Team lead trial'
                 : isExclusivePartnerTeamLayout
                   ? 'Exclusive Team Onboarding'
                   : 'Exclusive offer'}
             </p>
             <p className="mt-1 text-lg font-bold text-[#17181c]">
-              {isSalespersonOnboarding ? 'Set up your WolfGrid sales workspace' : 'Exclusive included campaign unlocked'}
+              {isSalespersonOnboarding
+                ? 'Set up your WolfGrid sales workspace'
+                : isDemo44TeamTrial
+                  ? '90 days of WolfGrid for your whole team'
+                  : 'Exclusive included campaign unlocked'}
             </p>
             <p className="mt-1 text-sm text-[#6f7480]">
               {isSalespersonOnboarding
                 ? 'Create your account with the invited email. Your workspace will be nested under WolfGrid / Salespeople.'
+                : isDemo44TeamTrial
+                  ? 'No credit card. Run real campaigns, invite your teammates, and send feedback directly from the app.'
                 : hideExclusiveStep1Demo
                   ? 'Finish onboarding to activate your included workspace campaign.'
                   : 'Finish onboarding to activate your included workspace campaign and watch the demo if you have not already.'}
             </p>
-            {!isSalespersonOnboarding && !hideExclusiveStep1Demo ? (
+            {!isSalespersonOnboarding && !isDemo44TeamTrial && !hideExclusiveStep1Demo ? (
               <div className="mt-4 overflow-hidden rounded-lg border border-[#d9dce2] bg-white">
                 <ExclusiveOfferArcadeEmbed demo={onboardingDemo} />
               </div>
@@ -1722,10 +1785,14 @@ function OnboardingContent() {
           )}
 
           {step === 2 && (
-            isExclusivePartnerTeamLayout ? (
+            isTeamOfferOnboarding ? (
               <div className="space-y-4">
                 <div className="rounded-xl border border-[#d9dce2] bg-[#fafafa] p-4 text-center">
-                  <p className="text-sm font-bold text-[#17181c]">Team onboarding is pre-selected for this exclusive offer.</p>
+                  <p className="text-sm font-bold text-[#17181c]">
+                    {isDemo44TeamTrial
+                      ? 'Team mode is included in your 90-day trial.'
+                      : 'Team onboarding is pre-selected for this exclusive offer.'}
+                  </p>
                   <p className="mt-1 text-xs text-[#6f7480]">Add teammate emails now and invites will be sent after onboarding completes.</p>
                 </div>
                 <div className="space-y-3">
@@ -1973,7 +2040,11 @@ function OnboardingContent() {
 
           {step === FINAL_ONBOARDING_STEP && (
             <div className="space-y-8">
-              <div className="mx-auto grid max-w-none gap-6 md:grid-cols-2">
+              <div
+                className={`mx-auto grid gap-6 ${
+                  isDemo44TeamTrial ? 'max-w-xl grid-cols-1' : 'max-w-none md:grid-cols-2'
+                }`}
+              >
                 {pricingCards.map((card) => {
                   return (
                     <div
@@ -1981,7 +2052,16 @@ function OnboardingContent() {
                       className="flex min-h-[440px] flex-col rounded-[26px] border border-[#d9dce2] bg-white p-6 shadow-[0_18px_45px_rgba(0,0,0,0.08)]"
                     >
                       <h2 className="text-2xl font-bold text-[#17181c]">{card.title}</h2>
-                      {card.showLaunchPricing ? (
+                      {isDemo44TeamTrial ? (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-700">
+                            Demo 44 team-lead offer
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#17181c]">
+                            Full team access for 90 days
+                          </p>
+                        </div>
+                      ) : card.showLaunchPricing ? (
                         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
                           <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
                             50% off launch pricing
@@ -1989,7 +2069,7 @@ function OnboardingContent() {
                           <p className="mt-1 text-sm font-semibold text-[#17181c]">
                             Normally{' '}
                             <span className="text-[#8c919c] line-through">
-                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /workspace/month
+                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /seat/month
                             </span>
                           </p>
                         </div>

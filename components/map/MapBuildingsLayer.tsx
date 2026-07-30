@@ -79,9 +79,10 @@ const defaultStatusFilters: StatusFilters = DEFAULT_STATUS_FILTERS;
 const FOOTPRINT_SCALE = 1;
 const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
-const ADDRESS_LABEL_MIN_ZOOM = 18;
+const ADDRESS_LABEL_MIN_ZOOM = 16;
 const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
-const DEFAULT_BUILDING_HEIGHT_METERS = 8;
+// Minimum rendered building height, reduced by 35% from the previous 8 m floor.
+const MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
 const GENERATED_HOME_WIDTH_METERS = 9;
 const GENERATED_HOME_DEPTH_METERS = 7;
 const GENERATED_HOME_HEIGHT_METERS = 5.5;
@@ -120,7 +121,7 @@ function applyBuildingSceneLighting(map: MapboxMap, isDarkMap: boolean) {
       id: 'wolfgrid-ambient-light',
       type: 'ambient',
       properties: {
-        color: isDarkMap ? '#9fb0c8' : '#dce8f5',
+        color: isDarkMap ? '#c7c7c7' : '#ffffff',
         intensity: isDarkMap ? 0.38 : 0.5,
       },
     },
@@ -128,7 +129,7 @@ function applyBuildingSceneLighting(map: MapboxMap, isDarkMap: boolean) {
       id: 'wolfgrid-sun-light',
       type: 'directional',
       properties: {
-        color: isDarkMap ? '#d8e4f2' : '#fff5df',
+        color: '#ffffff',
         intensity: isDarkMap ? 0.72 : 0.8,
         direction: [210, 38],
         'cast-shadows': true,
@@ -216,6 +217,16 @@ function scaleFootprint(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon, scale:
 }
 
 function getAddressCoordinate(address: CampaignAddress): [number, number] | null {
+  const adjusted = address as CampaignAddress & {
+    label_anchor_lon?: unknown;
+    label_anchor_lat?: unknown;
+  };
+  const anchorLongitude = Number(adjusted.label_anchor_lon);
+  const anchorLatitude = Number(adjusted.label_anchor_lat);
+  if (Number.isFinite(anchorLongitude) && Number.isFinite(anchorLatitude)) {
+    return [anchorLongitude, anchorLatitude];
+  }
+
   if (address.coordinate) {
     const { lon, lat } = address.coordinate;
     if (!Number.isNaN(lon) && !Number.isNaN(lat)) {
@@ -407,15 +418,39 @@ function buildInferredAddressAssignments(
   if (!addresses?.length || features.length === 0) return assignments;
 
   const candidates = features.flatMap((feature) => {
-    const key = getFeatureIdentifiers(feature)[0];
+    const identifiers = getFeatureIdentifiers(feature);
+    const key = identifiers[0];
     const geometry = feature.geometry;
     if (!key || (geometry?.type !== 'Polygon' && geometry?.type !== 'MultiPolygon')) return [];
+    const properties = toRecord(feature.properties);
     return [{
       key,
       feature,
-      identifiers: new Set(getFeatureIdentifiers(feature)),
+      identifiers,
+      directAddressId: getStringRecordValue(properties, 'address_id'),
       center: geometryCenter(geometry),
     }];
+  });
+
+  type Candidate = (typeof candidates)[number];
+  const candidateByIdentifier = new Map<string, Candidate>();
+  const candidateByAddressId = new Map<string, Candidate>();
+  const spatialCells = new Map<string, Candidate[]>();
+  const spatialCellSize = 0.0005;
+  const cellCoordinate = (value: number) => Math.floor(value / spatialCellSize);
+  const cellKey = (lon: number, lat: number) => `${cellCoordinate(lon)}:${cellCoordinate(lat)}`;
+
+  candidates.forEach((candidate) => {
+    candidate.identifiers.forEach((identifier) => {
+      if (!candidateByIdentifier.has(identifier)) candidateByIdentifier.set(identifier, candidate);
+    });
+    if (candidate.directAddressId && !candidateByAddressId.has(candidate.directAddressId)) {
+      candidateByAddressId.set(candidate.directAddressId, candidate);
+    }
+    if (candidate.center) {
+      const key = cellKey(candidate.center[0], candidate.center[1]);
+      spatialCells.set(key, [...(spatialCells.get(key) ?? []), candidate]);
+    }
   });
 
   const assign = (key: string, address: CampaignAddress) => {
@@ -427,40 +462,66 @@ function buildInferredAddressAssignments(
   };
 
   for (const address of addresses) {
+    const directMatch = candidateByAddressId.get(address.id);
+    if (directMatch) {
+      assign(directMatch.key, address);
+      continue;
+    }
+
+    const explicitMatch = getExplicitAddressBuildingIds(address)
+      .map((identifier) => candidateByIdentifier.get(identifier))
+      .find((candidate): candidate is Candidate => Boolean(candidate));
+    if (explicitMatch) {
+      assign(explicitMatch.key, address);
+      continue;
+    }
+
     const coordinate = getAddressCoordinate(address);
     if (!coordinate) continue;
 
-    const explicitIds = getExplicitAddressBuildingIds(address);
-    const exactMatch = explicitIds.length
-      ? candidates.find((candidate) => explicitIds.some((id) => candidate.identifiers.has(id)))
-      : undefined;
-    if (exactMatch) {
-      assign(exactMatch.key, address);
-      continue;
+    const originX = cellCoordinate(coordinate[0]);
+    const originY = cellCoordinate(coordinate[1]);
+    const nearbySet = new Set<Candidate>();
+    for (let xOffset = -2; xOffset <= 2; xOffset += 1) {
+      for (let yOffset = -2; yOffset <= 2; yOffset += 1) {
+        (spatialCells.get(`${originX + xOffset}:${originY + yOffset}`) ?? [])
+          .forEach((candidate) => nearbySet.add(candidate));
+      }
     }
 
-    const containingMatches = candidates.filter((candidate) =>
-      geometryContainsPoint(candidate.feature.geometry, coordinate)
-    );
-    if (containingMatches.length > 0) {
-      const bestContaining = containingMatches
-        .map((candidate) => ({
-          candidate,
-          distance: candidate.center ? distanceMeters(coordinate, candidate.center) : 0,
-        }))
-        .sort((a, b) => a.distance - b.distance)[0]?.candidate;
-      if (bestContaining) assign(bestContaining.key, address);
-      continue;
+    // The old implementation scanned and sorted every building for every
+    // address. Restrict geometry checks to the surrounding ~200 m instead.
+    const nearbyCandidates = nearbySet.size > 0
+      ? Array.from(nearbySet)
+      : candidates.length <= 250
+        ? candidates
+        : [];
+    let bestContaining: Candidate | null = null;
+    let bestContainingDistance = Number.POSITIVE_INFINITY;
+    let nearest: Candidate | null = null;
+    let nearestDistance = INFERRED_BUILDING_LINK_MAX_DISTANCE_M;
+
+    for (const candidate of nearbyCandidates) {
+      const distance = candidate.center
+        ? distanceMeters(coordinate, candidate.center)
+        : Number.POSITIVE_INFINITY;
+      if (
+        geometryContainsPoint(candidate.feature.geometry, coordinate) &&
+        distance < bestContainingDistance
+      ) {
+        bestContaining = candidate;
+        bestContainingDistance = distance;
+      }
+      if (distance <= nearestDistance) {
+        nearest = candidate;
+        nearestDistance = distance;
+      }
     }
 
-    const nearest = candidates
-      .map((candidate) => ({
-        candidate,
-        distance: candidate.center ? distanceMeters(coordinate, candidate.center) : Infinity,
-      }))
-      .filter((match) => match.distance <= INFERRED_BUILDING_LINK_MAX_DISTANCE_M)
-      .sort((a, b) => a.distance - b.distance)[0]?.candidate;
-
+    if (bestContaining) {
+      assign(bestContaining.key, address);
+      continue;
+    }
     if (nearest) assign(nearest.key, address);
   }
 
@@ -1595,7 +1656,7 @@ export function MapBuildingsLayer({
     }
     
     // Only fetch if we haven't already loaded this campaign's data
-    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}`;
+    const campaignDataKey = `${campaignId}:${refreshKey}:${getCampaignBuildingScopeKey(addressStateOverrides)}:map-bundle`;
     if (campaignDataLoadedRef.current === campaignDataKey) {
       return;
     }
@@ -1977,8 +2038,13 @@ export function MapBuildingsLayer({
           const polygonFilter: FilterSpecification = POLYGON_GEOMETRY_FILTER;
           const buildingHeightExpression = [
             'max',
-            ['coalesce', ['get', 'height'], ['get', 'height_m'], DEFAULT_BUILDING_HEIGHT_METERS],
-            DEFAULT_BUILDING_HEIGHT_METERS,
+            [
+              'coalesce',
+              ['get', 'height'],
+              ['get', 'height_m'],
+              MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
+            ],
+            MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
           ] as ExpressionSpecification;
 
           safeRemoveLayer(map, surfaceLayerId);
@@ -1992,7 +2058,9 @@ export function MapBuildingsLayer({
             minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             layout: {
-              'fill-extrusion-edge-radius': 0.6,
+              // Mapbox GL JS can generate long triangulation spikes when an
+              // edge radius is applied to complex/concave GeoJSON footprints.
+              'fill-extrusion-edge-radius': 0,
             },
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
@@ -2001,7 +2069,10 @@ export function MapBuildingsLayer({
               'fill-extrusion-base': 0,
               'fill-extrusion-opacity': getFootprintFillOpacity(),
               'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
-              'fill-extrusion-cast-shadows': true,
+              // Legacy light/dark basemaps can project kilometer-long shadow
+              // rays when the camera zooms out. AO and the vertical gradient
+              // retain depth without those false wall-like lines.
+              'fill-extrusion-cast-shadows': false,
               'fill-extrusion-ambient-occlusion-intensity': 0.35,
               'fill-extrusion-ambient-occlusion-wall-radius': 3,
               'fill-extrusion-ambient-occlusion-ground-radius': 4,

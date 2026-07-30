@@ -6,11 +6,11 @@ export const MAP_STYLE_PRESET_META: Record<
 > = {
   standard: {
     label: 'Standard',
-    description: 'Uses the default WolfGrid light and dark map styles.',
+    description: 'Uses White Out in light mode and the default WolfGrid dark map in dark mode.',
   },
   whiteOut: {
     label: 'White Out',
-    description: 'Bright stripped-back basemap that avoids the Standard building footprint bleed-through.',
+    description: 'Bright stripped-back light map; dark mode keeps the WolfGrid dark-grey basemap.',
   },
   blackOps: {
     label: 'Black Out',

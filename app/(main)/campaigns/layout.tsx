@@ -57,13 +57,22 @@ export default function CampaignsLayout({
   const headerTitle = useCampaignHeaderTitle();
   const isCreatePage = pathname === '/campaigns/create';
   const isSelfServeCreatePage = isCreatePage && searchParams.get('source') === 'self-serve-demo';
+  const shouldOpenCollapsed =
+    !isCreatePage &&
+    (searchParams.get('campaignPanel') === 'hidden' ||
+      searchParams.get('source') === 'self-serve-demo');
 
   useEffect(() => {
+    if (shouldOpenCollapsed) {
+      setCollapsed(true);
+      return;
+    }
+
     try {
       const stored = localStorage.getItem(CAMPAIGN_SIDEBAR_COLLAPSED_KEY);
       if (stored !== null) setCollapsed(stored === 'true');
     } catch {}
-  }, []);
+  }, [shouldOpenCollapsed]);
 
   const setCollapsedPersisted = useCallback((value: boolean) => {
     setCollapsed(value);

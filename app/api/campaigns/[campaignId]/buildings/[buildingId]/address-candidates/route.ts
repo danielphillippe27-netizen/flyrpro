@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { getSupabaseUrl } from "@/lib/supabase/env";
@@ -204,6 +205,12 @@ function round(value: number, places = 1): number {
   return Math.round(value * factor) / factor;
 }
 
+function candidateTier(score: number, trusted: boolean): "recommended" | "strong" | "needs_review" {
+  if (trusted && score >= 0.92) return "recommended";
+  if (trusted && score >= 0.70) return "strong";
+  return "needs_review";
+}
+
 async function ensureCampaignAccess(supabase: SupabaseClient, campaignId: string, userId: string): Promise<boolean> {
   const { data: campaign, error } = await supabase
     .from("campaigns")
@@ -297,9 +304,20 @@ async function reverseCandidatePayload(point: { lat: number; lng: number }): Pro
   const props = feature.properties ?? {};
   const context = props.context ?? {};
   const coordinates = feature.geometry?.coordinates;
+  const reverseHex = createHash("sha256")
+    .update(`${props.full_address ?? props.name ?? feature.place_name ?? ""}:${point.lng.toFixed(6)}:${point.lat.toFixed(6)}`)
+    .digest("hex")
+    .slice(0, 32);
+  const reverseId = [
+    reverseHex.slice(0, 8),
+    reverseHex.slice(8, 12),
+    `5${reverseHex.slice(13, 16)}`,
+    `a${reverseHex.slice(17, 20)}`,
+    reverseHex.slice(20, 32),
+  ].join("-");
 
   return {
-    id: crypto.randomUUID(),
+    id: reverseId,
     candidate_type: "reverse_geocode",
     is_synthetic: true,
     source: "mapbox_reverse",
@@ -322,6 +340,9 @@ async function reverseCandidatePayload(point: { lat: number; lng: number }): Pro
     },
     distance_meters: 0,
     score: 0.35,
+    tier: "needs_review",
+    evidence_codes: ["reverse_geocode_fallback", "not_saved_campaign_address"],
+    source_kind: "reverse_geocode",
   };
 }
 
@@ -415,6 +436,13 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
           requires_confirmation: trust.requiresConfirmation,
           trusted: trust.trusted,
           rejected_reason: trust.rejectedReason,
+          tier: candidateTier(score, trust.trusted),
+          evidence_codes: [
+            distanceMeters === 0 ? "footprint_containment" : distanceMeters <= 25 ? "within_25m" : "nearby",
+            ...(streetScore >= 0.99 ? ["street_exact"] : streetScore > 0 ? ["street_partial"] : []),
+            ...(row.source?.toLowerCase() === "manual" ? ["manual_address_origin"] : []),
+          ],
+          source_kind: "campaign_address",
         }];
       })
       .sort((a, b) => {
@@ -456,7 +484,15 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
       building_id: building.publicId,
       radius_meters: radiusMeters,
       trust_decision: trustDecision,
-      candidates: outputCandidates,
+      candidates: outputCandidates.map((candidate, index) => ({
+        ...candidate,
+        rank: index + 1,
+        tier: candidate.tier ?? "needs_review",
+        evidence_codes: candidate.evidence_codes ?? [],
+        source_kind: candidate.source_kind ?? (
+          candidate.candidate_type === "reverse_geocode" ? "reverse_geocode" : "campaign_address"
+        ),
+      })),
     });
   } catch (error) {
     console.error("[address-candidates] GET error:", error);

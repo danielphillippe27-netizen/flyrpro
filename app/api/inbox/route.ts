@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Resend } from 'resend';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { asUuid, getWorkspaceRole } from '@/app/api/routes/_lib';
+import {
+  DEMO_EMAIL_DOMAIN,
+  resolveAvailableDemoEmailHandle,
+  type HandleLookupClient,
+} from '@/lib/dialer/demo-email-handle';
 import { normalizePhoneNumber } from '@/lib/dialer/phone';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { InboxItem, InboxItemSource, InboxItemStatus } from '@/types/database';
@@ -11,6 +17,7 @@ export const dynamic = 'force-dynamic';
 type ApiInboxItem = {
   id: string;
   source: InboxItemSource;
+  direction: 'inbound' | 'outbound' | null;
   title: string;
   preview: string | null;
   body: string | null;
@@ -42,6 +49,7 @@ type ContactSummaryRow = {
   full_name: string | null;
   phone: string | null;
   phone_e164: string | null;
+  email?: string | null;
 };
 
 type NotificationRow = {
@@ -54,9 +62,89 @@ type NotificationRow = {
   created_at: string;
 };
 
+type SalespersonEmailRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  workspace_id: string | null;
+  demo_email_handle: string | null;
+};
+
+type InboxEmailContactRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
+
 const COMMUNICATION_SOURCES = new Set<InboxItemSource>(['email', 'sms', 'call']);
 const VALID_SOURCE_FILTERS = new Set(['all', 'email', 'sms', 'call']);
 const VALID_STATUS_FILTERS = new Set(['open', 'done', 'snoozed', 'archived', 'all']);
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL_SUBJECT_LENGTH = 320;
+const MAX_EMAIL_BODY_LENGTH = 20_000;
+
+function cleanText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getEnv(name: string): string | null {
+  const value = process.env[name];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeEmail(value: unknown): string | null {
+  const normalized = cleanText(value).toLowerCase();
+  return EMAIL_PATTERN.test(normalized) ? normalized : null;
+}
+
+function safeSenderName(value: string | null | undefined, fallbackEmail: string | null): string {
+  const fallback = fallbackEmail?.split('@')[0]?.replace(/[._+-]+/g, ' ').trim() || 'WolfGrid';
+  return (cleanText(value) || fallback || 'WolfGrid')
+    .replace(/[\r\n<>"]/g, '')
+    .slice(0, 80);
+}
+
+async function resolveSalespersonEmailRoute(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  requestUser: { id: string; email: string | null }
+): Promise<SalespersonEmailRow | null> {
+  const select = 'id, full_name, email, workspace_id, demo_email_handle';
+  const email = normalizeEmail(requestUser.email);
+
+  if (email) {
+    const { data, error } = await admin
+      .from('salespeople')
+      .select(select)
+      .eq('workspace_id', workspaceId)
+      .ilike('email', email)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) return data as SalespersonEmailRow;
+  }
+
+  const { data, error } = await admin
+    .from('salespeople')
+    .select(select)
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as SalespersonEmailRow | null) ?? null;
+}
+
 
 function asPositiveLimit(value: string | null): number {
   const parsed = Number(value);
@@ -65,9 +153,14 @@ function asPositiveLimit(value: string | null): number {
 }
 
 function rowToInboxItem(row: InboxItem): ApiInboxItem {
+  const rawDirection =
+    row.raw_payload && typeof row.raw_payload === 'object' && !Array.isArray(row.raw_payload)
+      ? (row.raw_payload as Record<string, unknown>).direction
+      : null;
   return {
     id: `inbox:${row.id}`,
     source: row.source,
+    direction: rawDirection === 'inbound' || rawDirection === 'outbound' ? rawDirection : null,
     title: row.title,
     preview: row.preview ?? null,
     body: row.body ?? null,
@@ -122,6 +215,7 @@ function smsToInboxItem(
   return {
     id: `sms:${row.id}`,
     source: 'sms',
+    direction: 'inbound',
     title: fromLabel,
     preview: row.body,
     body: row.body,
@@ -182,6 +276,7 @@ function notificationToInboxItem(row: NotificationRow): ApiInboxItem {
   return {
     id: `notification:${row.id}`,
     source,
+    direction: null,
     title: row.title,
     preview: row.body,
     body: row.body,
@@ -437,5 +532,204 @@ export async function PATCH(request: NextRequest) {
   } catch (error) {
     console.error('[api/inbox] PATCH error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const requestUser = await resolveUserFromRequest(request);
+    if (!requestUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = (await request.json().catch(() => null)) as {
+      workspaceId?: unknown;
+      channel?: unknown;
+      contactId?: unknown;
+      email?: unknown;
+      subject?: unknown;
+      body?: unknown;
+    } | null;
+
+    const workspaceId = asUuid(body?.workspaceId);
+    const channel = cleanText(body?.channel).toLowerCase();
+    const messageBody = cleanText(body?.body);
+    const subject = cleanText(body?.subject) || 'Following up';
+    const requestedContactId = asUuid(body?.contactId);
+    const requestedEmail = normalizeEmail(body?.email);
+
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });
+    }
+    if (channel !== 'email') {
+      return NextResponse.json({ error: 'This endpoint currently accepts email replies.' }, { status: 400 });
+    }
+    if (!messageBody) {
+      return NextResponse.json({ error: 'Write an email before sending it.' }, { status: 400 });
+    }
+    if (messageBody.length > MAX_EMAIL_BODY_LENGTH) {
+      return NextResponse.json(
+        { error: `Keep the email under ${MAX_EMAIL_BODY_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
+    if (subject.length > MAX_EMAIL_SUBJECT_LENGTH) {
+      return NextResponse.json(
+        { error: `Keep the subject under ${MAX_EMAIL_SUBJECT_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
+
+    const role = await getWorkspaceRole(workspaceId, requestUser.id);
+    if (!role) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+    const admin = createAdminClient();
+    let contact: InboxEmailContactRow | null = null;
+
+    if (requestedContactId) {
+      const { data, error } = await admin
+        .from('contacts')
+        .select('id, full_name, email')
+        .eq('workspace_id', workspaceId)
+        .eq('id', requestedContactId)
+        .maybeSingle();
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (!data) return NextResponse.json({ error: 'Contact not found' }, { status: 404 });
+      contact = data as InboxEmailContactRow;
+    } else if (requestedEmail) {
+      const { data, error } = await admin
+        .from('contacts')
+        .select('id, full_name, email')
+        .eq('workspace_id', workspaceId)
+        .ilike('email', requestedEmail)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error && error.code !== 'PGRST116') {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      contact = (data as InboxEmailContactRow | null) ?? null;
+    }
+
+    const recipient = requestedEmail ?? normalizeEmail(contact?.email);
+    if (!recipient) {
+      return NextResponse.json({ error: 'Add a valid recipient email address.' }, { status: 400 });
+    }
+
+    const apiKey = getEnv('RESEND_API_KEY');
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'Email is not configured. Set RESEND_API_KEY.' },
+        { status: 503 }
+      );
+    }
+
+    const salesperson = await resolveSalespersonEmailRoute(admin, workspaceId, requestUser);
+    if (!salesperson) {
+      return NextResponse.json(
+        { error: 'Your salesperson email route is not configured.' },
+        { status: 409 }
+      );
+    }
+
+    const handle = await resolveAvailableDemoEmailHandle(
+      admin as unknown as HandleLookupClient,
+      salesperson,
+      requestUser.email
+    );
+    if (!cleanText(salesperson.demo_email_handle)) {
+      const { error } = await admin
+        .from('salespeople')
+        .update({ demo_email_handle: handle })
+        .eq('id', salesperson.id)
+        .is('demo_email_handle', null);
+      if (error) {
+        console.warn('[api/inbox] failed to store salesperson email handle', error);
+      }
+    }
+
+    const fromLabel = safeSenderName(salesperson.full_name, requestUser.email);
+    const fromEmail = `${handle}@${getEnv('RESEND_INBOUND_DOMAIN') || DEMO_EMAIL_DOMAIN}`;
+    const resend = new Resend(apiKey);
+    const escapedBody = escapeHtml(messageBody).replace(/\n/g, '<br />');
+    const { data, error: sendError } = await resend.emails.send({
+      from: `${fromLabel} <${fromEmail}>`,
+      to: recipient,
+      subject,
+      text: messageBody,
+      html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6;color:#111827;">${escapedBody}</div>`,
+    });
+
+    if (sendError) {
+      return NextResponse.json(
+        { error: sendError.message?.trim() || 'Failed to send the email.' },
+        { status: sendError.statusCode ?? 500 }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const emailId = typeof data?.id === 'string' ? data.id : null;
+    const inboxPayload = {
+      workspace_id: workspaceId,
+      owner_user_id: requestUser.id,
+      salesperson_id: salesperson.id,
+      contact_id: contact?.id ?? null,
+      source: 'email',
+      source_table: 'resend_sent_emails',
+      source_id: emailId,
+      external_id: emailId,
+      title: subject,
+      preview: messageBody.replace(/\s+/g, ' ').slice(0, 280),
+      body: messageBody,
+      from_label: fromLabel,
+      from_email: fromEmail,
+      to_label: cleanText(contact?.full_name) || null,
+      to_email: recipient,
+      status: 'open',
+      priority: 'normal',
+      occurred_at: now,
+      read_at: now,
+      raw_payload: {
+        direction: 'outbound',
+        provider: 'resend',
+        providerMessageId: emailId,
+      },
+    };
+
+    const { error: inboxError } = await admin.from('inbox_items').insert(inboxPayload);
+    const warning = inboxError
+      ? 'Email sent, but WolfGrid could not save it to the conversation.'
+      : null;
+    if (inboxError) {
+      console.warn('[api/inbox] failed to save outbound email', inboxError);
+    }
+
+    if (contact?.id) {
+      const [activityResult, contactResult] = await Promise.all([
+        admin.from('contact_activities').insert({
+          contact_id: contact.id,
+          type: 'email',
+          note: `Outbound email: ${subject}\n${messageBody}`,
+          timestamp: now,
+        }),
+        admin
+          .from('contacts')
+          .update({ last_contacted: now, updated_at: now })
+          .eq('workspace_id', workspaceId)
+          .eq('id', contact.id),
+      ]);
+      if (activityResult.error) {
+        console.warn('[api/inbox] failed to log outbound email activity', activityResult.error);
+      }
+      if (contactResult.error) {
+        console.warn('[api/inbox] failed to update emailed contact', contactResult.error);
+      }
+    }
+
+    return NextResponse.json({ sent: true, emailId, warning }, { status: 201 });
+  } catch (error) {
+    console.error('[api/inbox] POST error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: 500 }
+    );
   }
 }

@@ -31,6 +31,26 @@ type LinkQualityRow = {
 
 type SortKey = 'degraded' | 'orphan' | 'suspect' | 'parcel_bridge';
 
+type ReconciliationRun = {
+  id: string;
+  campaign_id: string;
+  campaign_name: string | null;
+  mode: string;
+  status: string;
+  algorithm_version: string;
+  before_metrics: Record<string, unknown> | null;
+  after_metrics: Record<string, unknown> | null;
+  decision_count: number | string;
+  applied_count: number | string;
+  review_count: number | string;
+  rollback_count: number | string;
+  rejected_count: number | string;
+  synthetic_suggestion_count: number | string;
+  synthetic_applied_count: number | string;
+  queued_at: string | null;
+  completed_at: string | null;
+};
+
 const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'degraded', label: 'Degraded first' },
   { key: 'orphan', label: 'Orphan rate' },
@@ -38,7 +58,7 @@ const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'parcel_bridge', label: 'Parcel bridge' },
 ];
 
-function asNumber(value: number | string | null | undefined): number {
+function asNumber(value: unknown): number {
   if (typeof value === 'number') return value;
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value);
@@ -123,10 +143,17 @@ export default async function AdminLinkQualityPage({
     : 'degraded';
 
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from('campaign_link_quality_dashboard')
-    .select('*')
-    .limit(500);
+  const [{ data, error }, reconciliationResult] = await Promise.all([
+    admin
+      .from('campaign_link_quality_dashboard')
+      .select('*')
+      .limit(500),
+    admin
+      .from('map_reconciliation_run_summaries')
+      .select('*')
+      .order('queued_at', { ascending: false })
+      .limit(100),
+  ]);
 
   if (error) {
     throw new Error(`Failed to load link quality dashboard: ${error.message}`);
@@ -135,6 +162,43 @@ export default async function AdminLinkQualityPage({
   const rows = sortRows((data ?? []) as LinkQualityRow[], sort);
   const degradedCount = rows.filter((row) => row.link_quality_status === 'degraded' || row.link_quality_status === 'failed').length;
   const repairingCount = rows.filter((row) => row.link_quality_status === 'repairing').length;
+  const reconciliationRuns = (reconciliationResult.data ?? []) as ReconciliationRun[];
+  const reconciliationReviewCount = reconciliationRuns.reduce(
+    (sum, run) => sum + asNumber(run.review_count),
+    0
+  );
+  const coverageTrend = reconciliationRuns.length > 0
+    ? reconciliationRuns.reduce(
+        (sum, run) =>
+          sum +
+          asNumber(run.after_metrics?.coverage_percent) -
+          asNumber(run.before_metrics?.coverage_percent),
+        0
+      ) / reconciliationRuns.length
+    : 0;
+  const orphanReduction = reconciliationRuns.reduce(
+    (sum, run) =>
+      sum +
+      asNumber(run.before_metrics?.address_orphans) -
+      asNumber(run.after_metrics?.address_orphans),
+    0
+  );
+  const syntheticSuggestions = reconciliationRuns.reduce(
+    (sum, run) => sum + asNumber(run.synthetic_suggestion_count),
+    0
+  );
+  const syntheticApplied = reconciliationRuns.reduce(
+    (sum, run) => sum + asNumber(run.synthetic_applied_count),
+    0
+  );
+  const rejectedSuggestions = reconciliationRuns.reduce(
+    (sum, run) => sum + asNumber(run.rejected_count),
+    0
+  );
+  const rollbackCount = reconciliationRuns.reduce(
+    (sum, run) => sum + asNumber(run.rollback_count),
+    0
+  );
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6">
@@ -150,7 +214,7 @@ export default async function AdminLinkQualityPage({
         </Link>
       </header>
 
-      <section className="grid gap-3 md:grid-cols-3">
+      <section className="grid gap-3 md:grid-cols-4">
         <Card>
           <CardHeader>
             <CardDescription>Campaigns loaded</CardDescription>
@@ -169,7 +233,91 @@ export default async function AdminLinkQualityPage({
             <CardTitle>{repairingCount}</CardTitle>
           </CardHeader>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Reconciliation review</CardDescription>
+            <CardTitle>{reconciliationReviewCount}</CardTitle>
+          </CardHeader>
+        </Card>
       </section>
+
+      <section className="grid gap-3 md:grid-cols-5">
+        {[
+          ['Average coverage lift', `${coverageTrend.toFixed(2)} pts`],
+          ['Address orphans removed', String(orphanReduction)],
+          [
+            'Synthetic acceptance',
+            syntheticSuggestions > 0
+              ? `${((syntheticApplied / syntheticSuggestions) * 100).toFixed(1)}%`
+              : '—',
+          ],
+          ['Rejected suggestions', String(rejectedSuggestions)],
+          ['Rollbacks', String(rollbackCount)],
+        ].map(([label, value]) => (
+          <Card key={label}>
+            <CardHeader>
+              <CardDescription>{label}</CardDescription>
+              <CardTitle>{value}</CardTitle>
+            </CardHeader>
+          </Card>
+        ))}
+      </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Map reconciliation runs</CardTitle>
+          <CardDescription>
+            Shadow and applied runs, with reversible decisions and downloadable evidence.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {reconciliationRuns.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No reconciliation runs yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Campaign</th>
+                    <th className="px-3 py-2 font-medium">Mode / status</th>
+                    <th className="px-3 py-2 font-medium">Decisions</th>
+                    <th className="px-3 py-2 font-medium">Applied</th>
+                    <th className="px-3 py-2 font-medium">Review</th>
+                    <th className="px-3 py-2 font-medium">Coverage</th>
+                    <th className="px-3 py-2 font-medium">Queued</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciliationRuns.map((run) => (
+                    <tr key={run.id} className="border-b">
+                      <td className="px-3 py-3 font-medium">
+                        <Link href={`/admin/link-quality/reconciliation/${run.id}`} className="hover:underline">
+                          {run.campaign_name || run.campaign_id}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge variant={run.status === 'failed' ? 'destructive' : 'outline'}>
+                          {run.mode} · {run.status}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-3">{asNumber(run.decision_count)}</td>
+                      <td className="px-3 py-3">{asNumber(run.applied_count)}</td>
+                      <td className="px-3 py-3">{asNumber(run.review_count)}</td>
+                      <td className="px-3 py-3">
+                        {asNumber(run.before_metrics?.coverage_percent)}% →{' '}
+                        {asNumber(run.after_metrics?.coverage_percent)}%
+                      </td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">
+                        {formatDate(run.queued_at)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="gap-3">

@@ -101,13 +101,34 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
-    'keeps residential parcel features and rejects non-residential terms',
+    'keeps residential parcel features and rejects road classifications and indicators',
     () => {
       assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'residential' })));
       assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {})));
       assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_intent: 'road allowance' })));
       assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { status: 'Road Type Parcel' })));
+      assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { parcel_type: 'Road Reserve' })));
+      assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { legal_type: 'right_of_way corridor' })));
+      assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { sidewalk: true })));
+      assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { ROAD_CLASS: 'local' })));
       assertFalse(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, { topology_type: 'secondary' })));
+    },
+  ],
+  [
+    'does not confuse a residential street address with a road parcel classification',
+    () => {
+      assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {
+        parcel_intent: 'Fee Simple Title',
+        street_name: 'Pine Road',
+        address_line: '100 Pathway Court',
+      })));
+      assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {
+        parcel_intent: 'Fee Simple Title',
+        road: false,
+      })));
+      assertTrue(isResidentialParcelFeature(feature({ type: 'Point', coordinates: [0, 0] }, {
+        name: 'Broadway Heights',
+      })));
     },
   ],
   [

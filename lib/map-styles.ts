@@ -16,8 +16,8 @@ export type ResolvedMapStyle = {
 };
 
 const WHITE_OUT_DEFAULT_STYLE = 'mapbox://styles/mapbox/light-v11';
-const WHITE_OUT_BACKGROUND = '#f8fafc';
-const WHITE_OUT_WATER = '#eef1f4';
+const WHITE_OUT_BACKGROUND = '#ffffff';
+const WHITE_OUT_WATER = '#f4f4f5';
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
   light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT || 'mapbox://styles/mapbox/streets-v12',
@@ -30,13 +30,26 @@ const STANDARD_V11_STYLES: Record<Theme, string> = {
 };
 
 const strippedStyleCache = new Map<string, Record<string, unknown>>();
+const styleApplyRevisionByMap = new WeakMap<mapboxgl.Map, number>();
 
 export function resolveMapStyle(
   preset: MapStylePreset,
   theme: Theme,
   version: MapStyleVersion,
 ): ResolvedMapStyle {
-  if (preset === 'whiteOut') {
+  // White Out is the light-theme treatment. Never allow it to bleed into a
+  // dark workspace, including when an older White Out preference is stored in
+  // localStorage. Black Out and satellite remain explicit, theme-independent
+  // choices.
+  if (theme === 'dark' && (preset === 'standard' || preset === 'whiteOut')) {
+    const style = version === 'v12' ? STANDARD_V12_STYLES.dark : STANDARD_V11_STYLES.dark;
+    return {
+      key: `standard:${version}:dark`,
+      style,
+    };
+  }
+
+  if (preset === 'whiteOut' || preset === 'standard') {
     return {
       key: 'whiteOut:light-v11',
       style: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_WHITEOUT || WHITE_OUT_DEFAULT_STYLE,
@@ -155,6 +168,9 @@ export function applyResolvedMapStyle(
   map: mapboxgl.Map,
   resolvedStyle: ResolvedMapStyle,
 ) {
+  const applyRevision = (styleApplyRevisionByMap.get(map) ?? 0) + 1;
+  styleApplyRevisionByMap.set(map, applyRevision);
+  const isCurrentStyleRequest = () => styleApplyRevisionByMap.get(map) === applyRevision;
   const setStyleOptions = resolvedStyle.config
     ? {
         config: resolvedStyle.config,
@@ -165,6 +181,11 @@ export function applyResolvedMapStyle(
 
   void resolveStylePayload(resolvedStyle)
     .then((stylePayload) => {
+      // Stripped White Out styles require a network request. If the user
+      // switched to dark mode while that request was pending, do not let the
+      // older light payload overwrite the newer dark style.
+      if (!isCurrentStyleRequest()) return;
+
       if (typeof stylePayload === 'string' && setStyleOptions) {
         map.setStyle(stylePayload, setStyleOptions);
         return;
@@ -173,6 +194,7 @@ export function applyResolvedMapStyle(
       map.setStyle(stylePayload as string | mapboxgl.StyleSpecification);
     })
     .catch((error) => {
+      if (!isCurrentStyleRequest()) return;
       console.error('Failed to apply resolved map style:', error);
       if (setStyleOptions) {
         map.setStyle(resolvedStyle.style, setStyleOptions);
@@ -190,6 +212,12 @@ export function applyPresetVisualTweaks(
     preserveLayerPrefixes?: string[];
   },
 ) {
+  if (resolvedStyle.key.startsWith('standard:')) {
+    hideBaseBuildingLayers(map, options);
+    hideBaseAddressNumberLayers(map, options);
+    return;
+  }
+
   if (resolvedStyle.key.startsWith('whiteOut:')) {
     applyWhiteOutVisualTweaks(map, options);
     return;

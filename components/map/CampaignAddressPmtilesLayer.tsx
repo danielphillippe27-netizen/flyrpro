@@ -62,7 +62,7 @@ const SOURCE_ID = 'campaign-addresses-pmtiles-source';
 const GLOW_LAYER_ID = 'campaign-addresses-pmtiles-lead-glow';
 const CIRCLE_LAYER_ID = 'campaign-addresses-pmtiles-circle';
 const LABEL_LAYER_ID = 'campaign-addresses-pmtiles-label';
-const ADDRESS_LABEL_MIN_ZOOM = 17;
+const ADDRESS_LABEL_MIN_ZOOM = 16;
 const ADDRESS_CYLINDER_RADIUS_METERS = 2.6;
 const ADDRESS_CYLINDER_HEIGHT_METERS = 12;
 const ADDRESS_CYLINDER_COLOR = '#6b7280';
@@ -605,6 +605,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
           'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-cast-shadows': false,
         },
       } as mapboxgl.AnyLayer);
 
@@ -621,8 +622,8 @@ export function CampaignAddressPmtilesLayer({
           'text-anchor': 'center',
           'text-pitch-alignment': 'map',
           'text-rotation-alignment': 'map',
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
           'symbol-placement': 'point',
           'symbol-z-order': 'auto',
           'symbol-z-elevate': true,
@@ -739,6 +740,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
           'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-cast-shadows': false,
         },
       } as mapboxgl.AnyLayer);
 
@@ -772,8 +774,8 @@ export function CampaignAddressPmtilesLayer({
           'text-anchor': 'center',
           'text-pitch-alignment': 'map',
           'text-rotation-alignment': 'map',
-          'text-allow-overlap': true,
-          'text-ignore-placement': true,
+          'text-allow-overlap': false,
+          'text-ignore-placement': false,
           'symbol-placement': 'point',
           'symbol-z-order': 'auto',
         },

@@ -241,7 +241,14 @@ export async function GET(
   }
 
   try {
-    const scoped = await fetchScopedPmtilesParcels(campaignId, snapshot, parcelTiles, bbox, boundary);
+    const scoped = await fetchScopedPmtilesParcels(
+      campaignId,
+      snapshot,
+      parcelTiles,
+      bbox,
+      boundary,
+      { residentialOnly: true }
+    );
     const body = JSON.stringify(scoped.parcels);
     setCachedFinalParcelResponse(cacheKey, body, scoped.parcels.length);
     routeTimings.route = elapsedMs(routeStarted);

@@ -1,20 +1,17 @@
 export function TeamSeatSelector() {
   return (
-    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-center">
-      <p className="inline-flex rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white">
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-left">
+      <p className="inline-flex rounded-full bg-red-600 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">
         50% off early bird pricing
       </p>
-      <p className="mt-4 text-3xl font-black text-zinc-900">
+      <p className="mt-4 text-4xl font-black tracking-tight text-white">
         $30 USD
       </p>
-      <p className="mt-1 text-sm font-semibold text-zinc-700">
-        per user per month, normally <span className="text-zinc-400 line-through">$60 USD</span>
+      <p className="mt-1 text-sm font-semibold text-zinc-300">
+        per user / month <span className="ml-1 text-zinc-600 line-through">$60 USD</span>
       </p>
-      <p className="mt-2 text-sm font-semibold text-zinc-600">
-        CA$40 / user / month, normally <span className="text-zinc-400 line-through">CA$80</span>
-      </p>
-      <p className="mt-3 text-xs font-medium text-emerald-700">
-        Founding Team Pricing
+      <p className="mt-2 text-xs font-medium text-zinc-500">
+        CA$40 / user / month <span className="line-through">CA$80</span>
       </p>
     </div>
   );

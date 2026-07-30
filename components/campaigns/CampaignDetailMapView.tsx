@@ -216,6 +216,14 @@ type CampaignMapBundle = {
   buildings?: BuildingFeatureCollection;
   parcels?: GenericFeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
   roads?: GenericFeatureCollection<GeoJSON.LineString | GeoJSON.MultiLineString>;
+  reconciliation?: {
+    status?: string;
+    run_id?: string;
+    algorithm_version?: string;
+    completed_at?: string | null;
+    report?: Record<string, number>;
+  };
+  reconciliation_report?: Record<string, number>;
   counts?: {
     addresses?: number;
     buildings?: number;
@@ -223,6 +231,14 @@ type CampaignMapBundle = {
     roads?: number;
   };
   updated_at?: string;
+};
+
+type ReconciliationStatusPayload = {
+  status?: string;
+  run_id?: string;
+  algorithm_version?: string;
+  completed_at?: string | null;
+  report?: Record<string, number>;
 };
 
 function isFeatureCollection<G extends GeoJSON.Geometry>(value: unknown): value is GenericFeatureCollection<G> {
@@ -259,8 +275,7 @@ function mapBundleAddressesToCampaignAddresses(
         .filter(Boolean)
         .join(' ');
 
-    return [
-      {
+    const address = {
         id,
         campaign_id: campaignId,
         address: formatted || id,
@@ -278,8 +293,25 @@ function mapBundleAddressesToCampaignAddresses(
         house_number: getStringProperty(properties, ['house_number']) ?? undefined,
         locality: getStringProperty(properties, ['locality']) ?? undefined,
         address_status: getStringProperty(properties, ['address_status', 'status']) ?? undefined,
-      } satisfies CampaignAddress,
-    ];
+        label_anchor_lon: Number.isFinite(Number(properties.label_anchor_lon))
+          ? Number(properties.label_anchor_lon)
+          : undefined,
+        label_anchor_lat: Number.isFinite(Number(properties.label_anchor_lat))
+          ? Number(properties.label_anchor_lat)
+          : undefined,
+        access_lon: Number.isFinite(Number(properties.access_lon)) ? Number(properties.access_lon) : undefined,
+        access_lat: Number.isFinite(Number(properties.access_lat)) ? Number(properties.access_lat) : undefined,
+        origin: getStringProperty(properties, ['origin', 'source']) ?? undefined,
+        provisional: properties.provisional === true,
+      } as CampaignAddress & {
+        label_anchor_lon?: number;
+        label_anchor_lat?: number;
+        access_lon?: number;
+        access_lat?: number;
+        origin?: string;
+        provisional?: boolean;
+      };
+    return [address];
   });
 }
 
@@ -855,6 +887,10 @@ export function CampaignDetailMapView({
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
   const [mapBundle, setMapBundle] = useState<CampaignMapBundle | null>(null);
+  const [reconciliationStatusPayload, setReconciliationStatusPayload] =
+    useState<ReconciliationStatusPayload | null>(null);
+  const [showReconciliationReport, setShowReconciliationReport] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
   const campaignBbox =
     Array.isArray(campaign?.bbox) &&
@@ -881,6 +917,13 @@ export function CampaignDetailMapView({
       ? 'map-ready'
       : '');
   const optimizedKey = campaign?.optimized_at ?? '';
+  const reconciliationStatus =
+    reconciliationStatusPayload?.status ??
+    mapBundle?.reconciliation?.status ??
+    'not_started';
+  const adoptedReconciliationStatus = mapBundle?.reconciliation?.status ?? 'not_started';
+  const adoptedReconciliationRunId = mapBundle?.reconciliation?.run_id;
+  const reconciliationProcessing = ['queued', 'matching', 'geocoding', 'applying'].includes(reconciliationStatus);
   const mapBundleLoadKey = [
     campaignId,
     mapReadyKey,
@@ -1302,6 +1345,66 @@ export function CampaignDetailMapView({
       cancelled = true;
     };
   }, [campaignId, mapBundleLoadKey, parcelsProcessing]);
+
+  useEffect(() => {
+    const updateOnlineState = () => setIsOnline(window.navigator.onLine);
+    updateOnlineState();
+    window.addEventListener('online', updateOnlineState);
+    window.addEventListener('offline', updateOnlineState);
+    return () => {
+      window.removeEventListener('online', updateOnlineState);
+      window.removeEventListener('offline', updateOnlineState);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const poll = async () => {
+      if (document.visibilityState === 'hidden') {
+        timeoutId = window.setTimeout(poll, 10_000);
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/campaigns/${encodeURIComponent(campaignId)}/reconciliation`,
+          { credentials: 'include', cache: 'no-store' }
+        );
+        if (response.ok && !cancelled) {
+          const payload = await response.json() as ReconciliationStatusPayload;
+          setReconciliationStatusPayload(payload);
+          if (['queued', 'matching', 'geocoding', 'applying'].includes(payload.status ?? '')) {
+            timeoutId = window.setTimeout(poll, 5_000);
+          }
+        }
+      } catch {
+        if (!cancelled) timeoutId = window.setTimeout(poll, 15_000);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
+  }, [campaignId]);
+
+  useEffect(() => {
+    const runId = adoptedReconciliationRunId;
+    if (!['completed', 'review_needed'].includes(adoptedReconciliationStatus) || !runId) return;
+    const acknowledgementKey = `wolfgrid:map-quality:${campaignId}:${runId}`;
+    setShowReconciliationReport(window.localStorage.getItem(acknowledgementKey) !== 'acknowledged');
+  }, [adoptedReconciliationRunId, adoptedReconciliationStatus, campaignId]);
+
+  const dismissReconciliationReport = useCallback(() => {
+    const runId = adoptedReconciliationRunId;
+    if (runId) {
+      window.localStorage.setItem(
+        `wolfgrid:map-quality:${campaignId}:${runId}`,
+        'acknowledged'
+      );
+    }
+    setShowReconciliationReport(false);
+  }, [adoptedReconciliationRunId, campaignId]);
 
   // Subscribe first, then fetch a repair snapshot. Static bundles provide cold-start
   // geometry; statuses and field pins remain revisioned dynamic overlays.
@@ -3396,6 +3499,64 @@ export function CampaignDetailMapView({
       className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
     >
       <div ref={mapContainer} className="h-full w-full" />
+      {reconciliationProcessing ? (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2">
+          <div className="rounded-full border border-border bg-background/92 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
+            {isOnline
+              ? 'Optimizing map • Current map ready'
+              : 'Offline — using saved map • Optimization status will update when connected'}
+          </div>
+        </div>
+      ) : null}
+      {showReconciliationReport && ['completed', 'review_needed'].includes(adoptedReconciliationStatus) ? (
+        <div className="absolute bottom-4 left-4 z-30 w-[min(24rem,calc(100%-2rem))]">
+          <div className="rounded-xl border border-border bg-background/95 p-4 shadow-xl backdrop-blur-sm">
+            {(() => {
+              const report =
+                mapBundle?.reconciliation_report ??
+                mapBundle?.reconciliation?.report ??
+                {};
+              const changes =
+                Number(report.addresses_linked ?? 0) +
+                Number(report.links_reassigned ?? 0) +
+                Number(report.label_anchors_adjusted ?? 0) +
+                Number(report.synthetic_addresses_created ?? 0) +
+                Number(report.duplicate_buildings_hidden ?? 0) +
+                Number(report.auxiliary_buildings_hidden ?? 0);
+              return (
+                <>
+                  <p className="font-semibold text-foreground">
+                    {changes > 0 ? 'Map optimized.' : 'Map checked — no changes needed.'}
+                  </p>
+                  {changes > 0 ? (
+                    <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>Addresses paired</span><span>{Number(report.addresses_linked ?? 0)}</span>
+                      <span>Labels cleaned up</span><span>{Number(report.label_anchors_adjusted ?? 0)}</span>
+                      <span>New address points</span><span>{Number(report.synthetic_addresses_created ?? 0)}</span>
+                      <span>Footprints hidden</span>
+                      <span>
+                        {Number(report.duplicate_buildings_hidden ?? 0) +
+                          Number(report.auxiliary_buildings_hidden ?? 0)}
+                      </span>
+                      <span>Still needs review</span><span>{Number(report.review_needed ?? 0)}</span>
+                      <span>Coverage</span>
+                      <span>
+                        {Number(report.coverage_before ?? 0).toFixed(1)}% →{' '}
+                        {Number(report.coverage_after ?? 0).toFixed(1)}%
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex justify-end">
+                    <Button size="sm" variant="outline" onClick={dismissReconciliationReport}>
+                      Dismiss
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      ) : null}
       {mapInitFailed ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background p-6">
           <div className="max-w-sm rounded-lg border border-border bg-card p-5 text-center shadow-lg">

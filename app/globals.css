@@ -204,6 +204,41 @@
   box-shadow: none !important;
 }
 
+.industry-marquee-viewport {
+  mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+}
+
+.industry-marquee {
+  animation: industry-marquee 44s linear infinite;
+  will-change: transform;
+}
+
+.industry-marquee:hover {
+  animation-play-state: paused;
+}
+
+@keyframes industry-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .industry-marquee-viewport {
+    overflow-x: auto;
+    mask-image: none;
+  }
+
+  .industry-marquee {
+    animation: none;
+    will-change: auto;
+  }
+
+  .industry-marquee-duplicate {
+    display: none;
+  }
+}
+
 .mapboxgl-popup-close-button {
   width: 28px;
   height: 28px;
