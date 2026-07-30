@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v7-global-reverse-assignment';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v9-global-reverse-assignment';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -237,6 +237,22 @@ export function solveGlobalOneToOneAssignment(
     left.buildingId.localeCompare(right.buildingId) ||
     left.addressId.localeCompare(right.addressId)
   );
+}
+
+export function canCreateSyntheticAfterGlobalAssignment(input: {
+  targetBuildingId: string;
+  currentAddressIds: string[];
+  assignments: Array<{ buildingId: string; addressId: string }>;
+}): boolean {
+  const target = input.targetBuildingId.toLowerCase();
+  const assignmentBuildingByAddress = new Map(input.assignments.map((assignment) => [
+    assignment.addressId.toLowerCase(),
+    assignment.buildingId.toLowerCase(),
+  ] as const));
+  return input.currentAddressIds.every((addressIdValue) => {
+    const assignedBuilding = assignmentBuildingByAddress.get(addressIdValue.toLowerCase());
+    return Boolean(assignedBuilding && assignedBuilding !== target);
+  });
 }
 
 function asRecord(value: unknown): JsonRecord {
@@ -1941,7 +1957,9 @@ export class CampaignMapReconciliationService {
       decision.action === 'link_address' && countsDecision(decision)
     ).length;
     input.report.links_reassigned = decisions.filter((decision) =>
-      decision.action === 'reassign_address' && countsDecision(decision)
+      decision.action === 'reassign_address' &&
+      decision.proposed_state.assignment_unchanged !== true &&
+      countsDecision(decision)
     ).length;
     input.report.provisional_addresses_created = decisions.filter((decision) =>
       decision.action === 'create_synthetic_address' && countsDecision(decision)
@@ -2415,10 +2433,13 @@ export class CampaignMapReconciliationService {
       if (
         contextMatches.length === 0 &&
         civicMatches.length === 0 &&
-        reverseIdentityCounts.get(item.result.identity) === 1 &&
-        currentAddressIds.length === 0
+        reverseIdentityCounts.get(item.result.identity) === 1
       ) {
-        const beforeState = { address_identity: item.result.identity, exists: false };
+        const beforeState = {
+          address_identity: item.result.identity,
+          exists: false,
+          current_address_ids: currentAddressIds,
+        };
         syntheticDecisions.push({
           id: decisionId(input.run.id, 'create_synthetic_address', null, item.buildingId),
           run_id: input.run.id,
@@ -2462,14 +2483,25 @@ export class CampaignMapReconciliationService {
     }
 
     const assignments = solveGlobalOneToOneAssignment(edges);
+    const safeSyntheticDecisions = syntheticDecisions.filter((decision) => {
+      const buildingIdValue = decision.building_id?.toLowerCase();
+      const currentAddressIds = asArray<string>(decision.before_state.current_address_ids);
+      return Boolean(
+        buildingIdValue &&
+        canCreateSyntheticAfterGlobalAssignment({
+          targetBuildingId: buildingIdValue,
+          currentAddressIds,
+          assignments,
+        })
+      );
+    });
     const assignmentDecisions = assignments.flatMap(({ buildingId, addressId: addressIdValue }) => {
       const evidence = edgeEvidence.get(`${buildingId.toLowerCase()}:${addressIdValue.toLowerCase()}`);
       if (!evidence) return [];
       const currentLink = currentLinkByAddress.get(addressIdValue.toLowerCase());
       const currentBuildingId = stringValue(currentLink?.building_id ?? currentLink?.buildingId);
-      if (currentBuildingId?.toLowerCase() === buildingId.toLowerCase()) {
-        return [];
-      }
+      const assignmentUnchanged =
+        currentBuildingId?.toLowerCase() === buildingId.toLowerCase();
       const action: DecisionAction = currentBuildingId ? 'reassign_address' : 'link_address';
       const candidateProperties = asRecord(evidence.address.properties);
       const candidatePostal = normalizeText(
@@ -2510,6 +2542,7 @@ export class CampaignMapReconciliationService {
             : 'candidate_postal_unavailable',
           'global_one_to_one',
           'building_capacity_one',
+          ...(assignmentUnchanged ? ['existing_link_confirmed'] : []),
         ],
         score: 0.995,
         runner_up_margin: SYNTHETIC_MARGIN,
@@ -2523,13 +2556,14 @@ export class CampaignMapReconciliationService {
           spatial_distance_m: round(evidence.item.spatialDistance, 1),
           source: 'reconciliation_reverse_geocode',
           global_assignment: true,
+          assignment_unchanged: assignmentUnchanged,
         },
       } satisfies ReconciliationDecision];
     });
 
     return [
       ...assignmentDecisions,
-      ...syntheticDecisions,
+      ...safeSyntheticDecisions,
       ...reviewDecisions,
     ];
   }

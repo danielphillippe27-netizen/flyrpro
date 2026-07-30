@@ -5,6 +5,7 @@ import {
   addressContextMatchesReverse,
   assessReverseOrphanCorrection,
   buildingHasAuthoritativeMultiUnitMetadata,
+  canCreateSyntheticAfterGlobalAssignment,
   buildLinkedNeighborhoodEvidence,
   configuredReverseGeocodingStorageMode,
   neighborhoodContextForCandidate,
@@ -45,6 +46,22 @@ assert(
       pair.buildingId === 'building-b' && pair.addressId === 'address-1'
     ),
   'global assignment must preserve maximum cardinality across a reassignment chain'
+);
+assert(
+  canCreateSyntheticAfterGlobalAssignment({
+    targetBuildingId: 'building-a',
+    currentAddressIds: ['wrong-address'],
+    assignments: [{ buildingId: 'building-b', addressId: 'wrong-address' }],
+  }),
+  'a missing rooftop address may be created when the old occupant moves in the same transaction'
+);
+assert(
+  !canCreateSyntheticAfterGlobalAssignment({
+    targetBuildingId: 'building-a',
+    currentAddressIds: ['wrong-address'],
+    assignments: [],
+  }),
+  'a missing rooftop address must not create a second occupant on a capacity-one building'
 );
 
 const candidateAddress: GeoJSON.Feature<GeoJSON.Point> = {
