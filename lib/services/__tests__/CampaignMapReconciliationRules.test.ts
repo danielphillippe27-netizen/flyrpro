@@ -4,6 +4,7 @@
 import {
   assessReverseOrphanCorrection,
   buildLinkedNeighborhoodEvidence,
+  configuredReverseGeocodingStorageMode,
   neighborhoodContextForCandidate,
   normalizedCivicAddressIdentity,
   normalizedAddressIdentity,
@@ -17,6 +18,16 @@ import {
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
+
+assert(
+  configuredReverseGeocodingStorageMode('temporary') === 'temporary',
+  'temporary testing mode must disable permanent Mapbox storage'
+);
+assert(
+  configuredReverseGeocodingStorageMode('permanent') === 'permanent' &&
+    configuredReverseGeocodingStorageMode(undefined) === 'permanent',
+  'permanent storage must remain the default'
+);
 
 const source1777 = normalizedAddressIdentity({
   houseNumber: '1777',

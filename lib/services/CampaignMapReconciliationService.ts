@@ -21,6 +21,7 @@ const REVERSE_PROVIDER_VERSION = 'mapbox-geocoding-v6';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type MapReconciliationMode = 'off' | 'shadow' | 'apply_high_confidence';
+export type ReverseGeocodingStorageMode = 'permanent' | 'temporary';
 export type MapReconciliationStatus =
   | 'not_started'
   | 'queued'
@@ -777,7 +778,15 @@ export function configuredMapReconciliationMode(campaignId?: string): MapReconci
   return 'shadow';
 }
 
+export function configuredReverseGeocodingStorageMode(
+  configured = process.env.MAPBOX_GEOCODING_STORAGE_MODE
+): ReverseGeocodingStorageMode {
+  return normalizeText(configured) === 'temporary' ? 'temporary' : 'permanent';
+}
+
 export class CampaignMapReconciliationService {
+  private readonly temporaryReverseResults = new Map<string, ReverseResult | null>();
+
   constructor(private readonly supabase: SupabaseClient) {}
 
   async reviewDecision(
@@ -1169,6 +1178,9 @@ export class CampaignMapReconciliationService {
   }
 
   async processRun(run: ReconciliationRunRow): Promise<void> {
+    // Temporary results are session-scoped testing evidence. Never carry them
+    // into a later reconciliation run or persist them in Supabase.
+    this.temporaryReverseResults.clear();
     try {
       const currentRow = await readCurrentCampaignMapBundle(this.supabase, run.campaign_id);
       if (!currentRow) throw new Error('No current canonical map bundle');
@@ -2398,18 +2410,27 @@ export class CampaignMapReconciliationService {
   private async reverseGeocode(point: Point): Promise<ReverseResult | null> {
     const roundedLon = round(point[0], 6);
     const roundedLat = round(point[1], 6);
+    const storageMode = configuredReverseGeocodingStorageMode();
+    const permanent = storageMode === 'permanent';
     const cacheKey = stableHash({
       provider: REVERSE_PROVIDER_VERSION,
       longitude: roundedLon,
       latitude: roundedLat,
-      permanent: true,
+      permanent,
     });
-    const cached = await this.supabase
-      .from('reverse_geocode_cache')
-      .select('response')
-      .eq('cache_key', cacheKey)
-      .maybeSingle();
-    if (cached.data?.response) return this.parseReverseResult(cacheKey, asRecord(cached.data.response));
+    if (!permanent && this.temporaryReverseResults.has(cacheKey)) {
+      return this.temporaryReverseResults.get(cacheKey) ?? null;
+    }
+    if (permanent) {
+      const cached = await this.supabase
+        .from('reverse_geocode_cache')
+        .select('response')
+        .eq('cache_key', cacheKey)
+        .maybeSingle();
+      if (cached.data?.response) {
+        return this.parseReverseResult(cacheKey, asRecord(cached.data.response));
+      }
+    }
 
     const token = process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) return null;
@@ -2418,12 +2439,16 @@ export class CampaignMapReconciliationService {
     url.searchParams.set('latitude', String(roundedLat));
     url.searchParams.set('types', 'address');
     url.searchParams.set('limit', '1');
-    url.searchParams.set('permanent', 'true');
+    url.searchParams.set('permanent', permanent ? 'true' : 'false');
     url.searchParams.set('access_token', token);
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Mapbox reverse geocode failed: ${response.status}`);
     const payload = await response.json() as JsonRecord;
     const parsed = this.parseReverseResult(cacheKey, payload);
+    if (!permanent) {
+      this.temporaryReverseResults.set(cacheKey, parsed);
+      return parsed;
+    }
     if (!parsed) return null;
     await this.supabase.from('reverse_geocode_cache').upsert({
       cache_key: cacheKey,
