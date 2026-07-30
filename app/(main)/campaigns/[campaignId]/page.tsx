@@ -39,6 +39,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
+import { TerritoryIQPanel } from '@/components/campaigns/TerritoryIQPanel';
 import { MapOptimizationStatus } from '@/components/campaigns/MapOptimizationStatus';
 import { TerritoryIQPanel } from '@/components/campaigns/TerritoryIQPanel';
 import { FinancePanel } from '@/components/finance/FinancePanel';
