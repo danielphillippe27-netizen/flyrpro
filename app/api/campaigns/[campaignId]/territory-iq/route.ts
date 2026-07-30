@@ -52,7 +52,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const { data: campaign } = await admin
       .from('campaigns')
-      .select('id, workspace_id, workspaces!inner(owner_id, territory_iq_enabled)')
+      .select('id, workspace_id, workspaces!inner(owner_id)')
       .eq('id', campaignId)
       .single();
     if (!campaign?.workspace_id) {
@@ -60,18 +60,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const workspace = Array.isArray(campaign?.workspaces)
       ? campaign.workspaces[0]
-      : campaign?.workspaces as { owner_id?: string | null; territory_iq_enabled?: boolean } | undefined;
-    const { data: profile } = await admin
-      .from('user_profiles')
-      .select('is_founder')
-      .eq('user_id', user.id)
-      .maybeSingle();
-    const forceEnabled =
-      process.env.TERRITORY_IQ_FORCE_ENABLED === '1' ||
-      process.env.NEXT_PUBLIC_TERRITORY_IQ_PREVIEW === '1';
-    if (!workspace?.territory_iq_enabled && profile?.is_founder !== true && !forceEnabled) {
-      return NextResponse.json({ error: 'Territory IQ is not enabled for this workspace' }, { status: 403 });
-    }
+      : campaign?.workspaces as { owner_id?: string | null } | undefined;
 
     let { data: score } = await admin
       .from('campaign_territory_iq_scores')
