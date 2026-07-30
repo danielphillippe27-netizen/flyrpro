@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v5-civic-context';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v6-orphan-reverse-only';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -95,6 +95,11 @@ export type ReverseResult = {
 
 export type MapReconciliationReport = {
   addresses_examined: number;
+  unlinked_buildings_examined: number;
+  reverse_geocodes_matched: number;
+  orphan_addresses_reused: number;
+  provisional_addresses_created: number;
+  unresolved_buildings: number;
   addresses_linked: number;
   links_reassigned: number;
   source_coordinates_corrected: number;
@@ -683,23 +688,19 @@ export function assessReverseOrphanCorrection(input: {
   if (!input.localityMatches || !input.regionMatches || !input.postalMatches) {
     return reject('campaign_context_mismatch');
   }
-  if (!Number.isFinite(input.sourcePointDistanceMeters) || input.sourcePointDistanceMeters > 100) {
-    return reject('source_point_too_far');
-  }
   const rooftop = accuracy === 'rooftop' && input.reversePointDistanceMeters <= 8;
   const parcel =
     accuracy === 'parcel' &&
-    input.reversePointDistanceMeters === 0 &&
-    input.sourcePointDistanceMeters <= 60;
+    input.reversePointDistanceMeters === 0;
   if (!rooftop && !parcel) return reject('reverse_point_failed_building_test');
   return {
     eligible: true,
-    moveSource: true,
+    moveSource: false,
     score: rooftop ? 0.995 : 0.985,
     evidenceCodes: [
       ...baseEvidence,
       rooftop ? 'rooftop_within_8m' : 'parcel_point_inside_footprint',
-      'source_move_with_rollback',
+      'source_geometry_preserved',
     ],
   };
 }
@@ -727,6 +728,11 @@ function decisionId(runId: string, action: DecisionAction, addressIdValue: strin
 function defaultReport(): MapReconciliationReport {
   return {
     addresses_examined: 0,
+    unlinked_buildings_examined: 0,
+    reverse_geocodes_matched: 0,
+    orphan_addresses_reused: 0,
+    provisional_addresses_created: 0,
+    unresolved_buildings: 0,
     addresses_linked: 0,
     links_reassigned: 0,
     source_coordinates_corrected: 0,
@@ -1196,6 +1202,20 @@ export class CampaignMapReconciliationService {
       report.coverage_before = addresses.length > 0 ? round(links.length / addresses.length * 100, 2) : 100;
 
       const protectedState = await this.loadProtectedState(run.campaign_id);
+      if (MAP_RECONCILIATION_ALGORITHM_VERSION.endsWith('orphan-reverse-only')) {
+        await this.processOrphanReverseOnly({
+          run,
+          addresses,
+          buildings,
+          links,
+          addressOrphans,
+          buildingOrphans,
+          report,
+          protectedAddressIds: protectedState.addressIds,
+          protectedBuildingIds: protectedState.buildingIds,
+        });
+        return;
+      }
       const linkedAddressIds = new Set(links
         .map((link) => stringValue(link.address_id ?? link.addressId)?.toLowerCase())
         .filter((id): id is string => Boolean(id)));
@@ -1667,6 +1687,142 @@ export class CampaignMapReconciliationService {
     return { addressIds, buildingIds };
   }
 
+  private async processOrphanReverseOnly(input: {
+    run: ReconciliationRunRow;
+    addresses: BundleFeature[];
+    buildings: BundleFeature[];
+    links: JsonRecord[];
+    addressOrphans: JsonRecord[];
+    buildingOrphans: JsonRecord[];
+    report: MapReconciliationReport;
+    protectedAddressIds: Set<string>;
+    protectedBuildingIds: Set<string>;
+  }): Promise<void> {
+    const linkedAddressIds = new Set(input.links
+      .map((link) => stringValue(link.address_id ?? link.addressId)?.toLowerCase())
+      .filter((id): id is string => Boolean(id)));
+    const linkedBuildingIds = new Set(input.links
+      .map((link) => stringValue(link.building_id ?? link.buildingId)?.toLowerCase())
+      .filter((id): id is string => Boolean(id)));
+    const orphanAddressIds = new Set(input.addressOrphans
+      .map((orphan) => stringValue(orphan.address_id)?.toLowerCase())
+      .filter((id): id is string => Boolean(id)));
+    const orphanBuildingIds = new Set(input.buildingOrphans
+      .map((orphan) => stringValue(orphan.building_id ?? orphan.buildingId)?.toLowerCase())
+      .filter((id): id is string => Boolean(id)));
+
+    input.report.unlinked_buildings_examined = orphanBuildingIds.size;
+    await this.updateRun(input.run.id, 'geocoding', 'geocoding');
+    const decisions = await this.reverseGeocodeDecisions({
+      run: input.run,
+      buildings: input.buildings,
+      addresses: input.addresses,
+      linkedBuildingIds,
+      linkedAddressIds,
+      orphanBuildingIds,
+      orphanAddressIds,
+      protectedAddressIds: input.protectedAddressIds,
+      protectedBuildingIds: input.protectedBuildingIds,
+    });
+
+    if (decisions.length > 0) {
+      const { error } = await this.supabase
+        .from('map_reconciliation_decisions')
+        .upsert(decisions, { onConflict: 'id' });
+      if (error) throw new Error(`Failed to persist reconciliation decisions: ${error.message}`);
+    }
+
+    let appliedCount = 0;
+    if (input.run.mode === 'apply_high_confidence') {
+      await this.updateRun(input.run.id, 'applying', 'applying');
+      for (const decision of decisions) {
+        if (decision.status === 'proposed' && await this.applyDecision(decision)) {
+          appliedCount += 1;
+        }
+      }
+      if (appliedCount > 0) {
+        const qualityService = new CampaignLinkQualityService(this.supabase);
+        const quality = await qualityService.assessPersistedLinks(input.run.campaign_id);
+        await qualityService.persist(input.run.campaign_id, quality);
+        await new CampaignMapModeService(this.supabase).computeAndPersist(input.run.campaign_id);
+      }
+    }
+
+    const countsDecision = (decision: ReconciliationDecision) =>
+      input.run.mode === 'shadow' || decision.status === 'applied';
+    input.report.orphan_addresses_reused = decisions.filter((decision) =>
+      decision.action === 'link_address' && countsDecision(decision)
+    ).length;
+    input.report.provisional_addresses_created = decisions.filter((decision) =>
+      decision.action === 'create_synthetic_address' && countsDecision(decision)
+    ).length;
+    input.report.reverse_geocodes_matched =
+      input.report.orphan_addresses_reused + input.report.provisional_addresses_created;
+    input.report.unresolved_buildings = Math.max(
+      0,
+      input.report.building_orphans_before - input.report.reverse_geocodes_matched
+    );
+
+    // Preserve the established additive report contract for older clients.
+    input.report.addresses_linked = input.report.orphan_addresses_reused;
+    input.report.synthetic_addresses_created = input.report.provisional_addresses_created;
+    input.report.address_orphans_after = Math.max(
+      0,
+      input.report.address_orphans_before - input.report.orphan_addresses_reused
+    );
+    input.report.building_orphans_after = input.report.unresolved_buildings;
+    const resultingAddressCount = input.addresses.length + input.report.provisional_addresses_created;
+    input.report.coverage_after = resultingAddressCount > 0
+      ? round(
+          Math.min(
+            resultingAddressCount,
+            input.links.length +
+              input.report.orphan_addresses_reused +
+              input.report.provisional_addresses_created
+          ) / resultingAddressCount * 100,
+          2
+        )
+      : 100;
+
+    const completedAt = new Date().toISOString();
+    await this.supabase
+      .from('map_reconciliation_runs')
+      .update({
+        status: 'completed',
+        phase: 'completed',
+        after_metrics: {
+          address_orphans: input.report.address_orphans_after,
+          building_orphans: input.report.building_orphans_after,
+          coverage_percent: input.report.coverage_after,
+        },
+        before_metrics: {
+          address_orphans: input.report.address_orphans_before,
+          building_orphans: input.report.building_orphans_before,
+          coverage_percent: input.report.coverage_before,
+        },
+        report: input.report,
+        lease_owner: null,
+        lease_expires_at: null,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq('id', input.run.id);
+
+    const rebuilt = await prebuildCampaignMapBundle(
+      this.supabase,
+      input.run.campaign_id,
+      undefined,
+      { forceRebuild: true }
+    );
+    await this.supabase
+      .from('map_reconciliation_runs')
+      .update({
+        applied_bundle_signature: stringValue(asRecord(rebuilt).asset_signature),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.run.id);
+  }
+
   private duplicateBuildingDecisions(input: {
     run: ReconciliationRunRow;
     buildings: BundleFeature[];
@@ -1936,11 +2092,13 @@ export class CampaignMapReconciliationService {
       const existingAddress = orphanIdentityMatches.length === 1 ? orphanIdentityMatches[0] : null;
       const existingAddressId = existingAddress ? addressId(existingAddress) : null;
       const sourcePoint = existingAddress ? featurePoint(existingAddress) : null;
-      if (existingAddress && existingAddressId && sourcePoint) {
+      if (existingAddress && existingAddressId) {
         const assessment = assessReverseOrphanCorrection({
           accuracy: result.accuracy,
           reversePointDistanceMeters: spatialDistance,
-          sourcePointDistanceMeters: pointToGeometryDistanceMeters(sourcePoint, building.geometry),
+          sourcePointDistanceMeters: sourcePoint
+            ? pointToGeometryDistanceMeters(sourcePoint, building.geometry)
+            : Number.POSITIVE_INFINITY,
           addressIdentityMatches:
             civicIdentityFromFeature(existingAddress) === reverseCivicIdentity &&
             addressContextMatchesReverse(existingAddress, result),
@@ -1956,7 +2114,7 @@ export class CampaignMapReconciliationService {
             input.protectedBuildingIds.has(buildingIdValue.toLowerCase()),
           explicitNonResidentialType: isExplicitNonResidentialBuilding(building),
         });
-        if (!assessment.eligible || !assessment.moveSource) return null;
+        if (!assessment.eligible) return null;
         const beforeState = {
           link: null,
           address_id: existingAddressId,
@@ -1989,9 +2147,7 @@ export class CampaignMapReconciliationService {
           proposed_state: {
             building_id: buildingIdValue,
             distance_meters: 0,
-            move_source: true,
-            source_longitude: buildingAnchor[0],
-            source_latitude: buildingAnchor[1],
+            move_source: false,
             reverse_longitude: result.longitude,
             reverse_latitude: result.latitude,
             reverse_cache_key: result.cacheKey,
@@ -2210,7 +2366,10 @@ export class CampaignMapReconciliationService {
         });
       }
     }
-    return [...addressDecisions, ...auxiliaryDecisions];
+    // V6 deliberately does not classify or hide buildings. When more than one
+    // building resolves to the same civic address, leave the whole group
+    // untouched instead of guessing which footprint is primary.
+    return addressDecisions;
   }
 
   private async heartbeatRun(runId: string, cursor: JsonRecord): Promise<void> {

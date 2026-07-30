@@ -286,9 +286,9 @@ const strongRooftopCorrection = assessReverseOrphanCorrection({
 });
 assert(
   strongRooftopCorrection.eligible &&
-  strongRooftopCorrection.moveSource &&
+  !strongRooftopCorrection.moveSource &&
   strongRooftopCorrection.score >= 0.99,
-  'a unique rooftop-confirmed orphan pair should move the campaign source point'
+  'a unique rooftop-confirmed orphan pair should link without moving source geometry'
 );
 
 assert(
@@ -307,7 +307,7 @@ assert(
     protectedHistory: false,
     explicitNonResidentialType: false,
   }).eligible,
-  'interpolated reverse geocodes must never move source geometry'
+  'interpolated reverse geocodes must never create an automatic link'
 );
 
 assert(
@@ -345,7 +345,7 @@ assert(
     protectedHistory: true,
     explicitNonResidentialType: false,
   }).eligible,
-  'field history must block source-coordinate movement'
+  'field history must block automatic reverse-geocode linking'
 );
 
 assert(
@@ -364,7 +364,7 @@ assert(
     protectedHistory: false,
     explicitNonResidentialType: false,
   }).eligible,
-  'parcel accuracy may move source geometry only when the provider point is inside the footprint'
+  'parcel accuracy may link only when the provider point is inside the footprint'
 );
 
 console.log('✓ map reconciliation rule regression tests passed');
