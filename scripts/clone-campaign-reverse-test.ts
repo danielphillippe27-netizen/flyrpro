@@ -6,6 +6,7 @@ type JsonRecord = Record<string, unknown>;
 
 const sourceCampaignId = process.env.REVERSE_TEST_SOURCE_CAMPAIGN_ID;
 const targetName = process.env.REVERSE_TEST_TARGET_NAME ?? 'missa — Reverse Geo Test';
+const targetEmail = process.env.REVERSE_TEST_TARGET_EMAIL?.trim().toLowerCase();
 
 if (!sourceCampaignId) throw new Error('REVERSE_TEST_SOURCE_CAMPAIGN_ID is required');
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -41,6 +42,29 @@ async function insertChunks(table: string, rows: JsonRecord[]): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  let targetOwnerId: string | null = null;
+  let targetWorkspaceId: string | null = null;
+  if (targetEmail) {
+    const users = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (users.error) throw users.error;
+    const user = users.data.users.find((candidate) =>
+      candidate.email?.trim().toLowerCase() === targetEmail
+    );
+    if (!user) throw new Error(`No user found for ${targetEmail}`);
+    const membership = await supabase
+      .from('workspace_members')
+      .select('workspace_id')
+      .eq('user_id', user.id)
+      .limit(1)
+      .maybeSingle();
+    if (membership.error) throw membership.error;
+    if (!membership.data?.workspace_id) {
+      throw new Error(`${targetEmail} does not belong to a workspace`);
+    }
+    targetOwnerId = user.id;
+    targetWorkspaceId = String(membership.data.workspace_id);
+  }
+
   const [campaignResult, bundleResult, addressesResult, linksResult, orphansResult] =
     await Promise.all([
       supabase.from('campaigns').select('*').eq('id', sourceCampaignId).single(),
@@ -61,7 +85,7 @@ async function main(): Promise<void> {
   }
 
   const duplicate = await supabase.from('campaigns').select('id')
-    .eq('workspace_id', campaignResult.data.workspace_id)
+    .eq('workspace_id', targetWorkspaceId ?? campaignResult.data.workspace_id)
     .eq('name', targetName)
     .maybeSingle();
   if (duplicate.error) throw duplicate.error;
@@ -89,6 +113,8 @@ async function main(): Promise<void> {
     id: targetCampaignId,
     name: targetName,
     title: targetName,
+    owner_id: targetOwnerId ?? campaign.owner_id,
+    workspace_id: targetWorkspaceId ?? campaign.workspace_id,
     description: `Reverse-geocode comparison cloned from ${sourceCampaignId}`,
     created_at: now,
     updated_at: now,
@@ -153,6 +179,9 @@ async function main(): Promise<void> {
     source_signature: sourceBundle.asset_signature,
     campaign_id: targetCampaignId,
     name: targetName,
+    owner_id: targetOwnerId ?? campaign.owner_id,
+    workspace_id: targetWorkspaceId ?? campaign.workspace_id,
+    target_email: targetEmail ?? null,
     addresses: addressesResult.data?.length ?? 0,
     links: linksResult.data?.length ?? 0,
     address_orphans: orphansResult.data?.length ?? 0,
