@@ -1746,25 +1746,15 @@ export async function POST(request: NextRequest) {
       }
 
       if (campaign.workspace_id) {
-        const { data: territoryIQWorkspace } = await supabase
-          .from('workspaces')
-          .select('territory_iq_enabled')
-          .eq('id', campaign.workspace_id)
-          .maybeSingle();
-        if (
-          territoryIQWorkspace?.territory_iq_enabled === true ||
-          process.env.TERRITORY_IQ_FORCE_ENABLED === '1'
-        ) {
-          try {
-            await new TerritoryIQService(supabase).enqueue(campaignId!, requestUser.id);
-          } catch (territoryIQError) {
-            console.warn('[Provision] Territory IQ post-processing deferred:', {
-              campaignId,
-              message: territoryIQError instanceof Error
-                ? territoryIQError.message
-                : String(territoryIQError),
-            });
-          }
+        try {
+          await new TerritoryIQService(supabase).enqueue(campaignId!, requestUser.id);
+        } catch (territoryIQError) {
+          console.warn('[Provision] Territory IQ post-processing deferred:', {
+            campaignId,
+            message: territoryIQError instanceof Error
+              ? territoryIQError.message
+              : String(territoryIQError),
+          });
         }
       }
 

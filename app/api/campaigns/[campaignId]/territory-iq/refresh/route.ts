@@ -18,27 +18,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!(await ensureCampaignManagerAccess(admin, campaignId, user.id))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    const [{ data: campaign }, { data: profile }] = await Promise.all([
-      admin
-        .from('campaigns')
-        .select('workspaces!inner(territory_iq_enabled)')
-        .eq('id', campaignId)
-        .single(),
-      admin
-        .from('user_profiles')
-        .select('is_founder')
-        .eq('user_id', user.id)
-        .maybeSingle(),
-    ]);
-    const workspace = Array.isArray(campaign?.workspaces)
-      ? campaign.workspaces[0]
-      : campaign?.workspaces as { territory_iq_enabled?: boolean } | undefined;
-    const forceEnabled =
-      process.env.TERRITORY_IQ_FORCE_ENABLED === '1' ||
-      process.env.NEXT_PUBLIC_TERRITORY_IQ_PREVIEW === '1';
-    if (!workspace?.territory_iq_enabled && profile?.is_founder !== true && !forceEnabled) {
-      return NextResponse.json({ error: 'Territory IQ is not enabled for this workspace' }, { status: 403 });
-    }
     const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
     const { data: recent } = await admin
       .from('territory_iq_score_runs')

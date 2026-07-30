@@ -559,18 +559,13 @@ export default function CampaignDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const campaignId = params.campaignId as string;
-  const { currentWorkspaceId, currentWorkspace, membershipsByWorkspaceId, isFounder } = useWorkspace();
+  const { currentWorkspaceId, membershipsByWorkspaceId, isFounder } = useWorkspace();
   const { setTheme } = useTheme();
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
-  const showTerritoryIQ =
-    isFounder ||
-    currentWorkspace?.territory_iq_enabled === true ||
-    process.env.NEXT_PUBLIC_TERRITORY_IQ_PREVIEW === '1';
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const requestedTab = searchParams.get('tab');
   const initialTab: CampaignTabValue =
     requestedTab && CAMPAIGN_TAB_VALUES.includes(requestedTab as CampaignTabValue)
-      && (requestedTab !== 'territory-iq' || showTerritoryIQ)
       ? (requestedTab as CampaignTabValue)
       : 'map';
 
@@ -1533,7 +1528,7 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="finance">Finance</TabsTrigger>
             <TabsTrigger value="assignments">Assignments</TabsTrigger>
-            {showTerritoryIQ ? <TabsTrigger value="territory-iq">Territory IQ</TabsTrigger> : null}
+            <TabsTrigger value="territory-iq">Territory IQ</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -1809,14 +1804,12 @@ export default function CampaignDetailPage() {
             />
           </TabsContent>
 
-          {showTerritoryIQ ? (
-            <TabsContent value="territory-iq" className="mt-4">
-              <TerritoryIQPanel
-                campaignId={campaignId}
-                canRefresh={currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin' || isFounder}
-              />
-            </TabsContent>
-          ) : null}
+          <TabsContent value="territory-iq" className="mt-4">
+            <TerritoryIQPanel
+              campaignId={campaignId}
+              canRefresh={currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin' || isFounder}
+            />
+          </TabsContent>
 
           <TabsContent value="notes" className="mt-4 space-y-4">
             <div className="bg-card p-4 rounded-xl border border-border">
