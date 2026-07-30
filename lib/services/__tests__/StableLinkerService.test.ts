@@ -763,6 +763,25 @@ async function run() {
     assertEqual(match.matchType, 'orphan');
   });
 
+  test('Linker summary reports unmatched addresses as orphans', () => {
+    const service = createStableLinkerHarness();
+    const summary = service.generateSummary([
+      {
+        addressId: 'linked-address',
+        buildingId: 'linked-building',
+        matchType: 'proximity_verified',
+        confidence: 0.8,
+        distanceMeters: 5,
+        streetScore: 1,
+        isMultiUnit: false,
+        unitCount: 1,
+      },
+    ], 2);
+
+    assertEqual(summary.matched, 1);
+    assertEqual(summary.orphans, 1);
+  });
+
   test('Right-outside footprint address: no usable street signal stays orphan', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(

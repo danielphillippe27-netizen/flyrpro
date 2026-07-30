@@ -1967,7 +1967,9 @@ export class StableLinkerService {
     const proximityFallback = validMatches.filter(m => m.matchType === 'proximity_fallback').length;
 
     const suspect = containmentSuspect + proximityFallback;
-    const orphans = matches.filter(m => m.matchType === 'orphan').length;
+    // runSpatialJoin passes only successful matches here; derive the orphan
+    // count from the complete address total so operational reports stay honest.
+    const orphans = Math.max(0, totalAddresses - validMatches.length);
 
     const avgConfidence = validMatches.length > 0
       ? validMatches.reduce((sum, m) => sum + m.confidence, 0) / validMatches.length
