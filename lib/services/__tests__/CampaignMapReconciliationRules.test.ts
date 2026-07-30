@@ -28,9 +28,12 @@ assert(
   'temporary testing mode must disable permanent Mapbox storage'
 );
 assert(
-  configuredReverseGeocodingStorageMode('permanent') === 'permanent' &&
-    configuredReverseGeocodingStorageMode(undefined) === 'permanent',
-  'permanent storage must remain the default'
+  configuredReverseGeocodingStorageMode('permanent') === 'permanent',
+  'permanent storage must remain available only when explicitly configured'
+);
+assert(
+  configuredReverseGeocodingStorageMode(undefined) === 'temporary',
+  'temporary Mapbox reverse geocoding must be the safe default'
 );
 
 const globalAssignment = solveGlobalOneToOneAssignment([

@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v13-parcel-orphan-reverse';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v14-parcel-orphan-temporary-reverse';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -940,7 +940,7 @@ export function configuredMapReconciliationMode(campaignId?: string): MapReconci
 export function configuredReverseGeocodingStorageMode(
   configured = process.env.MAPBOX_GEOCODING_STORAGE_MODE
 ): ReverseGeocodingStorageMode {
-  return normalizeText(configured) === 'temporary' ? 'temporary' : 'permanent';
+  return normalizeText(configured) === 'permanent' ? 'permanent' : 'temporary';
 }
 
 export class CampaignMapReconciliationService {
