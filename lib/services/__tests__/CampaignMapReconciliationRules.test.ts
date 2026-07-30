@@ -418,9 +418,36 @@ const strongRooftopCorrection = assessReverseOrphanCorrection({
 });
 assert(
   strongRooftopCorrection.eligible &&
-  !strongRooftopCorrection.moveSource &&
+  strongRooftopCorrection.moveSource &&
   strongRooftopCorrection.score >= 0.99,
-  'a unique rooftop-confirmed orphan pair should link without moving source geometry'
+  'a unique rooftop-confirmed orphan pair should align source geometry to the building'
+);
+
+const jurisdictionLabeledAddress: GeoJSON.Feature<GeoJSON.Point> = {
+  ...candidateAddress,
+  properties: {
+    ...candidateAddress.properties,
+    locality: 'Durham',
+    postal_code: 'L1C 0P3',
+  },
+};
+assert(
+  addressContextMatchesReverse(jurisdictionLabeledAddress, {
+    cacheKey: 'temporary',
+    formatted: '137 John Matthew Crescent, Bowmanville, ON L1C 0P3',
+    houseNumber: '137',
+    streetName: 'John Matthew Crescent',
+    locality: 'Bowmanville',
+    region: 'ON',
+    postalCode: 'L1C 0P3',
+    country: 'CA',
+    longitude: -78.7,
+    latitude: 43.9,
+    accuracy: 'rooftop',
+    identity: '137|john matthew crescent|bowmanville|on|l1c0p3',
+    raw: {},
+  }),
+  'an exact postal and region match must bridge jurisdiction-versus-civic locality labels'
 );
 
 assert(

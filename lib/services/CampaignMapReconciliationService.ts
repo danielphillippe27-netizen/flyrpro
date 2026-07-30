@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v12-global-reverse-source-alignment';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v13-parcel-orphan-reverse';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -467,26 +467,52 @@ function civicIdentityFromFeature(feature: BundleFeature): string {
   });
 }
 
-export function addressContextMatchesReverse(
+export function reverseAddressContextCompatibility(
   feature: BundleFeature,
   result: ReverseResult
-): boolean {
+): {
+  localityMatches: boolean;
+  regionMatches: boolean;
+  postalMatches: boolean;
+} {
   const properties = asRecord(feature.properties);
   const locality = normalizeText(
     properties.locality ?? properties.municipality ?? properties.city
   );
   const resultLocality = normalizeText(result.locality);
-  if (locality && resultLocality && locality !== resultLocality) return false;
   const region = normalizedRegion(
     properties.region ?? properties.province ?? properties.state
   );
   const resultRegion = normalizedRegion(result.region);
-  if (region && resultRegion && region !== resultRegion) return false;
   const postal = normalizeText(
     properties.postal_code ?? properties.postalCode ?? properties.zip
   ).replaceAll(' ', '');
   const resultPostal = normalizeText(result.postalCode).replaceAll(' ', '');
-  return !(postal && resultPostal && postal !== resultPostal);
+  const regionMatches = !(region && resultRegion && region !== resultRegion);
+  const postalMatches = !(postal && resultPostal && postal !== resultPostal);
+  const exactPostalContext = Boolean(
+    postal &&
+    resultPostal &&
+    postal === resultPostal
+  );
+  // Municipal datasets sometimes use the source jurisdiction (for example
+  // "Durham") as locality while the geocoder returns the civic place
+  // ("Bowmanville"). An exact postal + region match is stronger evidence than
+  // that source-label mismatch.
+  const localityMatches = !(
+    locality &&
+    resultLocality &&
+    locality !== resultLocality
+  ) || (regionMatches && exactPostalContext);
+  return { localityMatches, regionMatches, postalMatches };
+}
+
+export function addressContextMatchesReverse(
+  feature: BundleFeature,
+  result: ReverseResult
+): boolean {
+  const context = reverseAddressContextCompatibility(feature, result);
+  return context.localityMatches && context.regionMatches && context.postalMatches;
 }
 
 function normalizeStreet(value: unknown): string {
@@ -829,12 +855,12 @@ export function assessReverseOrphanCorrection(input: {
   if (!rooftop && !parcel) return reject('reverse_point_failed_building_test');
   return {
     eligible: true,
-    moveSource: false,
+    moveSource: true,
     score: rooftop ? 0.995 : 0.985,
     evidenceCodes: [
       ...baseEvidence,
       rooftop ? 'rooftop_within_8m' : 'parcel_point_inside_footprint',
-      'source_geometry_preserved',
+      'source_geometry_aligned_to_building',
     ],
   };
 }
@@ -1665,6 +1691,16 @@ export class CampaignMapReconciliationService {
       }));
 
       await this.updateRun(run.id, 'geocoding', 'geocoding');
+      report.unlinked_buildings_examined = buildings.filter((building) => {
+        const id = featureId(building);
+        return Boolean(
+          id &&
+          !linkedBuildingIds.has(id.toLowerCase()) &&
+          !protectedState.buildingIds.has(id.toLowerCase()) &&
+          (orphanBuildingIds.size === 0 || orphanBuildingIds.has(id.toLowerCase())) &&
+          !isExplicitNonResidentialBuilding(building)
+        );
+      }).length;
       const reverseDecisions = await this.reverseGeocodeDecisions({
         run,
         buildings,
@@ -1752,6 +1788,15 @@ export class CampaignMapReconciliationService {
       report.synthetic_addresses_created = decisions.filter((item) =>
         item.action === 'create_synthetic_address' && (run.mode === 'shadow' || item.status === 'applied')
       ).length;
+      report.orphan_addresses_reused = reverseDecisions.filter((item) =>
+        item.action === 'link_address' && (run.mode === 'shadow' || item.status === 'applied')
+      ).length;
+      report.provisional_addresses_created = reverseDecisions.filter((item) =>
+        item.action === 'create_synthetic_address' &&
+        (run.mode === 'shadow' || item.status === 'applied')
+      ).length;
+      report.reverse_geocodes_matched =
+        report.orphan_addresses_reused + report.provisional_addresses_created;
       report.duplicate_buildings_hidden = decisions.filter((item) =>
         item.action === 'hide_duplicate' && (run.mode === 'shadow' || item.status === 'applied')
       ).length;
@@ -1768,6 +1813,7 @@ export class CampaignMapReconciliationService {
           report.duplicate_buildings_hidden -
           report.auxiliary_buildings_hidden
       );
+      report.unresolved_buildings = report.building_orphans_after;
       report.coverage_after = addresses.length > 0
         ? round(Math.min(addresses.length, links.length + report.addresses_linked + report.synthetic_addresses_created) / addresses.length * 100, 2)
         : 100;
@@ -2678,13 +2724,18 @@ export class CampaignMapReconciliationService {
           [result.longitude, result.latitude],
           building.geometry
         );
-        const localityMatches = campaignLocalities.size === 0 ||
-          (Boolean(result.locality) && campaignLocalities.has(normalizeText(result.locality)));
         const regionMatches = campaignRegions.size === 0 ||
-          (Boolean(result.region) && campaignRegions.has(normalizeText(result.region)));
+          (Boolean(result.region) && campaignRegions.has(normalizedRegion(result.region)));
+        const normalizedResultPostal = normalizeText(result.postalCode).replaceAll(' ', '');
         const postalMatches = campaignPostals.size === 0 ||
-          (Boolean(result.postalCode) &&
-            campaignPostals.has(normalizeText(result.postalCode).replaceAll(' ', '')));
+          (Boolean(normalizedResultPostal) && campaignPostals.has(normalizedResultPostal));
+        const localityMatches = campaignLocalities.size === 0 ||
+          (Boolean(result.locality) && campaignLocalities.has(normalizeText(result.locality))) ||
+          (
+            regionMatches &&
+            Boolean(normalizedResultPostal) &&
+            campaignPostals.has(normalizedResultPostal)
+          );
         if (
           !Number.isFinite(spatialDistance) ||
           spatialDistance > 12 ||
@@ -2730,6 +2781,7 @@ export class CampaignMapReconciliationService {
       const existingAddressId = existingAddress ? addressId(existingAddress) : null;
       const sourcePoint = existingAddress ? featurePoint(existingAddress) : null;
       if (existingAddress && existingAddressId) {
+        const addressContext = reverseAddressContextCompatibility(existingAddress, result);
         const assessment = assessReverseOrphanCorrection({
           accuracy: result.accuracy,
           reversePointDistanceMeters: spatialDistance,
@@ -2743,9 +2795,9 @@ export class CampaignMapReconciliationService {
           uniqueBuildingIdentity,
           addressIsOrphan: input.orphanAddressIds.has(existingAddressId.toLowerCase()),
           buildingIsOrphan: input.orphanBuildingIds.has(buildingIdValue.toLowerCase()),
-          localityMatches: candidate.localityMatches,
-          regionMatches: candidate.regionMatches,
-          postalMatches: candidate.postalMatches,
+          localityMatches: addressContext.localityMatches,
+          regionMatches: addressContext.regionMatches,
+          postalMatches: addressContext.postalMatches,
           protectedHistory:
             input.protectedAddressIds.has(existingAddressId.toLowerCase()) ||
             input.protectedBuildingIds.has(buildingIdValue.toLowerCase()),
@@ -2784,7 +2836,9 @@ export class CampaignMapReconciliationService {
           proposed_state: {
             building_id: buildingIdValue,
             distance_meters: 0,
-            move_source: false,
+            move_source: assessment.moveSource,
+            source_longitude: buildingAnchor[0],
+            source_latitude: buildingAnchor[1],
             reverse_longitude: result.longitude,
             reverse_latitude: result.latitude,
             reverse_cache_key: result.cacheKey,
