@@ -2642,7 +2642,6 @@ export class CampaignMapReconciliationService {
         return false;
       }
       const syntheticId = uuidV5(`${decision.campaign_id}:synthetic-address:${identity}`);
-      const sequence = await this.nextAddressSequence(decision.campaign_id);
       const longitude = numberValue(state.longitude);
       const latitude = numberValue(state.latitude);
       if (longitude === null || latitude === null) return false;
@@ -2659,7 +2658,6 @@ export class CampaignMapReconciliationService {
         source_id: `reconciliation:${identity}`,
         geom: `SRID=4326;POINT(${longitude} ${latitude})`,
         coordinate: { longitude, latitude },
-        seq: sequence,
       }, { onConflict: 'id' });
       if (error) throw new Error(`Failed to create synthetic address: ${error.message}`);
       decision.address_id = syntheticId;
@@ -2852,14 +2850,4 @@ export class CampaignMapReconciliationService {
     return null;
   }
 
-  private async nextAddressSequence(campaignId: string): Promise<number> {
-    const { data } = await this.supabase
-      .from('campaign_addresses')
-      .select('seq')
-      .eq('campaign_id', campaignId)
-      .order('seq', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    return Math.max(0, Number(data?.seq ?? -1)) + 1;
-  }
 }
