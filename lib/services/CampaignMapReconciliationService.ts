@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v9-global-reverse-assignment';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v11-global-reverse-source-alignment';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -1386,7 +1386,7 @@ export class CampaignMapReconciliationService {
       const hasUsableParcels =
         asArray<BundleFeature>(asRecord(bundle.parcels).features).length > 0;
       if (
-        MAP_RECONCILIATION_ALGORITHM_VERSION.endsWith('global-reverse-assignment') &&
+        MAP_RECONCILIATION_ALGORITHM_VERSION.includes('global-reverse') &&
         !hasUsableParcels
       ) {
         await this.processGlobalReverseAssignment({
@@ -1963,6 +1963,11 @@ export class CampaignMapReconciliationService {
     ).length;
     input.report.provisional_addresses_created = decisions.filter((decision) =>
       decision.action === 'create_synthetic_address' && countsDecision(decision)
+    ).length;
+    input.report.source_coordinates_corrected = decisions.filter((decision) =>
+      (decision.action === 'link_address' || decision.action === 'reassign_address') &&
+      decision.proposed_state.move_source === true &&
+      countsDecision(decision)
     ).length;
     input.report.review_needed = decisions.filter((decision) =>
       decision.status === 'requires_review'
@@ -2551,7 +2556,9 @@ export class CampaignMapReconciliationService {
         proposed_state: {
           building_id: buildingId,
           previous_building_id: currentBuildingId,
-          move_source: false,
+          move_source: true,
+          source_longitude: evidence.item.anchor[0],
+          source_latitude: evidence.item.anchor[1],
           accuracy: evidence.item.result.accuracy,
           spatial_distance_m: round(evidence.item.spatialDistance, 1),
           source: 'reconciliation_reverse_geocode',
@@ -3166,6 +3173,8 @@ export class CampaignMapReconciliationService {
             building_id: decision.building_id,
             score: decision.score,
             evidence_codes: decision.evidence_codes,
+            source_longitude: numberValue(decision.proposed_state.source_longitude),
+            source_latitude: numberValue(decision.proposed_state.source_latitude),
           }]
         : []
     );

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import {
+  prebuildCampaignMapBundle,
   readCurrentCampaignMapBundle,
   responseFromCampaignMapBundleRow,
 } from '../lib/services/CampaignMapBundlePrebuilder';
@@ -9,6 +10,7 @@ import {
 } from '../lib/services/CampaignMapReconciliationService';
 
 const campaignId = process.env.RECONCILIATION_CAMPAIGN_ID;
+const geometryCampaignId = process.env.RECONCILIATION_GEOMETRY_CAMPAIGN_ID;
 if (!campaignId) throw new Error('RECONCILIATION_CAMPAIGN_ID is required');
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error('Supabase production credentials are required');
@@ -21,8 +23,22 @@ const supabase = createClient(
 );
 
 async function main(): Promise<void> {
-  const beforeRow = await readCurrentCampaignMapBundle(supabase, campaignId);
+  let beforeRow = await readCurrentCampaignMapBundle(supabase, campaignId);
   if (!beforeRow) throw new Error('Campaign has no canonical map bundle');
+  if (geometryCampaignId) {
+    const geometryRow = await readCurrentCampaignMapBundle(supabase, geometryCampaignId);
+    if (!geometryRow) throw new Error('Geometry campaign has no canonical map bundle');
+    const geometry = responseFromCampaignMapBundleRow(geometryRow);
+    await prebuildCampaignMapBundle(supabase, campaignId, undefined, {
+      forceRebuild: true,
+      scopedGeometry: {
+        buildings: geometry.buildings as GeoJSON.FeatureCollection,
+        parcels: geometry.parcels as GeoJSON.FeatureCollection,
+      },
+    });
+    beforeRow = await readCurrentCampaignMapBundle(supabase, campaignId);
+    if (!beforeRow) throw new Error('Campaign bundle could not be rebuilt with source geometry');
+  }
   const before = responseFromCampaignMapBundleRow(beforeRow);
   const service = new CampaignMapReconciliationService(supabase);
   const run = await service.enqueue(campaignId, beforeRow.asset_signature);
