@@ -3,6 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import { createAdminClient } from '@/lib/supabase/server';
 import { TerritoryIQService } from '@/lib/territory-iq/TerritoryIQService';
+import { profileForIndustry } from '@/lib/territory-iq/scoring';
 import { responseFromRows, type CellRow, type ScoreRow } from './_response';
 
 export const runtime = 'nodejs';
@@ -31,6 +32,10 @@ async function assignedAddressScope(
     .eq('campaign_id', campaignId)
     .eq('assigned_to_user_id', userId)
     .in('status', ['assigned', 'accepted', 'in_progress']);
+  // Campaign access is the default. Only narrow the result when this member
+  // has an explicit address assignment; otherwise Territory IQ would render
+  // a misleading empty campaign for every unassigned workspace member.
+  if (!(assignments ?? []).length) return null;
   if ((assignments ?? []).some((assignment) => assignment.mode === 'whole_team')) return null;
   const assignmentIds = (assignments ?? []).map((assignment) => assignment.id);
   if (!assignmentIds.length) return new Set<string>();
@@ -52,7 +57,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const { data: campaign } = await admin
       .from('campaigns')
-      .select('id, workspace_id, workspaces!inner(owner_id)')
+      .select('id, workspace_id, workspaces!inner(owner_id, industry)')
       .eq('id', campaignId)
       .single();
     if (!campaign?.workspace_id) {
@@ -60,7 +65,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     const workspace = Array.isArray(campaign?.workspaces)
       ? campaign.workspaces[0]
-      : campaign?.workspaces as { owner_id?: string | null } | undefined;
+      : campaign?.workspaces as { owner_id?: string | null; industry?: string | null } | undefined;
+    const profile = profileForIndustry(workspace?.industry);
 
     let { data: score } = await admin
       .from('campaign_territory_iq_scores')
@@ -69,7 +75,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       .order('calculated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    let queuedTargetHomeCount = 0;
     if (!score) {
+      const { count: campaignHomeCount } = await admin
+        .from('campaign_addresses')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', campaignId);
+      queuedTargetHomeCount = campaignHomeCount ?? 0;
       const { data: latestRun } = await admin
         .from('territory_iq_score_runs')
         .select('status, completed_at, error_message')
@@ -80,12 +92,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       if (latestRun?.status === 'completed') {
         return NextResponse.json({
           status: 'insufficient_data',
-          model: { key: 'generic', displayName: 'Field Sales', version: 'grid-score-v1' },
+          model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
           overall: {
             score: null,
             confidence: 0,
             confidenceLabel: 'very_low',
-            targetHomeCount: 0,
+            targetHomeCount: queuedTargetHomeCount,
             explanation: 'Campaign homes need valid coordinates before Territory IQ can score this area.',
             benchmark: 'campaign area',
             calculatedAt: latestRun.completed_at,
@@ -100,12 +112,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       if (latestRun?.status === 'failed') {
         return NextResponse.json({
           status: 'failed',
-          model: { key: 'generic', displayName: 'Field Sales', version: 'grid-score-v1' },
+          model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
           overall: {
             score: null,
             confidence: 0,
             confidenceLabel: 'very_low',
-            targetHomeCount: 0,
+            targetHomeCount: queuedTargetHomeCount,
             explanation: 'Territory IQ could not safely calculate this campaign.',
             benchmark: 'campaign area',
             calculatedAt: latestRun.completed_at,
@@ -122,12 +134,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (!score) {
       return NextResponse.json({
         status: 'queued',
-        model: { key: 'generic', displayName: 'Field Sales', version: 'grid-score-v1' },
+        model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
         overall: {
           score: null,
           confidence: 0,
           confidenceLabel: 'very_low',
-          targetHomeCount: 0,
+          targetHomeCount: queuedTargetHomeCount,
           explanation: 'Territory IQ is preparing this campaign.',
           benchmark: 'campaign area',
           calculatedAt: null,

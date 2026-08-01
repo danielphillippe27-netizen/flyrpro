@@ -224,12 +224,12 @@ export function TerritoryIQPanel({
 
   useEffect(() => {
     if (data?.status !== 'queued' && data?.status !== 'processing') return;
-    const timeout = window.setTimeout(() => {
+    const interval = window.setInterval(() => {
       void load().catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : 'Could not load Territory IQ');
       });
     }, 3_000);
-    return () => window.clearTimeout(timeout);
+    return () => window.clearInterval(interval);
   }, [data?.status, load]);
 
   const refresh = useCallback(async () => {
