@@ -1,3 +1,4 @@
+import * as wkx from 'wkx';
 import type {
   TerritoryIQCellProperties,
   TerritoryIQFactor,
@@ -26,7 +27,7 @@ type ScoreRow = {
 
 type CellRow = {
   cell_key: string;
-  geom: GeoJSON.Geometry;
+  geom: unknown;
   target_home_count: number;
   target_address_ids: string[];
   score: number | null;
@@ -36,6 +37,31 @@ type CellRow = {
   factors: TerritoryIQFactor[];
   census_dguid: string | null;
 };
+
+export function decodeTerritoryIQGeometry(value: unknown): GeoJSON.Geometry | null {
+  if (value && typeof value === 'object') {
+    const geometry = value as Partial<GeoJSON.Geometry>;
+    if (typeof geometry.type === 'string' && 'coordinates' in geometry) {
+      return geometry as GeoJSON.Geometry;
+    }
+  }
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const trimmed = value.trim();
+  try {
+    const parsed = JSON.parse(trimmed) as GeoJSON.Geometry;
+    if (parsed && typeof parsed.type === 'string' && 'coordinates' in parsed) return parsed;
+  } catch {
+    // PostGIS geometry columns are commonly returned by PostgREST as EWKB hex.
+  }
+  try {
+    const geometry = /^[0-9a-f]+$/i.test(trimmed) && trimmed.length % 2 === 0
+      ? wkx.Geometry.parse(Buffer.from(trimmed, 'hex'))
+      : wkx.Geometry.parse(trimmed);
+    return geometry.toGeoJSON() as GeoJSON.Geometry;
+  } catch {
+    return null;
+  }
+}
 
 function aggregateFactors(cells: CellRow[]): TerritoryIQFactor[] {
   const totalHomes = cells.reduce((sum, cell) => sum + cell.target_home_count, 0);
@@ -94,21 +120,25 @@ export function responseFromRows(
   const scopedConfidence = totalHomes
     ? cells.reduce((sum, cell) => sum + cell.confidence * cell.target_home_count, 0) / totalHomes
     : 0;
-  const features: Array<GeoJSON.Feature<GeoJSON.Geometry, TerritoryIQCellProperties>> = cells.map(
-    (cell) => ({
-      type: 'Feature',
-      geometry: cell.geom,
-      properties: {
-        cellId: cell.cell_key,
-        score: cell.score,
-        confidence: cell.confidence,
-        confidenceLabel: cell.confidence_label,
-        rank: cell.rank,
-        targetHomeCount: cell.target_home_count,
-        factors: cell.factors ?? [],
-        censusDguid: cell.census_dguid,
-      },
-    })
+  const features: Array<GeoJSON.Feature<GeoJSON.Geometry, TerritoryIQCellProperties>> = cells.flatMap(
+    (cell) => {
+      const geometry = decodeTerritoryIQGeometry(cell.geom);
+      if (!geometry) return [];
+      return [{
+        type: 'Feature',
+        geometry,
+        properties: {
+          cellId: cell.cell_key,
+          score: cell.score,
+          confidence: cell.confidence,
+          confidenceLabel: cell.confidence_label,
+          rank: cell.rank,
+          targetHomeCount: cell.target_home_count,
+          factors: cell.factors ?? [],
+          censusDguid: cell.census_dguid,
+        },
+      }];
+    }
   );
   const factors = assignedAddressIds ? aggregateFactors(cells) : score.factors ?? [];
   const missingFactors = factors

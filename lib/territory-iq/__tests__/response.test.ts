@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { responseFromRows, type CellRow, type ScoreRow } from '@/app/api/campaigns/[campaignId]/territory-iq/_response';
+import * as wkx from 'wkx';
+import {
+  decodeTerritoryIQGeometry,
+  responseFromRows,
+  type CellRow,
+  type ScoreRow,
+} from '@/app/api/campaigns/[campaignId]/territory-iq/_response';
 import type { TerritoryIQFactor } from '../types';
 
 const factor = (score: number): TerritoryIQFactor => ({
@@ -46,6 +52,9 @@ const polygon = (offset: number): GeoJSON.Polygon => ({
   ]],
 });
 
+const ewkbPolygon = wkx.Geometry.parseGeoJSON(polygon(2)).toEwkb().toString('hex');
+assert.deepEqual(decodeTerritoryIQGeometry(ewkbPolygon), polygon(2));
+
 const cells: CellRow[] = [
   {
     cell_key: 'a',
@@ -87,5 +96,12 @@ const unassigned = responseFromRows(scoreRow, cells, new Set());
 assert.equal(unassigned.status, 'insufficient_data');
 assert.equal(unassigned.overall.score, null);
 assert.equal(unassigned.cells.features.length, 0);
+
+const encoded = responseFromRows(
+  scoreRow,
+  [{ ...cells[0], geom: ewkbPolygon }],
+  null
+);
+assert.deepEqual(encoded.cells.features[0].geometry, polygon(2));
 
 console.log('Territory IQ response scoping tests passed');
