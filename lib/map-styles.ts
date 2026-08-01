@@ -16,8 +16,62 @@ export type ResolvedMapStyle = {
 };
 
 const WHITE_OUT_DEFAULT_STYLE = 'mapbox://styles/mapbox/light-v11';
-const WHITE_OUT_BACKGROUND = '#ffffff';
-const WHITE_OUT_WATER = '#f4f4f5';
+const WHITE_OUT_BACKGROUND = '#f8fafc';
+const WHITE_OUT_WATER = '#eaf2f8';
+const WHITE_OUT_ROAD_CASING = '#cbd5e1';
+const WHITE_OUT_ROAD_PATH = '#d8dee8';
+const WHITE_OUT_ROAD_RAIL = '#c5ced9';
+const WHITE_OUT_ROAD_SURFACE: mapboxgl.Expression = [
+  'match',
+  ['get', 'class'],
+  ['motorway', 'trunk', 'primary'],
+  '#d7e0ea',
+  ['secondary', 'tertiary'],
+  '#dfe6ee',
+  ['motorway_link', 'trunk_link', 'primary_link', 'street', 'street_limited'],
+  '#e7ecf2',
+  '#edf1f5',
+];
+
+export type WhiteOutRoadLayerKind = 'surface' | 'casing' | 'path' | 'rail' | 'label';
+
+export function classifyWhiteOutRoadLayer(layer: {
+  id: string;
+  type: string;
+  'source-layer'?: unknown;
+}): WhiteOutRoadLayerKind | null {
+  const layerId = layer.id.toLowerCase();
+  const sourceLayer = typeof layer['source-layer'] === 'string'
+    ? layer['source-layer'].toLowerCase()
+    : '';
+  const isRoadLayer =
+    sourceLayer.includes('road')
+    || layerId.includes('road')
+    || layerId.includes('street')
+    || layerId.includes('motorway');
+
+  if (!isRoadLayer) return null;
+
+  if (layer.type === 'symbol') {
+    return layerId.includes('label') || layerId.includes('name') || layerId.includes('shield')
+      ? 'label'
+      : null;
+  }
+
+  if (layer.type !== 'line') return null;
+  if (layerId.includes('rail')) return 'rail';
+  if (
+    layerId.includes('path')
+    || layerId.includes('trail')
+    || layerId.includes('cycleway')
+    || layerId.includes('pedestrian')
+    || layerId.includes('steps')
+  ) {
+    return 'path';
+  }
+  if (layerId.includes('case') || layerId.includes('casing')) return 'casing';
+  return 'surface';
+}
 
 const STANDARD_V12_STYLES: Record<Theme, string> = {
   light: process.env.NEXT_PUBLIC_MAPBOX_STYLE_ID_STANDARD_LIGHT || 'mapbox://styles/mapbox/streets-v12',
@@ -299,6 +353,7 @@ function applyWhiteOutVisualTweaks(
         ? String((layer as { 'source-layer'?: unknown })['source-layer']).toLowerCase()
         : '';
     const isWater = lowerLayerId.includes('water') || sourceLayer.includes('water');
+    const roadLayerKind = classifyWhiteOutRoadLayer(layer);
 
     try {
       if (layer.type === 'background') {
@@ -316,6 +371,27 @@ function applyWhiteOutVisualTweaks(
       if (isWater && layer.type === 'line') {
         map.setPaintProperty(layer.id, 'line-color', WHITE_OUT_WATER);
         map.setPaintProperty(layer.id, 'line-opacity', 0.9);
+        continue;
+      }
+
+      if (roadLayerKind && roadLayerKind !== 'label' && layer.type === 'line') {
+        const lineColor = roadLayerKind === 'casing'
+          ? WHITE_OUT_ROAD_CASING
+          : roadLayerKind === 'path'
+            ? WHITE_OUT_ROAD_PATH
+            : roadLayerKind === 'rail'
+              ? WHITE_OUT_ROAD_RAIL
+              : WHITE_OUT_ROAD_SURFACE;
+        map.setPaintProperty(layer.id, 'line-color', lineColor);
+        map.setPaintProperty(layer.id, 'line-opacity', roadLayerKind === 'path' ? 0.9 : 1);
+        continue;
+      }
+
+      if (roadLayerKind === 'label' && layer.type === 'symbol') {
+        map.setPaintProperty(layer.id, 'text-color', '#475569');
+        map.setPaintProperty(layer.id, 'text-halo-color', '#ffffff');
+        map.setPaintProperty(layer.id, 'text-halo-width', 1.25);
+        map.setPaintProperty(layer.id, 'text-halo-blur', 0.2);
       }
     } catch {
       // Some imported style layers reject direct mutation.

@@ -162,19 +162,6 @@ export function FlyrMapView() {
                 hideBaseBuildingLayers(mapInstance, {
                   preserveLayerPrefixes: ['map-buildings-'],
                 });
-                style.layers.forEach((layer) => {
-                  // Remove layers that reference non-existent source layers
-                  if (layer.id && (
-                    layer.id.includes('road-label') || 
-                    layer.id.includes('road_label')
-                  )) {
-                    try {
-                      mapInstance.removeLayer(layer.id);
-                    } catch (err) {
-                      // Layer might not exist or already removed
-                    }
-                  }
-                });
               }
             } catch (err) {
               // Ignore cleanup errors
@@ -208,32 +195,6 @@ export function FlyrMapView() {
             // The map will still function, just without that specific layer
             console.warn('Mapbox style layer warning (non-critical):', errorDetails);
             
-            // Try to remove the problematic layer after style loads
-            if (map.current) {
-              map.current.once('style.load', () => {
-                try {
-                  const style = map.current?.getStyle();
-                  if (style && style.layers) {
-                    // Find and remove layers that reference non-existent source layers
-                    style.layers.forEach((layer) => {
-                      if (layer.id && (
-                        layer.id.includes('road-label') || 
-                        layer.id.includes('road_label')
-                      )) {
-                        try {
-                          map.current?.removeLayer(layer.id);
-                          console.log(`Removed problematic layer: ${layer.id}`);
-                        } catch (removeErr) {
-                          // Layer might already be removed or not exist
-                        }
-                      }
-                    });
-                  }
-                } catch (cleanupErr) {
-                  // Ignore cleanup errors
-                }
-              });
-            }
             return; // Don't set error state for non-critical issues
           }
           
@@ -351,13 +312,6 @@ export function FlyrMapView() {
           });
           hideBaseBuildingLayers(mapInstance, {
             preserveLayerPrefixes: ['map-buildings-'],
-          });
-          style.layers.forEach((layer) => {
-            if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
-              try {
-                mapInstance.removeLayer(layer.id);
-              } catch {}
-            }
           });
         }
       } catch {}

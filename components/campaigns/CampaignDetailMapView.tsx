@@ -2082,16 +2082,6 @@ export function CampaignDetailMapView({
               hideBaseBuildingLayers(map.current, {
                 preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
               });
-              style.layers.forEach((layer) => {
-                // Remove layers that reference non-existent source layers
-                if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
-                  try {
-                    map.current?.removeLayer(layer.id);
-                  } catch (err) {
-                    // Layer might not exist or already removed
-                  }
-                }
-              });
             }
           } catch (err) {
             // Ignore cleanup errors
@@ -2111,27 +2101,6 @@ export function CampaignDetailMapView({
           // This is a style validation error - log but don't show to user
           console.warn('Mapbox style layer warning (non-critical):', errorMessage);
 
-          // Try to remove the problematic layer after style loads
-          if (map.current) {
-            map.current.once('style.load', () => {
-              try {
-                const style = map.current?.getStyle();
-                if (style && style.layers) {
-                  style.layers.forEach((layer) => {
-                    if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
-                      try {
-                        map.current?.removeLayer(layer.id);
-                      } catch (removeErr) {
-                        // Layer might already be removed
-                      }
-                    }
-                  });
-                }
-              } catch (cleanupErr) {
-                // Ignore cleanup errors
-              }
-            });
-          }
         }
       });
 
@@ -2471,15 +2440,6 @@ export function CampaignDetailMapView({
           });
           hideBaseBuildingLayers(map.current, {
             preserveLayerPrefixes: CUSTOM_BUILDING_LAYER_PREFIXES,
-          });
-          style.layers.forEach((layer) => {
-            try {
-              if (layer.id && (layer.id.includes('road-label') || layer.id.includes('road_label'))) {
-                if (safeGetLayer(map.current!, layer.id)) map.current?.removeLayer(layer.id);
-              }
-            } catch {
-              // Ignore per-layer errors during style cleanup (e.g. getOwnLayer of undefined)
-            }
           });
         }
       } catch {}
