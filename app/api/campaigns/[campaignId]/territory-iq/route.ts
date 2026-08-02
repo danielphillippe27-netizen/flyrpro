@@ -3,7 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import { createAdminClient } from '@/lib/supabase/server';
 import { TerritoryIQService } from '@/lib/territory-iq/TerritoryIQService';
-import { profileForIndustry } from '@/lib/territory-iq/scoring';
+import { GRID_SCORE_MODEL_VERSION, profileForIndustry } from '@/lib/territory-iq/scoring';
 import { responseFromRows, type CellRow, type ScoreRow } from './_response';
 
 export const runtime = 'nodejs';
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       : campaign?.workspaces as { owner_id?: string | null; industry?: string | null } | undefined;
     const profile = profileForIndustry(workspace?.industry);
 
-    let { data: score } = await admin
+    const { data: score } = await admin
       .from('campaign_territory_iq_scores')
       .select('*')
       .eq('campaign_id', campaignId)
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       if (latestRun?.status === 'completed') {
         return NextResponse.json({
           status: 'insufficient_data',
-          model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
+          model: { key: profile.key, displayName: profile.displayName, version: GRID_SCORE_MODEL_VERSION },
           overall: {
             score: null,
             confidence: 0,
@@ -105,6 +105,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
           factors: [],
           cells: { type: 'FeatureCollection', features: [] },
           sources: [],
+          insights: [],
           missingFactors: [],
           retryMessage: 'Refresh after campaign map preparation completes.',
         });
@@ -112,7 +113,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       if (latestRun?.status === 'failed') {
         return NextResponse.json({
           status: 'failed',
-          model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
+          model: { key: profile.key, displayName: profile.displayName, version: GRID_SCORE_MODEL_VERSION },
           overall: {
             score: null,
             confidence: 0,
@@ -125,6 +126,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
           factors: [],
           cells: { type: 'FeatureCollection', features: [] },
           sources: [],
+          insights: [],
           missingFactors: [],
           retryMessage: 'An owner or admin can retry the calculation.',
         });
@@ -134,7 +136,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (!score) {
       return NextResponse.json({
         status: 'queued',
-        model: { key: profile.key, displayName: profile.displayName, version: 'grid-score-v1' },
+        model: { key: profile.key, displayName: profile.displayName, version: GRID_SCORE_MODEL_VERSION },
         overall: {
           score: null,
           confidence: 0,
@@ -147,6 +149,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         factors: [],
         cells: { type: 'FeatureCollection', features: [] },
         sources: [],
+        insights: [],
         missingFactors: [],
         retryMessage: 'Check again shortly.',
       });

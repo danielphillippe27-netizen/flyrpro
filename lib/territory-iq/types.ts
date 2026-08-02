@@ -15,6 +15,7 @@ export type TerritoryIQFactorKey =
   | 'household_income'
   | 'canvassability'
   | 'permit_activity'
+  | 'local_need'
   | 'storm_exposure';
 
 export type TerritoryIQFactor = {
@@ -39,6 +40,18 @@ export type TerritoryIQSource = {
   version: string;
   releaseDate: string | null;
   freshness: string;
+};
+
+export type TerritoryIQInsight = {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string | null;
+  score: number;
+  confidence: number;
+  source: string;
+  areaEstimate: boolean;
+  explanation: string;
 };
 
 export type TerritoryIQCellProperties = {
@@ -71,6 +84,7 @@ export type TerritoryIQResponse = {
   factors: TerritoryIQFactor[];
   cells: GeoJSON.FeatureCollection<GeoJSON.Geometry, TerritoryIQCellProperties>;
   sources: TerritoryIQSource[];
+  insights: TerritoryIQInsight[];
   missingFactors: TerritoryIQFactorKey[];
   retryMessage: string | null;
 };

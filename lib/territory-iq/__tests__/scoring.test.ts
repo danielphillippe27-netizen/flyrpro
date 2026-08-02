@@ -38,6 +38,7 @@ assert.equal(profileForIndustry('Roofing & Exteriors').key, 'roofing');
 assert.equal(profileForIndustry('Solar/Home Services').key, 'solar');
 assert.equal(profileForIndustry('Pest Control').key, 'pest_control');
 assert.equal(profileForIndustry('Political / Canvassing').key, 'political');
+assert.equal(profileForIndustry('Home Security').key, 'security');
 assert.equal(profileForIndustry('Something new').key, 'generic');
 
 assert.equal(homeAgeOpportunityScore('roofing', 20), 100);
@@ -57,21 +58,23 @@ const complete = scoreFactors(roofing, [
   input('household_income', 50),
   input('canvassability', 40),
   input('permit_activity', 30),
+  input('local_need', 25),
   input('storm_exposure', 20),
 ]);
-assert.equal(complete.score, 63);
+assert.equal(complete.score, 59);
 assert.equal(complete.confidence, 1);
 
 const goldenScores: Record<string, number> = {
-  roofing: 63,
+  roofing: 59,
   solar: 59,
-  hvac: 63,
-  pest_control: 61,
-  real_estate: 59,
-  home_service: 59,
-  insurance: 48,
+  hvac: 61,
+  pest_control: 59,
+  real_estate: 57,
+  home_service: 57,
+  insurance: 46,
   political: 48,
-  generic: 58,
+  security: 49,
+  generic: 56,
 };
 for (const profile of Object.values(TERRITORY_IQ_PROFILES)) {
   const result = scoreFactors(profile, [
@@ -81,6 +84,7 @@ for (const profile of Object.values(TERRITORY_IQ_PROFILES)) {
     input('household_income', 50),
     input('canvassability', 40),
     input('permit_activity', 30),
+    input('local_need', 25),
     input('storm_exposure', 20),
   ]);
   assert.equal(result.score, goldenScores[profile.key], `${profile.key} golden fixture changed`);
@@ -93,10 +97,11 @@ const withoutPilots = scoreFactors(roofing, [
   input('household_income', 50),
   input('canvassability', 40),
   input('permit_activity', null),
+  input('local_need', null),
   input('storm_exposure', null),
 ]);
-assert.equal(withoutPilots.score, 67);
-assert.equal(Number(withoutPilots.confidence.toFixed(2)), 0.9);
+assert.equal(withoutPilots.score, 66);
+assert.equal(Number(withoutPilots.confidence.toFixed(2)), 0.83);
 assert.equal(
   Math.round(withoutPilots.factors.reduce((sum, factor) => sum + factor.effectiveWeight, 0)),
   100
@@ -109,6 +114,7 @@ const insufficient = scoreFactors(roofing, [
   input('household_income', null),
   input('canvassability', null),
   input('permit_activity', null),
+  input('local_need', null),
   input('storm_exposure', null),
 ]);
 assert.equal(insufficient.score, null);

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import * as turf from '@turf/turf';
 import {
   GRID_SCORE_MODEL_VERSION,
+  TERRITORY_IQ_PROFILES,
   clampScore,
   confidenceLabel,
   homeAgeOpportunityScore,
@@ -14,6 +15,7 @@ import type {
   TerritoryIQCellProperties,
   TerritoryIQFactor,
   TerritoryIQFactorKey,
+  TerritoryIQInsight,
   TerritoryIQResponse,
   TerritoryIQSource,
 } from './types';
@@ -21,6 +23,7 @@ import type {
 type JsonRecord = Record<string, unknown>;
 type AddressRow = {
   id: string;
+  postal_code?: string | null;
   coordinate?: { lat?: number; lon?: number } | null;
   geom?: unknown;
   distance_m?: number | null;
@@ -66,6 +69,25 @@ type WeatherRecord = {
   confidence?: number;
   geometry?: GeoJSON.Geometry;
 };
+type AreaSignalRecord = {
+  signal_key?: string;
+  geography_level?: string;
+  area_key?: string | null;
+  industry_keys?: string[];
+  score?: number;
+  raw_value?: number | null;
+  raw_unit?: string | null;
+  observed_at?: string | null;
+  confidence?: number;
+  sample_size?: number;
+  geometry?: GeoJSON.Geometry | null;
+  metrics?: Record<string, unknown>;
+  source_key?: string;
+  provider?: string;
+  dataset?: string;
+  version?: string;
+  release_date?: string | null;
+};
 type ScoreRunRow = {
   id: string;
   campaign_id: string;
@@ -79,7 +101,24 @@ const FACTOR_LABELS: Record<TerritoryIQFactorKey, string> = {
   household_income: 'Household income',
   canvassability: 'Canvassability',
   permit_activity: 'Permit activity',
+  local_need: 'Local service need',
   storm_exposure: 'Storm exposure',
+};
+
+const INSIGHT_LABELS: Record<string, string> = {
+  active_permit_activity: 'Active renovation activity',
+  cleared_permit_activity: 'Completed permit activity',
+  pool_permit_activity: 'Pool permit activity',
+  green_roof_permit_activity: 'Green-roof activity',
+  zoning_review_activity: 'Early renovation intent',
+  utility_disruption: 'Utility work conditions',
+  service_request_need: '311 service need',
+  road_restriction: 'Road access conditions',
+  traffic_friction: 'Traffic and parking conditions',
+  neighbourhood_profile: 'Neighbourhood profile',
+  crime_context: 'Neighbourhood safety context',
+  fire_exposure: 'Fire exposure context',
+  canopy_context: 'Canopy and shade context',
 };
 
 function asRecord(value: unknown): JsonRecord {
@@ -202,31 +241,199 @@ function serviceMatchesProfile(profile: TerritoryIQProfile, value: string): bool
   return false;
 }
 
+function normalizedFsa(postalCode: string | null | undefined): string | null {
+  const normalized = String(postalCode ?? '').replace(/\s+/g, '').toUpperCase();
+  return normalized.length >= 3 ? normalized.slice(0, 3) : null;
+}
+
+function signalProfileScore(signal: AreaSignalRecord, profile: TerritoryIQProfile): number | null {
+  const metrics = asRecord(signal.metrics);
+  const profileScores = asRecord(metrics.profile_scores);
+  return asNumber(profileScores[profile.key]) ?? asNumber(signal.score);
+}
+
+function signalAppliesToProfile(signal: AreaSignalRecord, profile: TerritoryIQProfile): boolean {
+  const industries = Array.isArray(signal.industry_keys) ? signal.industry_keys : [];
+  return industries.length === 0 || industries.includes(profile.key) || industries.includes('generic');
+}
+
+function signalsForCell(
+  signals: AreaSignalRecord[],
+  cell: GeoJSON.Feature,
+  targets: Array<{ address: AddressRow }>
+): AreaSignalRecord[] {
+  const targetFsas = new Set(
+    targets.map((target) => normalizedFsa(target.address.postal_code)).filter(Boolean)
+  );
+  for (const signal of signals) {
+    if (signal.signal_key !== 'boundary_context' || !signal.area_key || !signal.geometry) continue;
+    try {
+      if (turf.booleanIntersects(cell, turf.feature(signal.geometry))) {
+        targetFsas.add(signal.area_key.toUpperCase());
+      }
+    } catch {
+      // A malformed supporting boundary cannot make a factor unavailable.
+    }
+  }
+  return signals.filter((signal) => {
+    if (signal.geography_level === 'fsa') {
+      return Boolean(signal.area_key && targetFsas.has(signal.area_key.toUpperCase()));
+    }
+    if (!signal.geometry) return false;
+    const feature = turf.feature(signal.geometry);
+    try {
+      if (signal.geometry.type === 'Point') {
+        return containsPoint(cell, feature as GeoJSON.Feature<GeoJSON.Point>);
+      }
+      return turf.booleanIntersects(
+        cell as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+        feature as GeoJSON.Feature<GeoJSON.Geometry>
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function weightedSignalScore(
+  signals: AreaSignalRecord[],
+  profile: TerritoryIQProfile
+): { score: number; confidence: number; rawValue: number; sources: string[] } | null {
+  const applicable = signals
+    .filter((signal) => signalAppliesToProfile(signal, profile))
+    .map((signal) => ({
+      signal,
+      score: signalProfileScore(signal, profile),
+      confidence: asNumber(signal.confidence) ?? 0,
+    }))
+    .filter((entry): entry is { signal: AreaSignalRecord; score: number; confidence: number } =>
+      entry.score !== null && entry.confidence > 0
+    );
+  const denominator = applicable.reduce((sum, entry) => sum + entry.confidence, 0);
+  if (!denominator) return null;
+  return {
+    score: applicable.reduce((sum, entry) => sum + entry.score * entry.confidence, 0) / denominator,
+    confidence: Math.min(0.9, denominator / applicable.length),
+    rawValue: applicable.reduce((sum, entry) => sum + (asNumber(entry.signal.sample_size) ?? 0), 0),
+    sources: Array.from(new Set(applicable.map((entry) => entry.signal.provider ?? entry.signal.dataset ?? 'Toronto Open Data'))),
+  };
+}
+
 function permitFactor(
   profile: TerritoryIQProfile,
   permits: PermitRecord[],
-  cell: GeoJSON.Feature
+  cell: GeoJSON.Feature,
+  areaSignals: AreaSignalRecord[]
 ): ReturnType<typeof factor> {
+  const municipalSignals = areaSignals.filter((signal) => [
+    'active_permit_activity',
+    'cleared_permit_activity',
+    'pool_permit_activity',
+    'green_roof_permit_activity',
+    'zoning_review_activity',
+  ].includes(signal.signal_key ?? ''));
+  const municipal = weightedSignalScore(municipalSignals, profile);
   const nearby = permits.filter((permit) => {
     const lon = asNumber(permit.longitude);
     const lat = asNumber(permit.latitude);
     return lon !== null && lat !== null && containsPoint(cell, turf.point([lon, lat]));
   });
-  if (!nearby.length) return factor('permit_activity', null, 0, null, 'permits', null);
+  if (!nearby.length && !municipal) return factor('permit_activity', null, 0, null, 'permits', null);
   const sameService = nearby.filter((permit) =>
     serviceMatchesProfile(profile, `${permit.service_category ?? ''} ${permit.permit_category ?? ''}`)
   ).length;
   const general = Math.min(100, nearby.length * 25);
-  const score = Math.max(0, general - sameService * 35);
+  const pointScore = nearby.length ? Math.max(0, general - sameService * 35) : null;
   const permitConfidence = average(nearby.map((permit) => asNumber(permit.confidence) ?? 0.5)) ?? 0.5;
+  const score = municipal && pointScore !== null
+    ? municipal.score * 0.7 + pointScore * 0.3
+    : municipal?.score ?? pointScore;
   return factor(
     'permit_activity',
     score,
-    Math.min(0.8, permitConfidence),
-    nearby.length,
+    municipal ? municipal.confidence : Math.min(0.8, permitConfidence),
+    municipal?.rawValue ?? nearby.length,
     'recent permits',
-    'Municipal permit pilot'
+    municipal?.sources.join(', ') ?? 'Municipal permit pilot',
+    Boolean(municipal)
   );
+}
+
+function localNeedFactor(
+  profile: TerritoryIQProfile,
+  areaSignals: AreaSignalRecord[]
+): ReturnType<typeof factor> {
+  const needSignals = areaSignals.filter((signal) => [
+    'service_request_need',
+    'crime_context',
+    'fire_exposure',
+    'canopy_context',
+  ].includes(signal.signal_key ?? ''));
+  const weighted = weightedSignalScore(needSignals, profile);
+  return weighted
+    ? factor(
+        'local_need',
+        weighted.score,
+        weighted.confidence,
+        weighted.rawValue,
+        'recent area events',
+        weighted.sources.join(', '),
+        true
+      )
+    : factor('local_need', null, 0, null, 'recent area events', null, true);
+}
+
+function adjustCanvassability(
+  baseScore: number,
+  baseConfidence: number,
+  areaSignals: AreaSignalRecord[]
+): { score: number; confidence: number; source: string; areaEstimate: boolean } {
+  const accessSignals = areaSignals.filter((signal) => [
+    'utility_disruption',
+    'road_restriction',
+    'traffic_friction',
+  ].includes(signal.signal_key ?? ''));
+  const access = weightedSignalScore(accessSignals, TERRITORY_IQ_PROFILES.generic);
+  if (!access) {
+    return { score: baseScore, confidence: baseConfidence, source: 'WolfGrid campaign routes', areaEstimate: false };
+  }
+  return {
+    score: clampScore(baseScore * 0.75 + access.score * 0.25),
+    confidence: Math.min(0.95, baseConfidence * 0.75 + access.confidence * 0.25),
+    source: `WolfGrid routes + ${access.sources.join(', ')}`,
+    areaEstimate: true,
+  };
+}
+
+function aggregateInsights(signals: AreaSignalRecord[]): TerritoryIQInsight[] {
+  const grouped = new Map<string, AreaSignalRecord[]>();
+  for (const signal of signals) {
+    const key = signal.signal_key ?? '';
+    if (!key || key === 'street_tree' || key === 'boundary_context') continue;
+    grouped.set(key, [...(grouped.get(key) ?? []), signal]);
+  }
+  return Array.from(grouped.entries()).map(([key, entries]) => {
+    const denominator = entries.reduce((sum, entry) => sum + (asNumber(entry.confidence) ?? 0), 0) || 1;
+    const score = entries.reduce(
+      (sum, entry) => sum + (asNumber(entry.score) ?? 0) * (asNumber(entry.confidence) ?? 0),
+      0
+    ) / denominator;
+    const rawEntries = entries.filter((entry) => asNumber(entry.raw_value) !== null);
+    const source = Array.from(new Set(entries.map((entry) => entry.provider ?? 'Toronto Open Data'))).join(', ');
+    return {
+      key,
+      label: INSIGHT_LABELS[key] ?? key.replaceAll('_', ' '),
+      value: rawEntries.length
+        ? rawEntries.reduce((sum, entry) => sum + Number(entry.raw_value), 0) / rawEntries.length
+        : null,
+      unit: entries.find((entry) => entry.raw_unit)?.raw_unit ?? null,
+      score: clampScore(score),
+      confidence: Math.min(0.95, denominator / entries.length),
+      source,
+      areaEstimate: entries.some((entry) => entry.geography_level !== 'point'),
+      explanation: `Derived from ${entries.length} promoted ${entries.length === 1 ? 'area signal' : 'area signals'}; it is not a household-level fact.`,
+    };
+  }).sort((left, right) => right.confidence - left.confidence || left.label.localeCompare(right.label));
 }
 
 function stormFactor(
@@ -413,7 +620,7 @@ export class TerritoryIQService {
     const [addressesResult, bundleResult, censusResult, enrichmentsResult] = await Promise.all([
       this.supabase
         .from('campaign_addresses')
-        .select('id, coordinate, geom, distance_m')
+        .select('id, coordinate, geom, distance_m, postal_code')
         .eq('campaign_id', campaignId),
       this.supabase
         .from('campaign_map_bundles')
@@ -446,6 +653,9 @@ export class TerritoryIQService {
     const enrichments = asRecord(enrichmentsResult.data);
     const permits = Array.isArray(enrichments.permits) ? enrichments.permits as PermitRecord[] : [];
     const weather = Array.isArray(enrichments.weather) ? enrichments.weather as WeatherRecord[] : [];
+    const areaSignals = Array.isArray(enrichments.signals)
+      ? (enrichments.signals as AreaSignalRecord[]).filter((signal) => signal.signal_key !== 'street_tree')
+      : [];
 
     const bbox = turf.bbox(boundary);
     const hexes = turf.hexGrid(bbox, 0.25, { units: 'kilometers', mask: boundary });
@@ -502,6 +712,12 @@ export class TerritoryIQService {
       const canvassScore = routeEfficiency === null
         ? densityScore
         : densityScore * 0.7 + routeEfficiency * 0.3;
+      const cellSignals = signalsForCell(areaSignals, clipped, targets);
+      const adjustedCanvass = adjustCanvassability(
+        canvassScore,
+        routeDistances.length ? 0.95 : 0.82,
+        cellSignals
+      );
       const factorsInput = [
         factor(
           'home_age_opportunity',
@@ -541,13 +757,15 @@ export class TerritoryIQService {
         ),
         factor(
           'canvassability',
-          canvassScore,
-          routeDistances.length ? 0.95 : 0.82,
+          adjustedCanvass.score,
+          adjustedCanvass.confidence,
           homesPerKm2,
           'target homes / km²',
-          routeDistances.length ? 'WolfGrid campaign routes' : 'WolfGrid campaign homes'
+          routeDistances.length ? adjustedCanvass.source : adjustedCanvass.source.replace('routes', 'homes'),
+          adjustedCanvass.areaEstimate
         ),
-        permitFactor(profile, permits, clipped),
+        permitFactor(profile, permits, clipped, cellSignals),
+        localNeedFactor(profile, cellSignals),
         stormFactor(weather, clipped, now),
       ];
       const scored = scoreFactors(profile, factorsInput);
@@ -597,6 +815,7 @@ export class TerritoryIQService {
         ) / totalHomes
       : 0;
     const aggregate = aggregateFactors(cells);
+    const insights = aggregateInsights(areaSignals);
     const missingFactors = aggregate
       .filter((candidate) => !candidate.available && profile.weights[candidate.key] > 0)
       .map((candidate) => candidate.key);
@@ -648,6 +867,22 @@ export class TerritoryIQService {
         freshness: 'Event feed',
       });
     }
+    const municipalSources = new Map<string, AreaSignalRecord>();
+    for (const signal of areaSignals) {
+      if (signal.source_key && !municipalSources.has(signal.source_key)) {
+        municipalSources.set(signal.source_key, signal);
+      }
+    }
+    for (const signal of municipalSources.values()) {
+      sources.push({
+        key: signal.source_key ?? `toronto-${sources.length}`,
+        provider: signal.provider ?? 'City of Toronto',
+        dataset: signal.dataset ?? INSIGHT_LABELS[signal.signal_key ?? ''] ?? 'Municipal area signal',
+        version: signal.version ?? 'promoted',
+        releaseDate: signal.release_date ?? null,
+        freshness: signal.observed_at ? `Observed ${signal.observed_at.slice(0, 10)}` : 'Municipal release',
+      });
+    }
 
     const inputHash = stableHash({
       campaign: [campaign.updated_at, campaign.map_ready_at],
@@ -656,7 +891,18 @@ export class TerritoryIQService {
       homes: addressPoints.map((entry) => entry.address.id).sort(),
       bundle: [bundle.asset_signature, bundle.source_version],
       census: censusAreas.map((area) => [area.properties?.dguid, area.properties?.source_version]).sort(),
-      enrichments: [permits.length, weather.length],
+      enrichments: [
+        permits.length,
+        weather.length,
+        ...areaSignals.map((signal) => [
+          signal.source_key,
+          signal.signal_key,
+          signal.area_key,
+          signal.version,
+          signal.score,
+          signal.sample_size,
+        ]).sort(),
+      ],
     });
     const idempotencyKey = `${campaignId}:${GRID_SCORE_MODEL_VERSION}:${inputHash}`;
     const runResult = claimedRunId
@@ -715,6 +961,7 @@ export class TerritoryIQService {
         benchmark,
         explanation,
         factors: aggregate,
+        insights,
         sources,
         missing_factors: missingFactors,
         input_hash: inputHash,
@@ -782,6 +1029,7 @@ export class TerritoryIQService {
       factors: aggregate,
       cells: { type: 'FeatureCollection', features: cells },
       sources,
+      insights,
       missingFactors,
       retryMessage: null,
     };
@@ -803,6 +1051,7 @@ export class TerritoryIQService {
       factors: [],
       cells: { type: 'FeatureCollection', features: [] },
       sources: [],
+      insights: [],
       missingFactors: Object.keys(profile.weights).filter(
         (key) => profile.weights[key as TerritoryIQFactorKey] > 0
       ) as TerritoryIQFactorKey[],

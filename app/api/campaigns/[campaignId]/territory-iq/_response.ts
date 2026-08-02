@@ -3,6 +3,7 @@ import type {
   TerritoryIQCellProperties,
   TerritoryIQFactor,
   TerritoryIQFactorKey,
+  TerritoryIQInsight,
   TerritoryIQResponse,
   TerritoryIQSource,
 } from '@/lib/territory-iq/types';
@@ -21,6 +22,7 @@ type ScoreRow = {
   explanation: string;
   factors: TerritoryIQFactor[];
   sources: TerritoryIQSource[];
+  insights: TerritoryIQInsight[];
   missing_factors: TerritoryIQFactorKey[];
   calculated_at: string;
 };
@@ -175,6 +177,7 @@ export function responseFromRows(
     factors,
     cells: { type: 'FeatureCollection', features },
     sources: score.sources ?? [],
+    insights: score.insights ?? [],
     missingFactors: assignedAddressIds ? missingFactors : score.missing_factors ?? [],
     retryMessage: score.status === 'failed' ? 'Refresh Territory IQ to try again.' : null,
   };

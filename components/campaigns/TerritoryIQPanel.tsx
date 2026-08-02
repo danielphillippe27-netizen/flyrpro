@@ -10,6 +10,7 @@ import { useTheme } from '@/lib/theme-provider';
 import type {
   TerritoryIQCellProperties,
   TerritoryIQFactor,
+  TerritoryIQInsight,
   TerritoryIQResponse,
 } from '@/lib/territory-iq/types';
 
@@ -56,6 +57,35 @@ function FactorRow({ factor }: { factor: TerritoryIQFactor }) {
       <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
         <span>{factor.source ?? 'Waiting for a supported source'}</span>
         <span>{Math.round(factor.confidence * 100)}% confidence</span>
+      </div>
+    </div>
+  );
+}
+
+function formatInsight(insight: TerritoryIQInsight): string {
+  if (insight.value === null) return `Score ${Math.round(insight.score)}`;
+  const value = Number(insight.value.toFixed(1)).toLocaleString();
+  return `${value}${insight.unit ? ` ${insight.unit}` : ''}`;
+}
+
+function InsightRow({ insight }: { insight: TerritoryIQInsight }) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">{insight.label}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatInsight(insight)}{insight.areaEstimate ? ' · Area estimate' : ''}
+          </p>
+        </div>
+        <p className="text-sm font-semibold" style={{ color: scoreColour(insight.score) }}>
+          {Math.round(insight.score)}
+        </p>
+      </div>
+      <Progress value={insight.score} className="mt-3 h-1.5" />
+      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+        <span className="truncate">{insight.source}</span>
+        <span className="shrink-0">{Math.round(insight.confidence * 100)}% confidence</span>
       </div>
     </div>
   );
@@ -397,6 +427,22 @@ export function TerritoryIQPanel({
         />
       ) : null}
 
+      {data.insights?.length ? (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Local opportunity signals</h3>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Municipal signals sharpen GRID SCORE at their published area or point resolution. They are
+            context for prioritization, not facts about individual homes.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {data.insights.map((insight) => <InsightRow key={insight.key} insight={insight} />)}
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between gap-3">
@@ -434,6 +480,8 @@ export function TerritoryIQPanel({
             <h3 className="text-sm font-semibold text-foreground">Why this score?</h3>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
               Census values are neighbourhood-level estimates, not facts about individual households.
+              Municipal permits, service requests, traffic, safety and incident layers retain their
+              published resolution and are also never presented as household-level facts.{' '}
               GRID SCORE ranks opportunity relative to the local market and does not guarantee property
               condition, ownership, storm damage, or conversion.
             </p>

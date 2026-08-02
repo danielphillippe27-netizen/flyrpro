@@ -37,6 +37,7 @@ const scoreRow: ScoreRow = {
   explanation: 'Fixture',
   factors: [factor(65)],
   sources: [],
+  insights: [],
   missing_factors: [],
   calculated_at: '2026-07-30T00:00:00.000Z',
 };

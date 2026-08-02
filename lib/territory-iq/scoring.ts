@@ -4,7 +4,7 @@ import type {
   TerritoryIQFactorKey,
 } from './types';
 
-export const GRID_SCORE_MODEL_VERSION = 'grid-score-v1';
+export const GRID_SCORE_MODEL_VERSION = 'grid-score-v2-toronto';
 
 export type TerritoryIQProfile = {
   key: string;
@@ -19,7 +19,8 @@ const weights = (
   income: number,
   canvass: number,
   permits: number,
-  storm: number
+  storm: number,
+  localNeed: number
 ): Record<TerritoryIQFactorKey, number> => ({
   home_age_opportunity: age,
   detached_home_fit: detached,
@@ -28,53 +29,59 @@ const weights = (
   canvassability: canvass,
   permit_activity: permits,
   storm_exposure: storm,
+  local_need: localNeed,
 });
 
 export const TERRITORY_IQ_PROFILES: Record<string, TerritoryIQProfile> = {
   roofing: {
     key: 'roofing',
     displayName: 'Roofing & Exteriors',
-    weights: weights(35, 20, 15, 10, 10, 5, 5),
+    weights: weights(30, 19, 14, 10, 10, 7, 5, 5),
   },
   solar: {
     key: 'solar',
     displayName: 'Solar',
-    weights: weights(10, 25, 25, 25, 10, 5, 0),
+    weights: weights(10, 25, 25, 25, 10, 5, 0, 0),
   },
   hvac: {
     key: 'hvac',
     displayName: 'HVAC',
-    weights: weights(30, 20, 20, 15, 10, 5, 0),
+    weights: weights(28, 19, 19, 14, 10, 5, 0, 5),
   },
   pest_control: {
     key: 'pest_control',
     displayName: 'Pest Control',
-    weights: weights(20, 25, 25, 10, 15, 5, 0),
+    weights: weights(18, 24, 24, 10, 14, 5, 0, 5),
   },
   real_estate: {
     key: 'real_estate',
     displayName: 'Real Estate',
-    weights: weights(20, 15, 25, 20, 15, 5, 0),
+    weights: weights(19, 14, 24, 19, 14, 5, 0, 5),
   },
   home_service: {
     key: 'home_service',
     displayName: 'Home Service',
-    weights: weights(15, 25, 20, 15, 20, 5, 0),
+    weights: weights(14, 24, 19, 14, 19, 5, 0, 5),
   },
   insurance: {
     key: 'insurance',
     displayName: 'Insurance',
-    weights: weights(15, 15, 15, 10, 10, 5, 30),
+    weights: weights(13, 14, 14, 9, 9, 5, 26, 10),
   },
   political: {
     key: 'political',
     displayName: 'Political / Canvassing',
-    weights: weights(0, 10, 15, 20, 55, 0, 0),
+    weights: weights(0, 10, 15, 20, 55, 0, 0, 0),
+  },
+  security: {
+    key: 'security',
+    displayName: 'Home Security',
+    weights: weights(10, 15, 15, 15, 15, 5, 5, 20),
   },
   generic: {
     key: 'generic',
     displayName: 'Field Sales',
-    weights: weights(15, 20, 20, 20, 20, 5, 0),
+    weights: weights(14, 19, 19, 19, 19, 5, 0, 5),
   },
 };
 
@@ -86,6 +93,7 @@ export function profileForIndustry(industry: string | null | undefined): Territo
   if (normalized.includes('pest')) return TERRITORY_IQ_PROFILES.pest_control;
   if (normalized.includes('real estate')) return TERRITORY_IQ_PROFILES.real_estate;
   if (normalized.includes('insurance')) return TERRITORY_IQ_PROFILES.insurance;
+  if (normalized.includes('security')) return TERRITORY_IQ_PROFILES.security;
   if (normalized.includes('political') || normalized.includes('canvass')) return TERRITORY_IQ_PROFILES.political;
   if (
     normalized.includes('home service') ||
@@ -158,7 +166,7 @@ export function scoreFactors(
     (factor) =>
       factor.available &&
       factor.score !== null &&
-      !(['permit_activity', 'storm_exposure'] as TerritoryIQFactorKey[]).includes(factor.key)
+      !(['permit_activity', 'storm_exposure', 'local_need'] as TerritoryIQFactorKey[]).includes(factor.key)
   ).length;
   if (denominator <= 0 || availableCore < 2 || confidence < 0.25) {
     return { score: null, confidence, factors };
