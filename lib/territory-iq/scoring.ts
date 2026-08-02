@@ -4,7 +4,7 @@ import type {
   TerritoryIQFactorKey,
 } from './types';
 
-export const GRID_SCORE_MODEL_VERSION = 'grid-score-v2-toronto';
+export const GRID_SCORE_MODEL_VERSION = 'grid-score-v3-toronto-priorities';
 
 export type TerritoryIQProfile = {
   key: string;

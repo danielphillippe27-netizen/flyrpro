@@ -111,6 +111,12 @@ const INSIGHT_LABELS: Record<string, string> = {
   pool_permit_activity: 'Pool permit activity',
   green_roof_permit_activity: 'Green-roof activity',
   zoning_review_activity: 'Early renovation intent',
+  development_momentum: 'Development pipeline momentum',
+  business_opening_velocity: 'Business opening activity',
+  rental_building_need: 'Rental building condition need',
+  rental_systems_opportunity: 'Rental building systems opportunity',
+  multi_tenant_concentration: 'Multi-tenant housing concentration',
+  short_term_rental_concentration: 'Short-term rental concentration',
   utility_disruption: 'Utility work conditions',
   service_request_need: '311 service need',
   road_restriction: 'Road access conditions',
@@ -331,6 +337,7 @@ function permitFactor(
     'pool_permit_activity',
     'green_roof_permit_activity',
     'zoning_review_activity',
+    'development_momentum',
   ].includes(signal.signal_key ?? ''));
   const municipal = weightedSignalScore(municipalSignals, profile);
   const nearby = permits.filter((permit) => {
@@ -353,7 +360,7 @@ function permitFactor(
     score,
     municipal ? municipal.confidence : Math.min(0.8, permitConfidence),
     municipal?.rawValue ?? nearby.length,
-    'recent permits',
+    municipal ? 'municipal activity records' : 'recent permits',
     municipal?.sources.join(', ') ?? 'Municipal permit pilot',
     Boolean(municipal)
   );
@@ -368,6 +375,11 @@ function localNeedFactor(
     'crime_context',
     'fire_exposure',
     'canopy_context',
+    'business_opening_velocity',
+    'rental_building_need',
+    'rental_systems_opportunity',
+    'multi_tenant_concentration',
+    'short_term_rental_concentration',
   ].includes(signal.signal_key ?? ''));
   const weighted = weightedSignalScore(needSignals, profile);
   return weighted

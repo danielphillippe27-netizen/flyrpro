@@ -30,6 +30,9 @@ from typing import Any
 DEFAULT_ROOT = Path(
     "/Volumes/Samsung SSD/WolfGrid/municipal_data/territory_iq_canada/work/toronto-v0.1.0"
 )
+PRIORITY_ROOT = Path(
+    "/Volumes/Samsung SSD/WolfGrid/municipal_data/territory_iq_canada/work/toronto-v0.2.0"
+)
 LICENCE_NAME = "Open Government Licence - Toronto"
 LICENCE_URL = "https://open.toronto.ca/open-data-licence/"
 TORONTO_COVERAGE = (
@@ -99,6 +102,66 @@ SOURCE_CONFIG: dict[str, dict[str, Any]] = {
     "toronto-forest-land-cover-2018": {
         "name": "Toronto Forest and Land Cover — 2018", "version": "2018",
         "resolution": "Land-cover polygon", "signal": "canopy_context", "confidence": 0.55,
+    },
+    "toronto-development-pipeline": {
+        "name": "Development Pipeline", "version": "2026-05-21",
+        "resolution": "Ward", "signal": "development_momentum", "confidence": 0.78,
+    },
+    "toronto-business-licences": {
+        "name": "Business Licences", "version": "2026-08-01",
+        "resolution": "FSA", "signal": "business_opening_velocity", "confidence": 0.82,
+    },
+    "toronto-apartment-building-evaluations": {
+        "name": "Apartment Building Evaluations — 2023 to current", "version": "2026-08-01",
+        "resolution": "Ward", "signal": "rental_building_need", "confidence": 0.58,
+    },
+    "toronto-apartment-building-registration": {
+        "name": "Apartment Building Registration", "version": "2026-07-05",
+        "resolution": "FSA/Ward", "signal": "rental_systems_opportunity", "confidence": 0.76,
+    },
+    "toronto-multi-tenant-house-licences": {
+        "name": "Multi-Tenant House Licences", "version": "2026-07-31",
+        "resolution": "Ward", "signal": "multi_tenant_concentration", "confidence": 0.77,
+    },
+    "toronto-short-term-rental-registrations": {
+        "name": "Short-Term Rental Registrations", "version": "2026-08-01",
+        "resolution": "FSA", "signal": "short_term_rental_concentration", "confidence": 0.80,
+    },
+}
+
+PRIORITY_SOURCE_KEYS = (
+    "toronto-development-pipeline",
+    "toronto-business-licences",
+    "toronto-apartment-building-evaluations",
+    "toronto-apartment-building-registration",
+    "toronto-multi-tenant-house-licences",
+    "toronto-short-term-rental-registrations",
+)
+
+PRIORITY_PROFILE_RELEVANCE: dict[str, dict[str, float]] = {
+    "development_momentum": {
+        "real_estate": 1.0, "home_service": 0.85, "generic": 0.8,
+        "roofing": 0.7, "solar": 0.7, "hvac": 0.7,
+    },
+    "business_opening_velocity": {
+        "generic": 1.0, "real_estate": 0.9, "security": 0.9,
+        "home_service": 0.75, "insurance": 0.75,
+    },
+    "rental_building_need": {
+        "hvac": 1.0, "pest_control": 1.0, "security": 1.0,
+        "home_service": 0.9, "insurance": 0.85, "roofing": 0.75,
+    },
+    "rental_systems_opportunity": {
+        "hvac": 1.0, "pest_control": 0.95, "security": 0.95,
+        "home_service": 0.9, "insurance": 0.85, "real_estate": 0.8,
+    },
+    "multi_tenant_concentration": {
+        "pest_control": 1.0, "security": 1.0, "hvac": 0.9,
+        "insurance": 0.9, "home_service": 0.85, "real_estate": 0.8,
+    },
+    "short_term_rental_concentration": {
+        "real_estate": 1.0, "security": 0.95, "home_service": 0.9,
+        "pest_control": 0.8, "insurance": 0.8, "generic": 0.75,
     },
 }
 
@@ -325,6 +388,93 @@ def ensure_ward_geojson(root: Path) -> Path:
         url = "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/5e7a8234-f805-43ac-820f-03d7c360b588/resource/737b29e0-8329-4260-b6af-21555ab24f28/download/city-wards-data-4326.geojson"
         urllib.request.urlretrieve(url, path)
     return path
+
+
+def priority_profile_scores(signal_key: str, score: float) -> dict[str, float]:
+    """Temper a local percentile toward neutral when a signal is less relevant.
+
+    A score from an unrelated municipal dataset must not behave like a direct
+    property fact. Profiles omitted from the relevance map receive a neutral 50.
+    """
+    relevance = PRIORITY_PROFILE_RELEVANCE.get(signal_key, {})
+    return {
+        profile: round(50 + (score - 50) * relevance.get(profile, 0), 2)
+        for profile in PROFILE_KEYS
+    }
+
+
+def ward_geometries(root: Path) -> dict[str, str]:
+    wards = ensure_ward_geojson(root)
+    rows = duckdb_json(f"""
+      INSTALL spatial; LOAD spatial;
+      SELECT lpad(cast(AREA_SHORT_CODE AS VARCHAR), 2, '0') ward,
+        'SRID=4326;' || ST_AsText(geom) geom
+      FROM ST_Read('{sql_path(wards)}')
+    """)
+    return {str(row["ward"]): str(row["geom"]) for row in rows}
+
+
+def priority_area_signals(root: Path, source_key: str) -> list[dict[str, Any]]:
+    """Read privacy-safe FSA/ward aggregates produced by the acquisition pipeline."""
+    config = SOURCE_CONFIG[source_key]
+    parquet, _ = source_files(root, source_key, config["version"])
+    if not parquet:
+        raise FileNotFoundError(source_key)
+    rows = duckdb_json(f"SELECT * FROM read_parquet('{sql_path(parquet)}') ORDER BY area_type, area_key")
+    wards = ward_geometries(root) if any(str(row.get("area_type", "")).lower() == "ward" for row in rows) else {}
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        geography = str(row.get("area_type") or "").lower()
+        area = str(row.get("area_key") or "").strip().upper()
+        if geography == "ward":
+            area = area.zfill(2)
+            geom = wards.get(area)
+        elif geography == "fsa":
+            area = fsa(area) or ""
+            geom = None
+        else:
+            continue
+        if not area or (geography == "ward" and not geom):
+            continue
+        score = safe_float(row.get("opportunity_score"))
+        confidence = safe_float(row.get("confidence"))
+        total = int(safe_float(row.get("record_count")) or 0)
+        if score is None or confidence is None or total <= 0:
+            continue
+        metrics: dict[str, Any] = {}
+        for column, target in (
+            ("numeric_metrics_json", "numeric_metrics"),
+            ("category_counts_json", "category_counts"),
+        ):
+            value = row.get(column)
+            if isinstance(value, str) and value:
+                try:
+                    metrics[target] = json.loads(value)
+                except json.JSONDecodeError:
+                    metrics[target] = {}
+        metrics.update({
+            "profile_scores": priority_profile_scores(config["signal"], score),
+            "active_count": int(safe_float(row.get("active_count")) or 0),
+            "recent_count": int(safe_float(row.get("recent_count")) or 0),
+            "area_estimate": True,
+            "privacy_level": "area aggregate",
+        })
+        result.append({
+            "source_record_id": f"{geography}:{area}",
+            "signal_key": config["signal"],
+            "geography_level": geography,
+            "area_key": area,
+            "industry_keys": ["generic"],
+            "score": round(score, 2),
+            "raw_value": total,
+            "raw_unit": "area records",
+            "observed_at": f"{config['version']}T00:00:00Z",
+            "confidence": min(config["confidence"], confidence),
+            "sample_size": total,
+            "geom": geom,
+            "metrics": metrics,
+        })
+    return result
 
 
 def fsa_boundary_signals(root: Path) -> list[dict[str, Any]]:
@@ -613,6 +763,8 @@ def source_version_payload(root: Path, source_key: str, signal_count: int) -> di
     if not checksum:
         checksum = hashlib.sha256(f"{source_key}:{config['version']}".encode()).hexdigest()
     is_statcan = source_key.startswith("statcan-")
+    raw_uri = f"s3://wolfgrid-territory-iq-203802643441-us-east-2/territory-iq/canada/raw/{source_key}/version={config['version']}"
+    normalized_uri = f"s3://wolfgrid-territory-iq-203802643441-us-east-2/territory-iq/canada/normalized/{source_key}/version={config['version']}"
     return {
         "source_key": source_key, "dataset_name": config["name"], "dataset_version": config["version"],
         "provider": "Statistics Canada" if is_statcan else "City of Toronto",
@@ -628,6 +780,9 @@ def source_version_payload(root: Path, source_key: str, signal_count: int) -> di
         "refresh_policy": {"frequency": "source release", "adapter": "toronto-territory-iq-v1"},
         "licence_status": "allowed", "quality_report": {"valid": True, "signal_count": signal_count},
         "derived_metric_versions": {config["signal"]: "toronto-signals-v1"},
+        "catalogue_dataset_id": source_key,
+        "raw_s3_uri": raw_uri,
+        "normalized_s3_uris": [normalized_uri],
     }
 
 
@@ -646,6 +801,19 @@ def validate_signals(source_key: str, rows: list[dict[str, Any]]) -> None:
 
 
 def publish_source(client: Postgrest, root: Path, source_key: str, rows: list[dict[str, Any]], promote: bool) -> None:
+    if any(row.get("geography_level") == "fsa" for row in rows):
+        boundaries = client.request(
+            "GET",
+            "territory_iq_area_signals?signal_key=eq.boundary_context&geography_level=eq.fsa&select=area_key",
+        )
+        valid_fsas = {str(row.get("area_key") or "").upper() for row in boundaries or []}
+        before = len(rows)
+        rows = [
+            row for row in rows
+            if row.get("geography_level") != "fsa" or str(row.get("area_key") or "").upper() in valid_fsas
+        ]
+        if before != len(rows):
+            print(f"{source_key}: dropped {before - len(rows)} FSA aggregate(s) without an official boundary")
     validate_signals(source_key, rows)
     payload = source_version_payload(root, source_key, len(rows))
     versions = client.request(
@@ -664,6 +832,17 @@ def publish_source(client: Postgrest, root: Path, source_key: str, rows: list[di
         client.request("PATCH", f"territory_iq_source_versions?id=eq.{source_id}", {
             "is_promoted": True, "promoted_at": datetime.now(timezone.utc).isoformat()
         })
+        client.request(
+            "PATCH",
+            f"territory_iq_dataset_catalogue?dataset_id=eq.{source_key}",
+            {
+                "ingestion_status": "promoted",
+                "raw_s3_prefix": payload["raw_s3_uri"],
+                "normalized_s3_prefix": payload["normalized_s3_uris"][0],
+                "checksum_sha256": payload["checksum_sha256"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
     print(f"{source_key}: {len(rows):,} signals {'promoted' if promote else 'staged'}")
 
 
@@ -690,17 +869,32 @@ def build_all(root: Path) -> dict[str, list[dict[str, Any]]]:
     return builders
 
 
+def build_priority(root: Path, selected: set[str] | None = None) -> dict[str, list[dict[str, Any]]]:
+    keys = [key for key in PRIORITY_SOURCE_KEYS if not selected or key in selected]
+    unknown = (selected or set()) - set(PRIORITY_SOURCE_KEYS)
+    if unknown:
+        raise ValueError(f"unknown priority source(s): {', '.join(sorted(unknown))}")
+    return {key: priority_area_signals(root, key) for key in keys}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--env-file", type=Path, default=Path(".env.local"))
     parser.add_argument("--promote", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--priority-sources", action="store_true",
+                        help="Publish the v0.2 Toronto planning, business and rental aggregates")
+    parser.add_argument("--source", action="append", choices=PRIORITY_SOURCE_KEYS,
+                        help="Limit --priority-sources to one or more configured sources")
     args = parser.parse_args()
     load_env(args.env_file)
     if any(FORBIDDEN_SOURCE_FRAGMENT in key for key in SOURCE_CONFIG):
         raise RuntimeError("forbidden street-tree source configured")
-    sources = build_all(args.root)
+    root = args.root
+    if args.priority_sources and args.root == DEFAULT_ROOT:
+        root = PRIORITY_ROOT
+    sources = build_priority(root, set(args.source or [])) if args.priority_sources else build_all(root)
     report = {key: len(rows) for key, rows in sources.items()}
     print(json.dumps({"sources": report, "total_signals": sum(report.values()), "street_trees": 0}, indent=2))
     if args.dry_run:
@@ -711,7 +905,7 @@ def main() -> int:
         raise RuntimeError("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
     client = Postgrest(url, key)
     for source_key, rows in sources.items():
-        publish_source(client, args.root, source_key, rows, args.promote)
+        publish_source(client, root, source_key, rows, args.promote)
     forbidden = client.request("GET", "territory_iq_area_signals?signal_key=eq.street_tree&select=id&limit=1")
     if forbidden:
         raise RuntimeError("street-tree signal found after ingestion")
