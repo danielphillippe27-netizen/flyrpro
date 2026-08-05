@@ -566,6 +566,7 @@ export default function CampaignDetailPage() {
   const requestedTab = searchParams.get('tab');
   const initialTab: CampaignTabValue =
     requestedTab && CAMPAIGN_TAB_VALUES.includes(requestedTab as CampaignTabValue)
+      && requestedTab !== 'territory-iq'
       ? (requestedTab as CampaignTabValue)
       : 'map';
 
@@ -600,6 +601,7 @@ export default function CampaignDetailPage() {
   const [roadMetadata, setRoadMetadata] = useState<CampaignRoadMetadata | null>(null);
   const [assignmentScope, setAssignmentScope] = useState<AssignmentScopeState | null>(null);
   const [activeTab, setActiveTab] = useState<CampaignTabValue>(initialTab);
+  const [territoryIQAvailable, setTerritoryIQAvailable] = useState(false);
   const [demoGuideOpen, setDemoGuideOpen] = useState(
     isSelfServeDemo && searchParams.get('tour') !== '0'
   );
@@ -741,11 +743,25 @@ export default function CampaignDetailPage() {
       }
     })();
 
+    const territoryIQAvailabilityRequest = fetch(
+      `/api/campaigns/${campaignId}/territory-iq?availability=1`,
+      { credentials: 'include' }
+    )
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        setTerritoryIQAvailable(response.ok && payload?.available === true);
+      })
+      .catch((error) => {
+        console.warn('Unable to check Territory IQ availability:', error);
+        setTerritoryIQAvailable(false);
+      });
+
     await Promise.allSettled([
       addressesRequest,
       contactsRequest,
       scanEventsRequest,
       roadMetadataRequest,
+      territoryIQAvailabilityRequest,
     ]);
   }, [campaignId, currentWorkspaceRole]);
 
@@ -890,8 +906,18 @@ export default function CampaignDetailPage() {
   }, [campaign?.notes, legacyCampaignText.notes]);
 
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
+    setActiveTab(requestedTab === 'territory-iq' ? 'map' : initialTab);
+  }, [initialTab, requestedTab]);
+
+  useEffect(() => {
+    if (requestedTab === 'territory-iq') {
+      setActiveTab(territoryIQAvailable ? 'territory-iq' : 'map');
+      return;
+    }
+    if (!territoryIQAvailable) {
+      setActiveTab((current) => current === 'territory-iq' ? 'map' : current);
+    }
+  }, [requestedTab, territoryIQAvailable]);
 
   useEffect(() => {
     if (isSelfServeDemo) setTheme('light');
@@ -1516,7 +1542,11 @@ export default function CampaignDetailPage() {
         ) : null}
         <Tabs
           value={activeTab}
-          onValueChange={(value) => setActiveTab(value as CampaignTabValue)}
+          onValueChange={(value) => {
+            if (value !== 'territory-iq' || territoryIQAvailable) {
+              setActiveTab(value as CampaignTabValue);
+            }
+          }}
           className="w-full"
           id="campaign-demo-tabs"
         >
@@ -1528,7 +1558,9 @@ export default function CampaignDetailPage() {
             <TabsTrigger value="qr">QR Codes</TabsTrigger>
             <TabsTrigger value="finance">Finance</TabsTrigger>
             <TabsTrigger value="assignments">Assignments</TabsTrigger>
-            <TabsTrigger value="territory-iq">Territory IQ</TabsTrigger>
+            {territoryIQAvailable ? (
+              <TabsTrigger value="territory-iq">Territory IQ</TabsTrigger>
+            ) : null}
             <TabsTrigger value="notes">Notes</TabsTrigger>
           </TabsList>
 
@@ -1804,12 +1836,14 @@ export default function CampaignDetailPage() {
             />
           </TabsContent>
 
-          <TabsContent value="territory-iq" className="mt-4">
-            <TerritoryIQPanel
-              campaignId={campaignId}
-              canRefresh={currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin' || isFounder}
-            />
-          </TabsContent>
+          {territoryIQAvailable ? (
+            <TabsContent value="territory-iq" className="mt-4">
+              <TerritoryIQPanel
+                campaignId={campaignId}
+                canRefresh={currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin' || isFounder}
+              />
+            </TabsContent>
+          ) : null}
 
           <TabsContent value="notes" className="mt-4 space-y-4">
             <div className="bg-card p-4 rounded-xl border border-border">

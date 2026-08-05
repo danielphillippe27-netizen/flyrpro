@@ -4,7 +4,13 @@ import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import { createAdminClient } from '@/lib/supabase/server';
 import { TerritoryIQService } from '@/lib/territory-iq/TerritoryIQService';
 import { GRID_SCORE_MODEL_VERSION, profileForIndustry } from '@/lib/territory-iq/scoring';
-import { responseFromRows, type CellRow, type ScoreRow } from './_response';
+import {
+  responseFromRows,
+  territoryIQRowsHaveData,
+  type AvailabilityCellRow,
+  type CellRow,
+  type ScoreRow,
+} from './_response';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,6 +54,7 @@ async function assignedAddressScope(
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    const availabilityOnly = request.nextUrl.searchParams.get('availability') === '1';
     const user = await resolveUserFromRequest(request);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { campaignId } = await context.params;
@@ -77,6 +84,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
       .maybeSingle();
     let queuedTargetHomeCount = 0;
     if (!score) {
+      if (availabilityOnly) {
+        return NextResponse.json({ available: false });
+      }
       const { count: campaignHomeCount } = await admin
         .from('campaign_addresses')
         .select('id', { count: 'exact', head: true })
@@ -154,11 +164,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
         retryMessage: 'Check again shortly.',
       });
     }
-    const { data: cells } = await admin
-      .from('campaign_territory_iq_cells')
-      .select('cell_key, geom, target_home_count, target_address_ids, score, confidence, confidence_label, rank, factors, census_dguid')
-      .eq('score_id', score.id)
-      .order('rank', { ascending: true, nullsFirst: false });
     const scope = await assignedAddressScope(
       admin,
       campaignId,
@@ -166,6 +171,28 @@ export async function GET(request: NextRequest, context: RouteContext) {
       user.id,
       workspace?.owner_id ?? null
     );
+    if (availabilityOnly) {
+      let availabilityQuery = admin
+        .from('campaign_territory_iq_cells')
+        .select('target_address_ids, score, target_home_count')
+        .eq('score_id', score.id)
+        .not('score', 'is', null)
+        .gt('target_home_count', 0);
+      if (scope === null) availabilityQuery = availabilityQuery.limit(1);
+      const { data: availableCells, error: availabilityError } = await availabilityQuery;
+      if (availabilityError) throw new Error(availabilityError.message);
+      const available = territoryIQRowsHaveData(
+        score as ScoreRow,
+        (availableCells ?? []) as AvailabilityCellRow[],
+        scope
+      );
+      return NextResponse.json({ available });
+    }
+    const { data: cells } = await admin
+      .from('campaign_territory_iq_cells')
+      .select('cell_key, geom, target_home_count, target_address_ids, score, confidence, confidence_label, rank, factors, census_dguid')
+      .eq('score_id', score.id)
+      .order('rank', { ascending: true, nullsFirst: false });
     const response = responseFromRows(score as ScoreRow, (cells ?? []) as CellRow[], scope);
     const { data: latestRun } = await admin
       .from('territory_iq_score_runs')

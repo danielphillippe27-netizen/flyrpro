@@ -40,6 +40,26 @@ type CellRow = {
   census_dguid: string | null;
 };
 
+type AvailabilityCellRow = Pick<
+  CellRow,
+  'target_address_ids' | 'score' | 'target_home_count'
+>;
+
+export function territoryIQRowsHaveData(
+  score: Pick<ScoreRow, 'score'>,
+  cells: AvailabilityCellRow[],
+  assignedAddressIds: Set<string> | null
+): boolean {
+  return score.score !== null && cells.some((cell) =>
+    cell.score !== null &&
+    cell.target_home_count > 0 &&
+    (
+      assignedAddressIds === null ||
+      (cell.target_address_ids ?? []).some((addressId) => assignedAddressIds.has(addressId))
+    )
+  );
+}
+
 export function decodeTerritoryIQGeometry(value: unknown): GeoJSON.Geometry | null {
   if (value && typeof value === 'object') {
     const geometry = value as Partial<GeoJSON.Geometry>;
@@ -183,4 +203,4 @@ export function responseFromRows(
   };
 }
 
-export type { CellRow, ScoreRow };
+export type { AvailabilityCellRow, CellRow, ScoreRow };
