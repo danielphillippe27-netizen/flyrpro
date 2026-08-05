@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import { AlertCircle, BrainCircuit, Database, RefreshCw, Sparkles } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
@@ -333,6 +334,12 @@ export function TerritoryIQPanel({
               <div className="flex items-center gap-2 text-sm font-medium text-primary">
                 <BrainCircuit className="h-4 w-4" />
                 Territory IQ
+                <Badge
+                  variant="outline"
+                  className="border-primary/30 bg-primary/10 px-1.5 py-0 text-[10px] font-bold tracking-widest text-primary"
+                >
+                  BETA
+                </Badge>
               </div>
               <h2 className="mt-2 text-2xl font-bold tracking-tight text-foreground">GRID SCORE</h2>
               <p className="mt-1 max-w-xl text-sm text-muted-foreground">{data.overall.explanation}</p>
