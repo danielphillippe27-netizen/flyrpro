@@ -5,6 +5,8 @@ import {
   addressContextMatchesReverse,
   assessReverseOrphanCorrection,
   buildingHasAuthoritativeMultiUnitMetadata,
+  canAutoCreateSyntheticOnParcel,
+  createParcelIdentityResolver,
   canCreateSyntheticAfterGlobalAssignment,
   buildLinkedNeighborhoodEvidence,
   configuredMaxReverseGeocodes,
@@ -72,6 +74,72 @@ assert(
     assignments: [],
   }),
   'a missing rooftop address must not create a second occupant on a capacity-one building'
+);
+
+assert(
+  canAutoCreateSyntheticOnParcel({
+    parcelId: 'parcel-1',
+    residentialBuildingCountOnParcel: 1,
+    knownCivicAddressCountOnParcel: 0,
+  }),
+  'a single residential footprint on an empty parcel may receive one strong synthetic address'
+);
+assert(
+  !canAutoCreateSyntheticOnParcel({
+    parcelId: 'parcel-1',
+    residentialBuildingCountOnParcel: 2,
+    knownCivicAddressCountOnParcel: 0,
+  }),
+  'multiple residential footprints on an empty parcel must not each create an inferred address'
+);
+assert(
+  !canAutoCreateSyntheticOnParcel({
+    parcelId: 'parcel-1',
+    residentialBuildingCountOnParcel: 1,
+    knownCivicAddressCountOnParcel: 1,
+  }),
+  'a parcel with an authoritative civic address must not auto-create a different address'
+);
+assert(
+  canAutoCreateSyntheticOnParcel({
+    parcelId: null,
+    residentialBuildingCountOnParcel: 4,
+    knownCivicAddressCountOnParcel: 0,
+  }),
+  'parcel-less campaigns retain the established global reverse behavior'
+);
+
+const resolveParcelIdentity = createParcelIdentityResolver([{
+  type: 'Feature',
+  id: 'parcel-feature-1',
+  geometry: {
+    type: 'Polygon',
+    coordinates: [[
+      [-79.701, 43.599],
+      [-79.699, 43.599],
+      [-79.699, 43.601],
+      [-79.701, 43.601],
+      [-79.701, 43.599],
+    ]],
+  },
+  properties: { parcel_id: 'parcel-1' },
+}]);
+assert(
+  resolveParcelIdentity({
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [[
+        [-79.7002, 43.5998],
+        [-79.6998, 43.5998],
+        [-79.6998, 43.6002],
+        [-79.7002, 43.6002],
+        [-79.7002, 43.5998],
+      ]],
+    },
+    properties: { building_id: 'building-without-parcel-property' },
+  }) === 'parcel-1',
+  'a building without parcel metadata must inherit the smallest containing parcel spatially'
 );
 
 const candidateAddress: GeoJSON.Feature<GeoJSON.Point> = {

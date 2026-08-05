@@ -23,6 +23,7 @@ const EMPTY_STATS: UserStats = {
   flyers: 0,
   conversations: 0,
   leads_created: 0,
+  appointments: 0,
   qr_codes_scanned: 0,
   distance_walked: 0,
   time_tracked: 0,
@@ -226,8 +227,9 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   const effectiveLeadsCreated = Math.max(displayStats.leads_created, leadCount);
   const effectiveLeadPerConversation =
     displayStats.conversations > 0 ? (effectiveLeadsCreated / displayStats.conversations) * 100 : 0;
+  const effectiveAppointmentCount = Math.max(displayStats.appointments, appointmentCount);
   const appointmentPerConversation =
-    displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
+    displayStats.conversations > 0 ? (effectiveAppointmentCount / displayStats.conversations) * 100 : 0;
   const heading = scope === 'team' ? 'Team stats' : 'Your stats';
   const description =
     scope === 'team'
@@ -370,8 +372,10 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
       {/* Stats grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Doors Knocked" value={displayStats.doors_knocked} />
+        <StatCard label="Flyers Delivered" value={displayStats.flyers} />
         <StatCard label="Conversations" value={displayStats.conversations} />
         <StatCard label="Leads Created" value={effectiveLeadsCreated} />
+        <StatCard label="Appointments Set" value={effectiveAppointmentCount} />
         <StatCard label="QR Codes Scanned" value={displayStats.qr_codes_scanned} />
         <StatCard label="Distance Walked" value={`${formatDistanceWalked(displayStats.distance_walked)} km`} />
         <StatCard label="Time Tracked" value={formatTimeTracked(displayStats.time_tracked)} />

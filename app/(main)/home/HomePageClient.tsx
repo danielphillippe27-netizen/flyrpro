@@ -34,7 +34,7 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
   }, [router, searchParams]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
+    <div data-testid="web.dashboard" className="min-h-screen bg-gray-50 dark:bg-background">
       {showSelfServeTeamDemo || isWorkspaceManager || resolvedAccessLevel === 'team_leader' || resolvedAccessLevel === 'solo_owner' ? (
         <TeamOwnerDashboardView />
       ) : resolvedAccessLevel === 'salesperson' ? (

@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v15-parcel-orphan-temporary-reverse';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v16-parcel-aware-global-temporary-reverse';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -143,6 +143,23 @@ export type GlobalAssignmentEdge = {
   addressId: string;
   weight: number;
 };
+
+export function canAutoCreateSyntheticOnParcel(input: {
+  parcelId: string | null;
+  residentialBuildingCountOnParcel: number;
+  knownCivicAddressCountOnParcel: number;
+}): boolean {
+  // Parcel-less campaigns keep the established global reverse behavior.
+  if (!input.parcelId) return true;
+  // An existing civic address on the parcel is authoritative. A different
+  // reverse result must be reviewed instead of creating a second address.
+  if (input.knownCivicAddressCountOnParcel > 0) return false;
+  // When a parcel contains multiple residential-looking footprints we cannot
+  // infer that every footprint is independently addressed. Existing distinct
+  // campaign addresses may still be globally reassigned one-to-one, but new
+  // addresses require review.
+  return input.residentialBuildingCountOnParcel <= 1;
+}
 
 /**
  * Maximum-cardinality, maximum-weight one-to-one assignment. Dummy columns
@@ -436,6 +453,52 @@ function parcelId(feature: BundleFeature): string | null {
     properties.parcel_external_id ??
     properties.canonical_parcel_id
   );
+}
+
+export function createParcelIdentityResolver(
+  parcels: BundleFeature[]
+): (feature: BundleFeature) => string | null {
+  const indexed = parcels.flatMap((parcel) => {
+    const id = parcelId(parcel);
+    if (!id || (parcel.geometry?.type !== 'Polygon' && parcel.geometry?.type !== 'MultiPolygon')) {
+      return [];
+    }
+    try {
+      return [{
+        id,
+        parcel,
+        bbox: turf.bbox(parcel as GeoJSON.Feature),
+        area: turf.area(parcel as GeoJSON.Feature),
+      }];
+    } catch {
+      return [];
+    }
+  }).sort((left, right) => left.area - right.area || left.id.localeCompare(right.id));
+
+  return (feature: BundleFeature): string | null => {
+    const explicit = parcelId(feature);
+    if (explicit) return explicit;
+    try {
+      const anchor = feature.geometry?.type === 'Point'
+        ? feature as GeoJSON.Feature<GeoJSON.Point>
+        : turf.pointOnFeature(feature as GeoJSON.Feature);
+      const [longitude, latitude] = anchor.geometry.coordinates;
+      for (const candidate of indexed) {
+        const [minLongitude, minLatitude, maxLongitude, maxLatitude] = candidate.bbox;
+        if (
+          longitude < minLongitude || longitude > maxLongitude ||
+          latitude < minLatitude || latitude > maxLatitude
+        ) continue;
+        if (turf.booleanPointInPolygon(anchor, candidate.parcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>)) {
+          return candidate.id;
+        }
+      }
+    } catch {
+      // Invalid geometry remains parcel-less and therefore cannot gain parcel
+      // authority from an unreliable spatial inference.
+    }
+    return null;
+  };
 }
 
 function addressIdentityFromFeature(feature: BundleFeature): string {
@@ -1419,12 +1482,7 @@ export class CampaignMapReconciliationService {
       report.coverage_before = addresses.length > 0 ? round(links.length / addresses.length * 100, 2) : 100;
 
       const protectedState = await this.loadProtectedState(run.campaign_id);
-      const hasUsableParcels =
-        asArray<BundleFeature>(asRecord(bundle.parcels).features).length > 0;
-      if (
-        MAP_RECONCILIATION_ALGORITHM_VERSION.includes('global-reverse') &&
-        !hasUsableParcels
-      ) {
+      if (MAP_RECONCILIATION_ALGORITHM_VERSION.includes('global')) {
         await this.processGlobalReverseAssignment({
           run,
           addresses,
@@ -1966,6 +2024,7 @@ export class CampaignMapReconciliationService {
       run: input.run,
       buildings: input.buildings,
       addresses: input.addresses,
+      parcels: asArray<BundleFeature>(input.sourceParcels.features),
       linkedBuildingIds,
       linkedAddressIds,
       orphanBuildingIds,
@@ -2255,6 +2314,7 @@ export class CampaignMapReconciliationService {
     run: ReconciliationRunRow;
     buildings: BundleFeature[];
     addresses: BundleFeature[];
+    parcels: BundleFeature[];
     linkedBuildingIds: Set<string>;
     linkedAddressIds: Set<string>;
     orphanBuildingIds: Set<string>;
@@ -2269,8 +2329,10 @@ export class CampaignMapReconciliationService {
     );
     if (maxGeocodes === 0) return [];
 
+    const resolveParcelId = createParcelIdentityResolver(input.parcels);
     const addressesById = new Map<string, BundleFeature>();
     const addressesByCivicIdentity = new Map<string, BundleFeature[]>();
+    const knownCivicIdentitiesByParcel = new Map<string, Set<string>>();
     for (const address of input.addresses) {
       const id = addressId(address);
       if (!id) continue;
@@ -2281,6 +2343,23 @@ export class CampaignMapReconciliationService {
         ...(addressesByCivicIdentity.get(identity) ?? []),
         address,
       ]);
+      const addressParcelId = resolveParcelId(address)?.toLowerCase();
+      if (addressParcelId) {
+        const identities = knownCivicIdentitiesByParcel.get(addressParcelId) ?? new Set<string>();
+        identities.add(identity);
+        knownCivicIdentitiesByParcel.set(addressParcelId, identities);
+      }
+    }
+
+    const residentialBuildingCountByParcel = new Map<string, number>();
+    for (const building of input.buildings) {
+      if (isExplicitNonResidentialBuilding(building)) continue;
+      const buildingParcelId = resolveParcelId(building)?.toLowerCase();
+      if (!buildingParcelId) continue;
+      residentialBuildingCountByParcel.set(
+        buildingParcelId,
+        (residentialBuildingCountByParcel.get(buildingParcelId) ?? 0) + 1
+      );
     }
 
     const currentLinkByAddress = new Map<string, JsonRecord>();
@@ -2376,9 +2455,15 @@ export class CampaignMapReconciliationService {
         streetName: item.result.streetName,
       });
       const civicMatches = addressesByCivicIdentity.get(civicIdentity) ?? [];
-      const contextMatches = civicMatches.filter((address) =>
-        addressContextMatchesReverse(address, item.result)
-      );
+      const buildingParcelId = resolveParcelId(item.building)?.toLowerCase() ?? null;
+      const contextMatches = civicMatches.filter((address) => {
+        if (!addressContextMatchesReverse(address, item.result)) return false;
+        const addressParcelId = resolveParcelId(address)?.toLowerCase() ?? null;
+        // When both records carry parcel identity, never move an address across
+        // parcel boundaries automatically. Missing parcel metadata does not
+        // block an otherwise exact rooftop identity.
+        return !(buildingParcelId && addressParcelId && buildingParcelId !== addressParcelId);
+      });
       const currentAddressIds = currentAddressIdsByBuilding.get(buildingKey) ?? [];
       const currentExactAddress = currentAddressIds.find((id) => {
         const address = addressesById.get(id.toLowerCase());
@@ -2501,12 +2586,21 @@ export class CampaignMapReconciliationService {
           exists: false,
           current_address_ids: currentAddressIds,
         };
+        const parcelSafe = canAutoCreateSyntheticOnParcel({
+          parcelId: buildingParcelId,
+          residentialBuildingCountOnParcel: buildingParcelId
+            ? residentialBuildingCountByParcel.get(buildingParcelId) ?? 0
+            : 0,
+          knownCivicAddressCountOnParcel: buildingParcelId
+            ? knownCivicIdentitiesByParcel.get(buildingParcelId)?.size ?? 0
+            : 0,
+        });
         syntheticDecisions.push({
           id: decisionId(input.run.id, 'create_synthetic_address', null, item.buildingId),
           run_id: input.run.id,
           campaign_id: input.run.campaign_id,
           action: 'create_synthetic_address',
-          status: 'proposed',
+          status: parcelSafe ? 'proposed' : 'requires_review',
           address_id: null,
           building_id: item.buildingId,
           secondary_building_id: null,
@@ -2520,6 +2614,8 @@ export class CampaignMapReconciliationService {
             `accuracy_${item.result.accuracy}`,
             'unique_reverse_building_identity',
             'no_equivalent_campaign_address',
+            ...(buildingParcelId ? ['parcel_aware'] : []),
+            ...(!parcelSafe ? ['parcel_address_capacity_review'] : []),
           ],
           score: SYNTHETIC_SCORE,
           runner_up_margin: SYNTHETIC_MARGIN,

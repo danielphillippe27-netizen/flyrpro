@@ -14,8 +14,9 @@ export function SuccessMetricBar({
   description,
 }: SuccessMetricBarProps) {
   const progress = Math.min(value / 100, 1);
+  const testId = `stats.${title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '')}`;
   return (
-    <div className="flex flex-col gap-2 py-1">
+    <div className="flex flex-col gap-2 py-1" data-testid={testId}>
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-gray-900 dark:text-gray-100 flex-1">
           {title}

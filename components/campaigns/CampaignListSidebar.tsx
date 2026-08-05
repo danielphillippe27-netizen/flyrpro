@@ -467,6 +467,7 @@ function CampaignList({
                 >
                   <Link
                     href={`/campaigns/${campaign.id}`}
+                    data-testid={`campaign-${campaign.id}`}
                     className="truncate min-w-0 flex-1"
                   >
                     {campaign.name || copy.campaigns.unnamed}

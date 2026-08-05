@@ -67,6 +67,7 @@ function mapRow(row: Record<string, unknown>): UserStats {
     flyers: typeof row.flyers === 'number' ? row.flyers : 0,
     conversations: typeof row.conversations === 'number' ? row.conversations : 0,
     leads_created: typeof row.leads_created === 'number' ? row.leads_created : 0,
+    appointments: typeof row.appointments === 'number' ? row.appointments : 0,
     qr_codes_scanned: typeof row.qr_codes_scanned === 'number' ? row.qr_codes_scanned : 0,
     distance_walked: typeof row.distance_walked === 'number' ? row.distance_walked : 0,
     time_tracked: typeof row.time_tracked === 'number' ? row.time_tracked : 0,
@@ -171,6 +172,7 @@ export class StatsService {
       flyers: 0,
       conversations: 0,
       leads_created: 0,
+      appointments: 0,
       qr_codes_scanned: 0,
       distance_walked: 0,
       time_tracked: 0,
@@ -230,6 +232,7 @@ export class StatsService {
       aggregated.flyers += stat.flyers;
       aggregated.conversations += stat.conversations;
       aggregated.leads_created += stat.leads_created;
+      aggregated.appointments += stat.appointments;
       aggregated.qr_codes_scanned += stat.qr_codes_scanned;
       aggregated.distance_walked += stat.distance_walked;
       aggregated.time_tracked += stat.time_tracked;

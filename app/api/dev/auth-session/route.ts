@@ -5,6 +5,14 @@ function isSafeNextPath(value: string | null): value is string {
   return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//');
 }
 
+function requestOrigin(request: NextRequest): string {
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const host = forwardedHost || request.headers.get('host');
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const protocol = forwardedProto || request.nextUrl.protocol.replace(':', '') || 'http';
+  return host ? `${protocol}://${host}` : request.nextUrl.origin;
+}
+
 export async function GET(request: NextRequest) {
   if (process.env.NODE_ENV !== 'development') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -27,7 +35,9 @@ export async function GET(request: NextRequest) {
   }
 
   const redirectPath = isSafeNextPath(next) ? next : '/home';
-  const response = NextResponse.redirect(new URL(redirectPath, request.url));
+  // Preserve the incoming hostname. Switching 127.0.0.1 to localhost (or vice versa) drops
+  // Supabase's host-only auth cookie and makes the following page appear signed out.
+  const response = NextResponse.redirect(new URL(redirectPath, requestOrigin(request)));
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {

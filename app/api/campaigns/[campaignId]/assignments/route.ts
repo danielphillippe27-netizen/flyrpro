@@ -7,7 +7,10 @@ import {
   type CampaignAssignmentMode,
   type ZoneAssignmentInput,
 } from '@/lib/campaignAssignments';
-import { sendCampaignAssignmentEmail } from '@/lib/email/campaignAssignments';
+import {
+  resolveCampaignAssignmentTeamLeaderName,
+  sendCampaignAssignmentEmail,
+} from '@/lib/email/campaignAssignments';
 
 type RouteContext = { params: Promise<{ campaignId: string }> };
 
@@ -57,6 +60,11 @@ type CampaignHomeEventRow = {
   user_id: string;
   action_type: string;
   created_at: string;
+};
+
+type TeamLeaderIdentity = {
+  name: string;
+  email: string | null;
 };
 
 const CONVERSATION_STATUSES = new Set([
@@ -137,6 +145,41 @@ async function loadEmails(
     })
   );
   return emailByUserId;
+}
+
+async function loadTeamLeaderIdentity(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string
+): Promise<TeamLeaderIdentity> {
+  const { data: workspace, error: workspaceError } = await admin
+    .from('workspaces')
+    .select('owner_id')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError) {
+    throw new Error(workspaceError.message || 'Failed to load workspace team leader');
+  }
+
+  const ownerId = (workspace as { owner_id: string | null } | null)?.owner_id;
+  if (!ownerId) return { name: 'WolfGrid Team', email: null };
+
+  const [profiles, authResult] = await Promise.all([
+    loadProfiles(admin, [ownerId]),
+    admin.auth.admin.getUserById(ownerId),
+  ]);
+  const owner = authResult.data?.user;
+  const metadata = owner?.user_metadata as Record<string, unknown> | undefined;
+  const profile = profiles.get(ownerId);
+
+  return {
+    name: resolveCampaignAssignmentTeamLeaderName({
+      firstName: profile?.first_name,
+      lastName: profile?.last_name,
+      metadataFullName: typeof metadata?.full_name === 'string' ? metadata.full_name : null,
+      metadataName: typeof metadata?.name === 'string' ? metadata.name : null,
+    }),
+    email: authResult.error ? null : owner?.email?.trim().toLowerCase() || null,
+  };
 }
 
 async function loadAssignmentsForResponse(params: {
@@ -348,6 +391,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Resolve the stable workspace leader before mutating assignment state so an
+    // unexpected workspace lookup failure cannot leave the request half-complete.
+    const teamLeader = await loadTeamLeaderIdentity(admin, workspaceId);
+
     const campaignAddressIds = await fetchAllCampaignAddressIds(admin, campaignId);
     if (campaignAddressIds.length === 0) {
       return NextResponse.json({ error: 'Campaign has no homes to assign' }, { status: 400 });
@@ -432,8 +479,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
     }
 
-    const profiles = await loadProfiles(admin, memberIds);
-    const emails = await loadEmails(admin, memberIds);
+    const [profiles, emails] = await Promise.all([
+      loadProfiles(admin, memberIds),
+      loadEmails(admin, memberIds),
+    ]);
     const campaignName = campaignRow.name?.trim() || 'Campaign';
     const campaignUrl = `${request.nextUrl.origin}/?notifications=1`;
 
@@ -478,6 +527,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           await sendCampaignAssignmentEmail({
             to: email,
             recipientName: displayName(profiles.get(assignment.assigned_to_user_id), 'there'),
+            teamLeaderName: teamLeader.name,
+            teamLeaderEmail: teamLeader.email,
             campaignName,
             mode: assignment.mode,
             goalHomes: assignment.goal_homes,

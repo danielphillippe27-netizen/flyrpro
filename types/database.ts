@@ -1470,6 +1470,7 @@ export interface UserStats {
   flyers: number;
   conversations: number;
   leads_created: number;
+  appointments: number;
   qr_codes_scanned: number;
   distance_walked: number; // km
   time_tracked: number; // minutes
