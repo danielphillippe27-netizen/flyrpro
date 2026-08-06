@@ -11,12 +11,13 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v16-parcel-aware-global-temporary-reverse';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v17-global-preserve-multi-address';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
 const SYNTHETIC_SCORE = 0.96;
 const SYNTHETIC_MARGIN = 0.20;
+const REVERSE_REASSIGN_CONFIDENCE_CEILING = 0.80;
 const REVERSE_PROVIDER_VERSION = 'mapbox-geocoding-v6';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -936,6 +937,37 @@ export function isBuildingAvailableForCivicAssignment(
   return (
     allowsMultipleAddresses ||
     !occupiedSingleAddressBuildings.has(buildingId.toLowerCase())
+  );
+}
+
+export function buildingAllowsMultipleCivicAddresses(
+  building: BundleFeature,
+  existingLinkedAddressCount: number
+): boolean {
+  return (
+    existingLinkedAddressCount > 1 ||
+    buildingHasAuthoritativeMultiUnitMetadata(building)
+  );
+}
+
+export function shouldReverseGeocodeBuilding(
+  hasActiveLink: boolean,
+  isOrphan: boolean,
+  highestLinkConfidence: number | null
+): boolean {
+  if (!hasActiveLink) return true;
+  return (
+    isOrphan &&
+    (highestLinkConfidence ?? 0) < REVERSE_REASSIGN_CONFIDENCE_CEILING
+  );
+}
+
+export function canAutoReassignAddressFromReverseGeocode(
+  currentLinkConfidence: number | null
+): boolean {
+  return (
+    currentLinkConfidence !== null &&
+    currentLinkConfidence < REVERSE_REASSIGN_CONFIDENCE_CEILING
   );
 }
 
@@ -2364,6 +2396,7 @@ export class CampaignMapReconciliationService {
 
     const currentLinkByAddress = new Map<string, JsonRecord>();
     const currentAddressIdsByBuilding = new Map<string, string[]>();
+    const highestLinkConfidenceByBuilding = new Map<string, number>();
     const currentLinks = asArray<JsonRecord>(
       (await readCurrentCampaignMapBundle(this.supabase, input.run.campaign_id))
         ?.links
@@ -2385,6 +2418,14 @@ export class CampaignMapReconciliationService {
         ...(currentAddressIdsByBuilding.get(buildingIdValue.toLowerCase()) ?? []),
         addressIdValue,
       ]);
+      const linkConfidence = numberValue(link.confidence);
+      if (linkConfidence !== null) {
+        const buildingKey = buildingIdValue.toLowerCase();
+        highestLinkConfidenceByBuilding.set(
+          buildingKey,
+          Math.max(highestLinkConfidenceByBuilding.get(buildingKey) ?? 0, linkConfidence)
+        );
+      }
     }
 
     const geocoded: Array<{
@@ -2397,7 +2438,15 @@ export class CampaignMapReconciliationService {
       multipleAddressesAllowed: boolean;
     }> = [];
     const orderedBuildings = input.buildings
-      .filter((building) => !isExplicitNonResidentialBuilding(building))
+      .filter((building) => {
+        const id = featureId(building)?.toLowerCase();
+        if (!id || isExplicitNonResidentialBuilding(building)) return false;
+        return shouldReverseGeocodeBuilding(
+          input.linkedBuildingIds.has(id),
+          input.orphanBuildingIds.has(id),
+          highestLinkConfidenceByBuilding.get(id) ?? null
+        );
+      })
       .sort((left, right) => (featureId(left) ?? '').localeCompare(featureId(right) ?? ''));
     for (const building of orderedBuildings.slice(0, maxGeocodes)) {
       const buildingIdValue = featureId(building);
@@ -2418,7 +2467,14 @@ export class CampaignMapReconciliationService {
           result,
           spatialDistance,
           strong: result.accuracy === 'rooftop' || result.accuracy === 'parcel',
-          multipleAddressesAllowed: buildingHasAuthoritativeMultiUnitMetadata(building),
+          // Existing canonical links are authoritative evidence too. Some row
+          // homes and multi-address footprints do not carry reliable unit
+          // metadata, so treating only metadata as capacity evidence allowed a
+          // reverse-geocode pass to collapse their sibling address links.
+          multipleAddressesAllowed: buildingAllowsMultipleCivicAddresses(
+            building,
+            currentAddressIdsByBuilding.get(buildingIdValue.toLowerCase())?.length ?? 0
+          ),
         });
         if (geocoded.length === 1 || geocoded.length % 10 === 0) {
           await this.heartbeatRun(input.run.id, {
@@ -2557,12 +2613,19 @@ export class CampaignMapReconciliationService {
       for (const address of contextMatches) {
         const addressIdValue = addressId(address);
         if (!addressIdValue || input.protectedAddressIds.has(addressIdValue.toLowerCase())) continue;
+        const currentLink = currentLinkByAddress.get(addressIdValue.toLowerCase());
+        if (
+          currentLink &&
+          !canAutoReassignAddressFromReverseGeocode(numberValue(currentLink.confidence))
+        ) {
+          continue;
+        }
         const sourcePoint = featurePoint(address);
         const sourceDistance = sourcePoint
           ? pointToGeometryDistanceMeters(sourcePoint, item.building.geometry)
           : 100;
         const currentBuildingId = stringValue(
-          currentLinkByAddress.get(addressIdValue.toLowerCase())?.building_id
+          currentLink?.building_id
         );
         const weight =
           100 +
