@@ -2,6 +2,7 @@
  * Run with: npx tsx lib/services/__tests__/CampaignMapReconciliationRules.test.ts
  */
 import {
+  MAP_RECONCILIATION_ALGORITHM_VERSION,
   addressContextMatchesReverse,
   assessReverseOrphanCorrection,
   buildingAllowsMultipleCivicAddresses,
@@ -28,6 +29,11 @@ import {
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
+
+assert(
+  MAP_RECONCILIATION_ALGORITHM_VERSION.includes('global'),
+  'the algorithm version must keep the global dispatcher token for parcel and non-parcel campaigns'
+);
 
 assert(
   configuredReverseGeocodingStorageMode('temporary') === 'temporary',
