@@ -4,7 +4,9 @@
 import {
   addressContextMatchesReverse,
   assessReverseOrphanCorrection,
+  buildingAllowsMultipleCivicAddresses,
   buildingHasAuthoritativeMultiUnitMetadata,
+  canAutoReassignAddressFromReverseGeocode,
   canAutoCreateSyntheticOnParcel,
   createParcelIdentityResolver,
   canCreateSyntheticAfterGlobalAssignment,
@@ -17,6 +19,7 @@ import {
   isBuildingAvailableForCivicAssignment,
   parseMapboxReverseResult,
   scoreReconciliationCandidate,
+  shouldReverseGeocodeBuilding,
   solveGlobalOneToOneAssignment,
   shouldAutoHideAuxiliary,
   shouldAutoHideOverlappingDuplicate,
@@ -226,6 +229,46 @@ assert(
     properties: { building_type: 'townhouse' },
   }),
   'explicit townhouse metadata must retain multi-unit capacity'
+);
+
+const detachedBuildingWithoutUnitMetadata: GeoJSON.Feature<GeoJSON.Polygon> = {
+  type: 'Feature',
+  geometry: {
+    type: 'Polygon',
+    coordinates: [[
+      [-79.7, 43.6],
+      [-79.6999, 43.6],
+      [-79.6999, 43.6001],
+      [-79.7, 43.6001],
+      [-79.7, 43.6],
+    ]],
+  },
+  properties: { building_type: 'detached' },
+};
+assert(
+  buildingAllowsMultipleCivicAddresses(detachedBuildingWithoutUnitMetadata, 2),
+  'an existing multi-address canonical link set must protect sibling addresses even without unit metadata'
+);
+assert(
+  !buildingAllowsMultipleCivicAddresses(detachedBuildingWithoutUnitMetadata, 1),
+  'a single existing address must not manufacture multi-address capacity'
+);
+assert(
+  shouldReverseGeocodeBuilding(false, false, null),
+  'an unlinked building must remain eligible for targeted reverse geocoding'
+);
+assert(
+  !shouldReverseGeocodeBuilding(true, false, 0.9),
+  'an established linked building must not be reverse geocoded indiscriminately'
+);
+assert(
+  shouldReverseGeocodeBuilding(true, true, 0.5),
+  'an orphaned building with only low-confidence evidence may be reverse geocoded'
+);
+assert(
+  !canAutoReassignAddressFromReverseGeocode(0.9) &&
+    canAutoReassignAddressFromReverseGeocode(0.5),
+  'reverse geocoding must not auto-reassign an existing high-confidence address link'
 );
 
 const source1777 = normalizedAddressIdentity({
