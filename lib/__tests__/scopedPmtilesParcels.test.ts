@@ -7,6 +7,7 @@ import {
   getParcelFeatureExternalId,
   isDisplayableParcelFeature,
   isResidentialParcelFeature,
+  normalizeParcelGeometryLongitudes,
   parcelTilesFromSnapshot,
   parseParcelBbox,
   tileRangeForParcelBbox,
@@ -55,6 +56,18 @@ function snapshot(tileMetrics: Record<string, unknown>): CampaignSnapshotRow {
 }
 
 const tests: Array<[string, () => void]> = [
+  [
+    'normalizes and deduplicates world-wrapped parcel polygons',
+    () => {
+      const ring = [[-81.73, 26.15], [-81.72, 26.15], [-81.72, 26.16], [-81.73, 26.15]];
+      const wrapped = ring.map(([longitude, latitude]) => [longitude + 360, latitude]);
+      const normalized = normalizeParcelGeometryLongitudes(
+        { type: 'MultiPolygon', coordinates: [[ring], [wrapped]] },
+        [-81.74, 26.14, -81.71, 26.17]
+      );
+      assertEqual(normalized, { type: 'Polygon', coordinates: [ring] });
+    },
+  ],
   [
     'selects the highest bounded parcel tile range within the scan budget',
     () => {

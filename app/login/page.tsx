@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
+import { clearBrowserSupabaseAuthCookies } from '@/lib/supabase/shared-cookie';
 
 type InviteValidationResponse = {
   valid?: boolean;
@@ -74,6 +75,10 @@ export default function LoginPage() {
     const message = rawMessage.trim();
     const status = typeof asRecord?.status === 'number' ? asRecord.status : null;
 
+    if (status === 429 || /rate limit|too many requests/i.test(message)) {
+      return 'Too many sign-in attempts. Please wait 60 seconds, then try once more.';
+    }
+
     const isUpstreamFailure =
       message === '{}' ||
       /upstream connect error|remote connection failure|service unavailable|fetch failed|timeout|timed out/i.test(
@@ -93,6 +98,7 @@ export default function LoginPage() {
   const inviteToken = searchParams?.get('token') ?? null;
   const inviteMode = Boolean(inviteToken?.trim());
   const workspaceIntent = searchParams?.get('workspace') ?? searchParams?.get('workspaceId') ?? null;
+  const isSalesLogin = searchParams?.get('sales') === '1';
 
   const resolveNextPath = () => {
     if (nextFromQuery && nextFromQuery.startsWith('/')) return nextFromQuery;
@@ -217,6 +223,14 @@ export default function LoginPage() {
   useEffect(() => {
     if (hasChecked || typeof window === 'undefined') return;
 
+    // Sales users may still have the old host-only cookie alongside the new
+    // `.wolfgrid.app` cookie. Avoid refreshing both and start this login clean.
+    if (isSalesLogin) {
+      clearBrowserSupabaseAuthCookies();
+      setHasChecked(true);
+      return;
+    }
+
     const checkAuth = async () => {
       try {
         setHasChecked(true);
@@ -237,14 +251,16 @@ export default function LoginPage() {
     };
 
     checkAuth();
-  }, [gatePath, hasChecked, router]);
+  }, [gatePath, hasChecked, isSalesLogin, router]);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setMessage(null);
 
     try {
+      if (isSalesLogin) clearBrowserSupabaseAuthCookies();
       const supabase = await getClientAsync();
       const normalizedEmail = sanitizeEmail(
         inviteMode && inviteInfo.email ? inviteInfo.email : email

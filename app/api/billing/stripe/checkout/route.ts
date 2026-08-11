@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         metadata: { user_id: userId },
       });
       customerId = customer.id;
-      await admin
+      const { error: entitlementError } = await admin
         .from('entitlements')
         .upsert(
           {
@@ -95,6 +95,9 @@ export async function POST(request: NextRequest) {
           },
           { onConflict: 'user_id' }
         );
+      if (entitlementError) {
+        throw new Error(`Failed to save Stripe customer: ${entitlementError.message}`);
+      }
     }
 
     const appUrl = getAppUrl(request);

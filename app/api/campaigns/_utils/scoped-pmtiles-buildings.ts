@@ -319,7 +319,26 @@ function mergeBuildingFragments(buildingId: string, fragments: PolygonalBuilding
 
 function bedrockFallbackSnapshotForBuildings(snapshot: CampaignSnapshotRow): CampaignSnapshotRow | null {
   const pmtilesKey = resolvePmtilesKey(snapshot);
-  if (!pmtilesKey || pmtilesKey.startsWith('bedrock/')) return null;
+  if (!pmtilesKey) return null;
+
+  const configuredFallback = snapshot.tile_metrics?.buildings_fallback_pmtiles_key;
+  if (typeof configuredFallback === 'string' && configuredFallback.trim()) {
+    const fallbackKey = configuredFallback.trim().replace(/^\/+/, '');
+    return {
+      ...snapshot,
+      buildings_key: fallbackKey,
+      buildings_url: null,
+      tile_metrics: {
+        ...(snapshot.tile_metrics ?? {}),
+        pmtiles_key: fallbackKey,
+        buildings_fallback_pmtiles_key: null,
+        fallback_from_pmtiles_key: pmtilesKey,
+        fallback_reason: 'regional_building_gap_fill',
+      },
+    };
+  }
+
+  if (pmtilesKey.startsWith('bedrock/')) return null;
 
   const usStateMatch = pmtilesKey.match(/^diamond\/buildings\/usa\/([a-z]{2})\//i);
   if (!usStateMatch) return null;
@@ -349,6 +368,41 @@ function bedrockFallbackSnapshotForBuildings(snapshot: CampaignSnapshotRow): Cam
       fallback_from_pmtiles_key: pmtilesKey,
       fallback_reason: 'empty_diamond_building_scope',
     },
+  };
+}
+
+function mergePrimaryAndFallbackBuildings(
+  primary: ScopedBuildingFeatureCollection,
+  fallback: ScopedBuildingFeatureCollection | null
+): ScopedBuildingFeatureCollection {
+  if (!fallback?.features.length) return primary;
+
+  const primaryWithBounds = primary.features.map((feature) => ({
+    feature,
+    bounds: geometryBounds(feature.geometry),
+  }));
+  const acceptedFallback = fallback.features.filter((candidate) => {
+    const candidateBounds = geometryBounds(candidate.geometry);
+    if (!candidateBounds) return false;
+    return !primaryWithBounds.some(({ feature, bounds }) => {
+      if (!bounds || !bboxesIntersect(bounds, candidateBounds)) return false;
+      try {
+        return turf.booleanIntersects(feature, candidate);
+      } catch {
+        return true;
+      }
+    });
+  });
+
+  console.log('[ScopedPMTilesBuildings] Merged regional primary with national fallback', {
+    primary: primary.features.length,
+    fallbackCandidates: fallback.features.length,
+    fallbackAccepted: acceptedFallback.length,
+    total: primary.features.length + acceptedFallback.length,
+  });
+  return {
+    type: 'FeatureCollection',
+    features: [...primary.features, ...acceptedFallback],
   };
 }
 
@@ -463,10 +517,16 @@ export async function fetchScopedPmtilesBuildingFeatures(
   boundary: GeoJSON.Polygon | null = null
 ): Promise<ScopedBuildingFeatureCollection | null> {
   const primary = await extractScopedPmtilesBuildingFeatures(snapshot, bbox, hiddenBuildingIds, boundary);
-  if (primary) return primary;
-
   const fallbackSnapshot = bedrockFallbackSnapshotForBuildings(snapshot);
-  if (!fallbackSnapshot) return null;
+  if (!fallbackSnapshot) return primary;
 
-  return extractScopedPmtilesBuildingFeatures(fallbackSnapshot, bbox, hiddenBuildingIds, boundary);
+  const fallback = await extractScopedPmtilesBuildingFeatures(
+    fallbackSnapshot,
+    bbox,
+    hiddenBuildingIds,
+    boundary
+  );
+  if (primary) return mergePrimaryAndFallbackBuildings(primary, fallback);
+
+  return fallback;
 }

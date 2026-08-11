@@ -87,6 +87,7 @@ type BedrockAustraliaRow = Record<string, unknown> & {
 const DEFAULT_BUCKET = 'flyr-pro-addresses-2025';
 const DEFAULT_ADDRESS_PREFIX = 'bedrock/australia/current/addresses';
 const DEFAULT_BUILDING_PREFIX = 'bedrock/australia/buildings/national';
+const DEFAULT_QLD_BUILDING_PREFIX = 'bedrock/australia/buildings/qld';
 const AU_REGION_CODES = new Set(['AU', 'ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']);
 const AU_PARCEL_REGION_CODES = new Set(['NSW', 'QLD']);
 const REGION = process.env.AWS_REGION || process.env.AWS_S3_BUCKET_REGION || 'us-east-2';
@@ -135,16 +136,20 @@ function buildingPrefix() {
   return (process.env.BEDROCK_AU_BUILDING_PREFIX || DEFAULT_BUILDING_PREFIX).replace(/^\/+|\/+$/g, '');
 }
 
+function qldBuildingPrefix() {
+  return (process.env.BEDROCK_AU_QLD_BUILDING_PREFIX || DEFAULT_QLD_BUILDING_PREFIX).replace(/^\/+|\/+$/g, '');
+}
+
+function buildingPrefixForRegion(regionCode: string | null | undefined) {
+  return regionCode?.trim().toUpperCase() === 'QLD' ? qldBuildingPrefix() : buildingPrefix();
+}
+
 function datasetPrefix() {
   return addressPrefix().replace(/\/addresses$/i, '');
 }
 
 function key(filename: string) {
   return `${addressPrefix()}/${filename}`;
-}
-
-function buildingKey(filename: string) {
-  return `${buildingPrefix()}/${filename}`;
 }
 
 function parcelPmtilesKey() {
@@ -710,6 +715,7 @@ export class BedrockAustraliaService {
             addressCount: pmtilesResult.addresses.length,
             scanMetric: pmtilesResult.metric,
             parcelTiles,
+            regionCode: options.regionCode,
           }),
         };
       }
@@ -726,8 +732,15 @@ export class BedrockAustraliaService {
     addressCount: number;
     scanMetric: BedrockScanResult;
     parcelTiles?: ResolvedParcelTiles | null;
+    regionCode?: string | null;
   }): LambdaSnapshotResponse {
     const parcelTiles = options.parcelTiles ?? null;
+    const primaryBuildingPrefix = buildingPrefixForRegion(options.regionCode);
+    const primaryBuildingKey = `${primaryBuildingPrefix}/buildings.pmtiles`;
+    const primaryBuildingTilejsonKey = `${primaryBuildingPrefix}/buildings.json`;
+    const primaryBuildingGeojsonKey = `${primaryBuildingPrefix}/buildings.ndjson.gz`;
+    const usesQueenslandPrimary = options.regionCode?.trim().toUpperCase() === 'QLD';
+    const nationalFallbackKey = `${buildingPrefix()}/buildings.pmtiles`;
     const tileMetrics = {
       artifact_type: 'diamond',
       diamond_mode: true,
@@ -736,9 +749,12 @@ export class BedrockAustraliaService {
       bedrock_country_code: 'AU',
       bedrock_version: process.env.BEDROCK_AU_VERSION || 'current',
       geometry_provider: 'pmtiles',
-      pmtiles_key: buildingKey('buildings.pmtiles'),
-      tilejson_key: buildingKey('buildings.json'),
-      buildings_geojson_key: buildingKey('buildings.geojson.gz'),
+      pmtiles_key: primaryBuildingKey,
+      tilejson_key: primaryBuildingTilejsonKey,
+      buildings_geojson_key: primaryBuildingGeojsonKey,
+      buildings_fallback_pmtiles_key: usesQueenslandPrimary ? nationalFallbackKey : null,
+      buildings_fallback_source: usesQueenslandPrimary ? 'Overture Maps Buildings' : null,
+      buildings_merge_strategy: usesQueenslandPrimary ? 'primary_intersection_precedence' : null,
       addresses_pmtiles_key: key('addresses.pmtiles'),
       addresses_tilejson_key: key('addresses.json'),
       addresses_geojson_key: key('addresses.ndjson.gz'),
@@ -762,7 +778,10 @@ export class BedrockAustraliaService {
       },
       join_key: 'address_detail_pid',
       sources: {
-        buildings: 'Microsoft GlobalML Building Footprints',
+        buildings: usesQueenslandPrimary
+          ? 'Building outlines [generated] - Queensland'
+          : 'Overture Maps Buildings',
+        buildings_fallback: usesQueenslandPrimary ? 'Overture Maps Buildings' : null,
         addresses: 'G-NAF',
       },
       address_minzoom: 8,
@@ -785,12 +804,12 @@ export class BedrockAustraliaService {
         roads: 0,
       },
       s3_keys: {
-        buildings: buildingKey('buildings.pmtiles'),
+        buildings: primaryBuildingKey,
         addresses: key('addresses.pmtiles'),
         metadata: key('bedrock-manifest.json'),
       },
       urls: {
-        buildings: cdnUrlForKey(buildingKey('buildings.pmtiles')),
+        buildings: cdnUrlForKey(primaryBuildingKey),
         addresses: cdnUrl('addresses.pmtiles'),
         metadata: `s3://${bucket()}/${key('bedrock-manifest.json')}`,
       },

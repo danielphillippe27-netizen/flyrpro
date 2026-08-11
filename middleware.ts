@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
+import { withSharedWolfGridCookie } from '@/lib/supabase/shared-cookie';
 
 let loggedConfigError = false;
 
@@ -20,6 +21,12 @@ export async function middleware(req: NextRequest) {
     redirectURL.hostname = CANONICAL_HOST;
     redirectURL.port = '';
     return NextResponse.redirect(redirectURL, 308);
+  }
+
+  // Public auth pages must not repeatedly refresh an already-invalid token.
+  // The login page creates a fresh session, and the callback persists it.
+  if (req.nextUrl.pathname === '/login' || req.nextUrl.pathname.startsWith('/password/')) {
+    return NextResponse.next();
   }
 
   const res = NextResponse.next();
@@ -41,7 +48,7 @@ export async function middleware(req: NextRequest) {
               req.cookies.set(name, value)
             );
             cookiesToSet.forEach(({ name, value, options }) =>
-              res.cookies.set(name, value, options)
+              res.cookies.set(name, value, withSharedWolfGridCookie(req.nextUrl.hostname, options))
             );
           },
         },
@@ -62,6 +69,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except static assets
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)'],
+  // Run on application routes, never on static files such as logos and fonts.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.[a-zA-Z0-9]+$).*)'],
 };

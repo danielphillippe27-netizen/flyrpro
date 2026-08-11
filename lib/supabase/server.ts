@@ -1,11 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import {
   getSupabaseAnonKey,
   getSupabaseServiceRoleKey,
   getSupabaseUrl,
 } from '@/lib/supabase/env';
+import { withSharedWolfGridCookie } from '@/lib/supabase/shared-cookie';
 
 function isTransientSupabaseFetchError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -69,6 +70,8 @@ export function createAdminClient() {
  */
 export async function getSupabaseServerClient() {
   const cookieStore = await cookies();
+  const headerStore = await headers();
+  const hostname = headerStore.get('x-forwarded-host') || headerStore.get('host');
   const supabaseUrl = getSupabaseUrl();
   const supabaseAnonKey = getSupabaseAnonKey();
 
@@ -82,7 +85,7 @@ export async function getSupabaseServerClient() {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
+            cookieStore.set(name, value, withSharedWolfGridCookie(hostname, options))
           );
         },
       },

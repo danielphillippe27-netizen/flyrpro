@@ -184,8 +184,9 @@ type MatchCandidate = {
 };
 
 type PreparedParcel = {
-  rings: number[][][];
+  polygons: number[][][][];
   bbox: [number, number, number, number];
+  normalizedAddressText: string;
 };
 
 function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
@@ -200,6 +201,9 @@ interface CampaignAddress {
   formatted: string | null;
   house_number: string | null;
   street_name: string | null;
+  locality?: string | null;
+  region?: string | null;
+  postal_code?: string | null;
   geom: unknown;
 }
 
@@ -310,7 +314,7 @@ export class StableLinkerService {
       const rawAddresses = await fetchAllInPages<CampaignAddress>(async (from, to) =>
         await this.supabase
           .from('campaign_addresses')
-          .select('id, gers_id, formatted, house_number, street_name, geom')
+          .select('id, gers_id, formatted, house_number, street_name, locality, region, postal_code, geom')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
@@ -522,7 +526,7 @@ export class StableLinkerService {
       .sort((a, b) => this.rankMatches(a, b))[0];
     if (contained) return this.matchFromCandidate(address, contained);
 
-    const parcelMatch = this.parcelBridgeMatch(addressCoords, nearby, parcels);
+    const parcelMatch = this.parcelBridgeMatch(address, nearby, parcels);
     if (parcelMatch) return this.matchFromCandidate(address, parcelMatch);
 
     const semantic = nearby
@@ -598,11 +602,17 @@ export class StableLinkerService {
   }
 
   private parcelBridgeMatch(
-    addressCoords: [number, number],
+    address: CampaignAddressWithPoint,
     nearby: MatchCandidate[],
     parcels: PreparedParcel[]
   ): MatchCandidate | null {
-    const parcel = parcels.find((candidate) => this.pointInPreparedParcel(addressCoords, candidate));
+    const addressCoords = address.geom.coordinates;
+    const exactParcel = parcels.find((candidate) =>
+      this.parcelAddressMatches(address, candidate.normalizedAddressText)
+    );
+    const parcel = exactParcel ?? parcels.find((candidate) =>
+      this.pointInPreparedParcel(addressCoords, candidate)
+    );
     if (!parcel) return null;
 
     return nearby
@@ -762,7 +772,7 @@ export class StableLinkerService {
         continue;
       }
 
-      const parcelMatch = this.parcelBridgeMatch(addressCoords, nearby, parcels);
+      const parcelMatch = this.parcelBridgeMatch(address, nearby, parcels);
       if (parcelMatch) {
         addAddressEvidence(parcelMatch.building, address);
         continue;
@@ -1091,18 +1101,65 @@ export class StableLinkerService {
       const polygons = parcel.geometry.type === 'Polygon'
         ? [parcel.geometry.coordinates as number[][][]]
         : parcel.geometry.coordinates as number[][][][];
-      const rings = polygons.flatMap((polygon) => polygon);
-      if (rings.length === 0) return [];
+      if (polygons.length === 0) return [];
+      const properties = parcel.properties ?? {};
+      const parcelAddress = [
+        properties.parceladdr,
+        properties.parcel_address,
+        properties.site_address,
+        properties.address_line,
+        properties.address,
+        properties.full_address,
+      ].find((value) => typeof value === 'string' && value.trim());
       return [{
-        rings,
-        bbox: this.bboxForPositions(rings.flat()),
+        polygons,
+        bbox: this.bboxForPositions(polygons.flat(2)),
+        normalizedAddressText: this.normalizedCivicText(parcelAddress),
       }];
     });
   }
 
   private pointInPreparedParcel(point: [number, number], parcel: PreparedParcel): boolean {
     if (!this.pointInBbox(point, parcel.bbox)) return false;
-    return parcel.rings.some((ring) => this.isPointInPolygon(point, ring));
+    return parcel.polygons.some((polygon) => this.isPointInPolygonRings(point, polygon));
+  }
+
+  private normalizedCivicText(value: unknown): string {
+    const suffixes: Record<string, string> = {
+      avenue: 'ave', boulevard: 'blvd', circle: 'cir', court: 'ct',
+      drive: 'dr', lane: 'ln', place: 'pl', road: 'rd', street: 'st',
+      terrace: 'ter', trail: 'trl',
+    };
+    return String(value ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean)
+      .map((token) => suffixes[token] ?? token)
+      .join(' ');
+  }
+
+  private parcelAddressMatches(
+    address: CampaignAddressWithPoint,
+    normalizedParcelAddress: string
+  ): boolean {
+    if (!normalizedParcelAddress) return false;
+    const civic = this.normalizedCivicText(`${address.house_number ?? ''} ${address.street_name ?? ''}`);
+    if (!civic) return false;
+    const locality = this.normalizedCivicText(address.locality);
+    const region = this.normalizedCivicText(address.region);
+    const postal = this.normalizedCivicText(address.postal_code);
+    const suffixes = [
+      '',
+      locality,
+      region,
+      [locality, region].filter(Boolean).join(' '),
+      [locality, region, postal].filter(Boolean).join(' '),
+    ];
+    return suffixes.some((suffix) =>
+      normalizedParcelAddress === [civic, suffix].filter(Boolean).join(' ')
+    );
   }
 
   private buildingBbox(building: BuildingFeature): [number, number, number, number] {

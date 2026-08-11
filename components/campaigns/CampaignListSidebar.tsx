@@ -21,6 +21,7 @@ import { getClientAsync } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 import { getIndustryCopy } from '@/lib/industry-copy';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -119,8 +120,11 @@ export function CampaignListSidebar({
         if (pathname?.startsWith(`/campaigns/${id}`)) {
           router.push('/campaigns');
         }
+        toast.success('Campaign deleted');
       } catch (e) {
         console.error('Delete campaign failed:', e);
+        toast.error(e instanceof Error ? e.message : 'Failed to delete campaign');
+        throw e;
       }
     },
     [pathname, router]
@@ -435,6 +439,8 @@ function CampaignList({
     try {
       await onDeleteCampaign(deleteTarget.id);
       setDeleteTarget(null);
+    } catch {
+      // The parent reports the server error and the dialog stays open for retry.
     } finally {
       setDeleting(false);
     }

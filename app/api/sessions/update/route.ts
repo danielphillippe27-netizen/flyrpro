@@ -3,6 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
+import { normalizeSessionGoalType } from '../goal-type';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,6 +123,7 @@ export async function POST(request: NextRequest) {
   const averageAccuracyMeters = body.averageAccuracyMeters == null
     ? null
     : Math.max(0, Number(body.averageAccuracyMeters) || 0);
+  const persistedGoalType = normalizeSessionGoalType(body.goalType, body.mode);
   const sessionMeta = {
     goalType: body.goalType ?? null,
     goalAmount,
@@ -140,7 +142,7 @@ export async function POST(request: NextRequest) {
     farm_touch_id: body.farmTouchId ?? null,
     start_time: startedAt.toISOString(),
     end_time: endedAt.toISOString(),
-    goal_type: body.goalType ?? 'doors',
+    goal_type: persistedGoalType,
     goal_amount: goalAmount ?? 0,
     notes: body.notes ?? null,
     session_mode: body.mode ?? 'door_knocking',
@@ -160,7 +162,7 @@ export async function POST(request: NextRequest) {
       route_assignment_id: body.routeAssignmentId ?? null,
       farm_id: body.farmId ?? null,
       farm_touch_id: body.farmTouchId ?? null,
-      goal_type: body.goalType ?? 'doors',
+      goal_type: persistedGoalType,
       goal_amount: goalAmount ?? 0,
       notes: body.notes ?? null,
       session_mode: body.mode ?? 'door_knocking',
@@ -204,6 +206,7 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
     }
     if (activeResult.error) {
+      console.error('[api/sessions/update] active session write failed', activeResult.error);
       return NextResponse.json({ error: activeResult.error.message }, { status: 500 });
     }
     return NextResponse.json({ ok: true, sessionId: activeResult.data?.id ?? body.sessionId });
@@ -219,7 +222,7 @@ export async function POST(request: NextRequest) {
           farm_id: body.farmId ?? null,
           farm_touch_id: body.farmTouchId ?? null,
           end_time: endedAt.toISOString(),
-          goal_type: body.goalType ?? 'doors',
+          goal_type: persistedGoalType,
           goal_amount: goalAmount ?? 0,
           notes: body.notes ?? null,
           session_mode: body.mode ?? 'door_knocking',
@@ -254,6 +257,7 @@ export async function POST(request: NextRequest) {
     result = await admin.from('sessions').insert(fallback).select('id').single();
   }
   if (result.error) {
+    console.error('[api/sessions/update] final session write failed', result.error);
     return NextResponse.json({ error: result.error.message }, { status: 500 });
   }
 

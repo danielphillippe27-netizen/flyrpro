@@ -3,6 +3,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
+import { normalizeSessionGoalType } from '../goal-type';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
     farm_touch_id: body.farmTouchId ?? null,
     start_time: startedAt.toISOString(),
     end_time: null as string | null,
-    goal_type: body.goalType ?? 'doors',
+    goal_type: normalizeSessionGoalType(body.goalType, body.mode),
     goal_amount: goalAmount,
     notes: body.notes ?? null,
     session_mode: body.mode ?? 'door_knocking',

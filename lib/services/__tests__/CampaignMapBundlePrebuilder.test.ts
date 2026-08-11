@@ -142,6 +142,37 @@ function run() {
     assertEqual(ownership[0].parcelId, 'small-parcel');
   });
 
+  test('address-rich parcels use civic identity instead of a road-side containing parcel', () => {
+    const address: GeoJSON.Feature = {
+      ...addressFeature('address-6610', -81.73420, 26.15980),
+      properties: {
+        id: 'address-6610',
+        house_number: '6610',
+        street_name: 'Cutty Sark Lane',
+        locality: 'Naples',
+        region: 'FL',
+      },
+    };
+    const addresses: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [address] };
+    const parcels: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        parcelFeature('road-side-master', rectangle(-81.7350, 26.1590, -81.7330, 26.1610), {
+          parceladdr: '6608 CUTTY SARK LN NAPLES FL',
+        }),
+        parcelFeature('home-6610', rectangle(-81.73475, 26.15965, -81.73440, 26.15995), {
+          parceladdr: '6610 CUTTY SARK LN NAPLES FL',
+        }),
+      ],
+    };
+
+    const ownership = selectCanonicalAddressParcelOwnershipForBundle(addresses, parcels);
+
+    assertEqual(ownership.length, 1);
+    assertEqual(ownership[0].parcelId, 'home-6610');
+    assertEqual(ownership[0].matchType, 'address_identity');
+  });
+
 	  test('parcel ownership never emits duplicate parcel owners for one address', () => {
     const addresses: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',

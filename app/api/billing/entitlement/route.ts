@@ -19,6 +19,7 @@ import {
   resolveWorkspaceIdForUser,
   type MinimalSupabaseClient,
 } from '@/app/api/_utils/workspace';
+import { reconcileActiveStripeSubscriptionForUser } from '@/app/lib/billing/stripe-subscription-sync';
 
 type WorkspaceBilling = {
   id?: string;
@@ -64,8 +65,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const entitlement = await getEntitlementForUser(requestUser.id);
     const admin = createAdminClient();
+    let entitlement = await getEntitlementForUser(requestUser.id);
+    if (!entitlement.is_active && entitlement.stripe_customer_id) {
+      try {
+        const reconciled = await reconcileActiveStripeSubscriptionForUser(
+          admin,
+          requestUser.id
+        );
+        if (reconciled) {
+          entitlement = await getEntitlementForUser(requestUser.id);
+        }
+      } catch (reconcileError) {
+        console.warn('[billing/entitlement] Stripe reconciliation failed', {
+          user_id: requestUser.id,
+          error:
+            reconcileError instanceof Error
+              ? reconcileError.message
+              : String(reconcileError),
+        });
+      }
+    }
     const approvedAmbassador = await getApprovedAmbassadorByEmail(admin, requestUser.email);
     const isAmbassador = !!approvedAmbassador;
     const workspace = await resolvePrimaryWorkspaceBilling(requestUser.id);
