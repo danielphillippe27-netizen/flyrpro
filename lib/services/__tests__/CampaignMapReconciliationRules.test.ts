@@ -48,8 +48,8 @@ assert(
   'temporary Mapbox reverse geocoding must be the safe default'
 );
 assert(
-  configuredMaxReverseGeocodes('') === 100 &&
-    configuredMaxReverseGeocodes('not-a-number') === 100 &&
+  configuredMaxReverseGeocodes('') === 1000 &&
+    configuredMaxReverseGeocodes('not-a-number') === 1000 &&
     configuredMaxReverseGeocodes('0') === 0,
   'blank or invalid reverse-geocode limits must use the fallback while explicit zero disables calls'
 );

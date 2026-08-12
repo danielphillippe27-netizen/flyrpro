@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v17-global-preserve-multi-address';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v18-global-address-first-synthetic';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -1040,12 +1040,12 @@ export function configuredReverseGeocodingStorageMode(
 
 export function configuredMaxReverseGeocodes(
   configured = process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
-  fallback = 100
+  fallback = 1000
 ): number {
   const raw = String(configured ?? '').trim();
   const parsed = raw === '' ? fallback : Number(raw);
   const safe = Number.isFinite(parsed) ? parsed : fallback;
-  return Math.max(0, Math.min(500, Math.floor(safe)));
+  return Math.max(0, Math.min(1000, Math.floor(safe)));
 }
 
 export class CampaignMapReconciliationService {
@@ -2357,7 +2357,7 @@ export class CampaignMapReconciliationService {
     if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
     const maxGeocodes = configuredMaxReverseGeocodes(
       process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
-      500
+      1000
     );
     if (maxGeocodes === 0) return [];
 

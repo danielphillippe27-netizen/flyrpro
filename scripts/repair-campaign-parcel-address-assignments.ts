@@ -87,6 +87,7 @@ async function main(): Promise<void> {
   const campaign = campaignResult.data as JsonRecord;
   const bbox = campaign.bbox as [number, number, number, number];
   const addresses = addressesResult.data as JsonRecord[];
+  const sourceAddressById = new Map(addresses.map((address) => [String(address.id), address]));
   const existingLinks = linksResult.data as JsonRecord[];
   const existingLinkByAddress = new Map(existingLinks.map((link) => [String(link.address_id), link]));
   const protectedAddressIds = new Set<string>();
@@ -269,7 +270,9 @@ async function main(): Promise<void> {
     }
   }
 
-  const unresolvedAddressIds = unresolved.map((item) => String(item.address_id));
+  const unresolvedAddressIds = unresolved
+    .map((item) => String(item.address_id))
+    .filter((addressId) => sourceAddressById.get(addressId)?.source !== 'derived_reverse_geocode');
   if (unresolvedAddressIds.length > 0) {
     const [deleteLinks, resetAddresses, deleteParcelLinks] = await Promise.all([
       supabase.from('building_address_links').delete()
