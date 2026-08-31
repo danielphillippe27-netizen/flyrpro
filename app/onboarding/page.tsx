@@ -121,6 +121,7 @@ type OnboardingDraft = {
 };
 
 type SelfServeCampaignDraft = {
+  draftId?: string;
   name: string;
   polygon: GeoJSON.Polygon;
   bbox?: number[];
@@ -211,6 +212,7 @@ function readSelfServeCampaignDraft(): SelfServeCampaignDraft | null {
     const parsed = JSON.parse(raw) as Partial<SelfServeCampaignDraft>;
     if (!parsed.name || parsed.polygon?.type !== 'Polygon' || !Array.isArray(parsed.polygon.coordinates)) return null;
     return {
+      draftId: typeof parsed.draftId === 'string' ? parsed.draftId : undefined,
       name: parsed.name,
       polygon: parsed.polygon,
       bbox: Array.isArray(parsed.bbox) ? parsed.bbox : undefined,
@@ -2107,21 +2109,17 @@ function OnboardingContent() {
                           </li>
                           ))}
                       </ul>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={loading || authLoading}
-                        onClick={async () => {
-                          if (isDialerOnboarding) {
-                            await handleContinueToApp(card.seatCount);
-                            return;
-                          }
-                          await handleContinueToApp(card.seatCount);
-                        }}
-                        className="mt-5 h-11 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-sm font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
-                      >
-                        {loading ? 'Opening...' : card.buttonLabel}
-                      </Button>
+                      {!isSelfServeDemoOnboarding ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading || authLoading}
+                          onClick={() => handleContinueToApp(card.seatCount)}
+                          className="mt-5 h-11 w-full rounded-xl border-[#d9dce2] bg-[#09090b] text-sm font-bold text-white hover:bg-[#27272a] hover:text-white dark:border-[#09090b] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a] dark:hover:text-white"
+                        >
+                          {loading ? 'Opening...' : card.buttonLabel}
+                        </Button>
+                      ) : null}
                     </div>
                   );
                 })}

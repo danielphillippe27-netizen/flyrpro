@@ -1586,6 +1586,7 @@ export default function CampaignDetailPage() {
                   title: 'Buildings loading',
                   description: 'Buildings will appear soon. This may take a minute.',
                 }}
+                preferMapbox3D={isSelfServeDemo}
               />
             </div>
           </TabsContent>

@@ -33,8 +33,10 @@ export function resolveCampaignMapRenderer(input: {
   sessionUses2D: boolean;
   mapboxAvailable: boolean;
   googleAvailable: boolean;
+  preferMapbox3D?: boolean;
 }): CampaignMapRenderer | null {
   if (!input.dataResolved) return null;
+  if (!input.activeSession && input.preferMapbox3D && input.mapboxAvailable) return 'mapbox3D';
   if (input.activeSession) {
     if ((input.sessionUses2D || !input.mapboxAvailable) && input.googleAvailable) return 'google2D';
     return input.mapboxAvailable ? 'mapbox3D' : null;

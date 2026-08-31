@@ -39,7 +39,10 @@ import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useMovieMapControlsEnabled } from '@/lib/hooks/useMovieMapControlsEnabled';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
-import { hasRenderableCampaignBuildings } from '@/lib/map/campaignRenderer';
+import {
+  hasRenderableCampaignBuildings,
+  resolveCampaignMapRenderer,
+} from '@/lib/map/campaignRenderer';
 import {
   applyPresetVisualTweaks,
   applyResolvedMapStyle,
@@ -802,6 +805,7 @@ export function CampaignDetailMapView({
   buildingPendingOverlay,
   pointOverlays = [],
   initialMapViewMode = 'buildings',
+  preferMapbox3D = false,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -817,6 +821,7 @@ export function CampaignDetailMapView({
   buildingPendingOverlay?: BuildingPendingOverlayConfig;
   pointOverlays?: MapPointOverlay[];
   initialMapViewMode?: InitialMapViewMode;
+  preferMapbox3D?: boolean;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
@@ -1012,8 +1017,16 @@ export function CampaignDetailMapView({
     () => (isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null),
     [mapBundle?.buildings],
   );
-  const useGoogle2D =
-    mapBundleResolved && mapBundleAvailable && !hasRenderableCampaignBuildings(bundleBuildings);
+  const selectedRenderer = resolveCampaignMapRenderer({
+    dataResolved: mapBundleResolved && mapBundleAvailable,
+    hasRenderableBuildings: hasRenderableCampaignBuildings(bundleBuildings),
+    activeSession: false,
+    sessionUses2D: false,
+    mapboxAvailable: true,
+    googleAvailable: true,
+    preferMapbox3D,
+  });
+  const useGoogle2D = selectedRenderer === 'google2D';
   const mapBundleDataKey = mapBundle?.asset_signature ?? mapBundle?.updated_at ?? mapBundle?.source_version ?? null;
   const visibleAddressesRef = useRef(visibleAddresses);
   const mapBundleSignatureRef = useRef<string | null>(null);

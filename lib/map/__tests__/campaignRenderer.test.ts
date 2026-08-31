@@ -49,6 +49,18 @@ test('an empty resolved campaign uses Google 2D', () => {
   }), 'google2D');
 });
 
+test('the self-serve demo prefers Mapbox even without building footprints', () => {
+  equal(resolveCampaignMapRenderer({
+    dataResolved: true,
+    hasRenderableBuildings: false,
+    activeSession: false,
+    sessionUses2D: false,
+    mapboxAvailable: true,
+    googleAvailable: true,
+    preferMapbox3D: true,
+  }), 'mapbox3D');
+});
+
 test('a populated campaign uses Mapbox 3D', () => {
   equal(resolveCampaignMapRenderer({
     dataResolved: true,

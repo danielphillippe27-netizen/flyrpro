@@ -108,6 +108,7 @@ async function createSelfServeCampaignFallback(params: {
   region?: string | null;
   polygon?: GeoJSON.Polygon | null;
   bbox?: number[] | null;
+  draftId?: string | null;
 }): Promise<string> {
   const existingCampaignId = await findFirstWorkspaceCampaign(params.admin, params.workspaceId);
   if (existingCampaignId) return existingCampaignId;
@@ -130,7 +131,11 @@ async function createSelfServeCampaignFallback(params: {
     address_source: 'map',
     region: params.region || null,
     seed_query: null,
-    tags: params.polygon ? 'self-serve-demo,prospecting-map' : 'self-serve-demo',
+    tags: [
+      'self-serve-demo',
+      params.polygon ? 'prospecting-map' : null,
+      params.draftId ? `self-serve-draft:${params.draftId}` : null,
+    ].filter(Boolean).join(','),
     bbox: params.bbox ?? null,
     territory_boundary: params.polygon ?? null,
     total_flyers: 0,
@@ -205,12 +210,14 @@ function normalizeSelfServeCampaignDraft(value: unknown): {
   name: string | null;
   polygon: GeoJSON.Polygon;
   bbox: number[] | null;
+  draftId: string | null;
 } | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as {
     name?: unknown;
     polygon?: unknown;
     bbox?: unknown;
+    draftId?: unknown;
   };
   const polygon = candidate.polygon as GeoJSON.Polygon | null;
   if (
@@ -234,6 +241,10 @@ function normalizeSelfServeCampaignDraft(value: unknown): {
     name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name.trim() : null,
     polygon,
     bbox: isFiniteNumberArray(candidate.bbox, 4) ? candidate.bbox : null,
+    draftId:
+      typeof candidate.draftId === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(candidate.draftId)
+        ? candidate.draftId
+        : null,
   };
 }
 
@@ -1176,6 +1187,7 @@ export async function POST(request: NextRequest) {
           region: normalizedCountryCode,
           polygon: selfServeCampaignDraft.polygon,
           bbox: selfServeCampaignDraft.bbox,
+          draftId: selfServeCampaignDraft.draftId,
         });
         selfServeProvisionCampaignId = selfServeCampaignId;
       } else {

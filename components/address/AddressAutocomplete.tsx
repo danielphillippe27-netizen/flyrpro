@@ -19,6 +19,7 @@ interface AddressAutocompleteProps {
   className?: string;
   inputClassName?: string;
   inputId?: string;
+  includeCities?: boolean;
 }
 
 export function AddressAutocomplete({
@@ -30,6 +31,7 @@ export function AddressAutocomplete({
   className,
   inputClassName,
   inputId,
+  includeCities = false,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -89,11 +91,28 @@ export function AddressAutocomplete({
         setError(null);
 
         try {
-          const results = await MapboxAutocompleteService.searchAddresses(
+          const addressPromise = MapboxAutocompleteService.searchAddresses(
             query,
             proximity || undefined,
             abortController.signal
           );
+          const cityPromise = includeCities
+            ? MapboxAutocompleteService.searchCities(
+                query,
+                proximity || undefined,
+                abortController.signal
+              )
+            : Promise.resolve([]);
+          const [addressResults, cityResults] = await Promise.all([addressPromise, cityPromise]);
+          const results: AddressSuggestion[] = [
+            ...addressResults,
+            ...cityResults.map((city) => ({
+              id: city.id,
+              title: city.city,
+              subtitle: [city.region, city.countryCode].filter(Boolean).join(', '),
+              coordinate: city.coordinate,
+            })),
+          ].slice(0, 8);
 
           // Check if request was aborted
           if (abortController.signal.aborted) {
@@ -117,7 +136,7 @@ export function AddressAutocomplete({
           }
         }
       }, 400),
-    []
+    [includeCities]
   );
 
   // Cleanup debounced function on unmount
