@@ -69,6 +69,9 @@ const CAMPAIGN_OVERLAY_LINE_LAYER_ID = 'campaign-territory-overlays-line';
 const CAMPAIGN_OVERLAY_LAYER_IDS = [CAMPAIGN_OVERLAY_FILL_LAYER_ID, CAMPAIGN_OVERLAY_LINE_LAYER_ID] as const;
 const SELF_SERVE_PREVIEW_SOURCE_ID = 'self-serve-preview-buildings';
 const SELF_SERVE_PREVIEW_LAYER_ID = 'self-serve-preview-buildings-extrusion';
+const SELF_SERVE_PREVIEW_PITCH_DEGREES = 62;
+const SELF_SERVE_PREVIEW_START_BEARING = -35;
+const SELF_SERVE_PREVIEW_ORBIT_DURATION_MS = 11000;
 const CAMPAIGN_BUILDING_LIMIT = 1000;
 
 type TeamMember = {
@@ -1259,6 +1262,9 @@ export default function CreateCampaignPage() {
         id: SELF_SERVE_PREVIEW_LAYER_ID,
         source: SELF_SERVE_PREVIEW_SOURCE_ID,
         type: 'fill-extrusion',
+        layout: {
+          'fill-extrusion-edge-radius': 0.2,
+        },
         paint: {
           'fill-extrusion-color': [
             'match',
@@ -1275,6 +1281,8 @@ export default function CreateCampaignPage() {
           'fill-extrusion-opacity': 0.96,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.28,
+          'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-cast-shadows': false,
         },
       });
     }
@@ -1312,19 +1320,6 @@ export default function CreateCampaignPage() {
       selfServePreviewHiddenLayerIdsRef.current = [];
     }
 
-    if (selfServeStep === 'preview' && selfServePreviewRevealCount === 0) {
-      const polygon = getDrawnPolygon(drawRef.current);
-      if (polygon) {
-        const [minLng, minLat, maxLng, maxLat] = turf.bbox(turf.polygon(polygon.coordinates));
-        mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
-          padding: { top: 100, bottom: 310, left: 42, right: 42 },
-          pitch: 52,
-          bearing: -18,
-          duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1200,
-          maxZoom: 17.5,
-        });
-      }
-    }
   }, [
     isSelfServeDemo,
     mapLoaded,
@@ -1334,6 +1329,66 @@ export default function CreateCampaignPage() {
     selfServeSelectedCount,
     selfServeStep,
   ]);
+
+  useEffect(() => {
+    if (
+      !isSelfServeDemo ||
+      !mapLoaded ||
+      !map.current ||
+      selfServeStep !== 'preview' ||
+      selfServeSelectedCount === 0
+    ) {
+      return;
+    }
+
+    const mapInstance = map.current;
+    const polygon = getDrawnPolygon(drawRef.current);
+    if (!polygon) return;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const [minLng, minLat, maxLng, maxLat] = turf.bbox(turf.polygon(polygon.coordinates));
+    const fitDuration = reducedMotion ? 0 : 1200;
+    let orbitFrame: number | null = null;
+    let orbitTimer: number | null = null;
+
+    mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+      padding: { top: 100, bottom: 310, left: 42, right: 42 },
+      pitch: SELF_SERVE_PREVIEW_PITCH_DEGREES,
+      bearing: SELF_SERVE_PREVIEW_START_BEARING,
+      duration: fitDuration,
+      maxZoom: 17.5,
+    });
+
+    if (!reducedMotion) {
+      orbitTimer = window.setTimeout(() => {
+        const center = mapInstance.getCenter();
+        const zoom = Math.max(15.4, Math.min(17, mapInstance.getZoom() + 0.45));
+        const startBearing = mapInstance.getBearing();
+        const startedAt = performance.now();
+
+        const orbit = (now: number) => {
+          const progress = Math.min(1, (now - startedAt) / SELF_SERVE_PREVIEW_ORBIT_DURATION_MS);
+          mapInstance.jumpTo({
+            center,
+            zoom,
+            pitch: SELF_SERVE_PREVIEW_PITCH_DEGREES,
+            bearing: startBearing + progress * 360,
+          });
+
+          if (progress < 1) {
+            orbitFrame = window.requestAnimationFrame(orbit);
+          }
+        };
+
+        orbitFrame = window.requestAnimationFrame(orbit);
+      }, fitDuration + 80);
+    }
+
+    return () => {
+      if (orbitTimer !== null) window.clearTimeout(orbitTimer);
+      if (orbitFrame !== null) window.cancelAnimationFrame(orbitFrame);
+    };
+  }, [isSelfServeDemo, mapLoaded, mapStyleRevision, selfServeSelectedCount, selfServeStep]);
 
   useEffect(() => {
     if (!mapLoaded || !map.current) return;
