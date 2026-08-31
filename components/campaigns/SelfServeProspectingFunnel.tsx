@@ -257,8 +257,14 @@ export function SelfServeProspectingFunnel({
           </div>
         </>
       ) : (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 max-h-[65dvh] overflow-y-auto px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
-          <div className="pointer-events-auto mx-auto w-full max-w-lg rounded-[1.75rem] border border-white/10 bg-[#08090c]/92 p-4 text-white shadow-[0_-24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-5">
+        <>
+          <div
+            className={`absolute inset-x-0 z-20 overflow-y-auto overscroll-contain px-3 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] sm:px-5 ${showResults
+              ? 'pointer-events-auto bottom-[calc(5rem+env(safe-area-inset-bottom))] max-h-[calc(65dvh_-_5rem_-_env(safe-area-inset-bottom))] touch-pan-y pb-2'
+              : 'pointer-events-none bottom-0 max-h-[65dvh] pb-[max(0.75rem,env(safe-area-inset-bottom))]'
+            }`}
+          >
+            <div className="pointer-events-auto mx-auto w-full max-w-lg rounded-[1.75rem] border border-white/10 bg-[#08090c]/92 p-4 text-white shadow-[0_-24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-5">
             {showResults ? (
               <>
                 <div className="flex items-start justify-between gap-4">
@@ -324,17 +330,6 @@ export function SelfServeProspectingFunnel({
                 </div>
                 <p className="mt-4 text-center text-sm font-bold leading-5 text-zinc-200">
                   Claim this map and use WolfGrid to find your next job.
-                </p>
-                <Button
-                  type="button"
-                  onClick={onStartOnboarding}
-                  className="mt-3 h-14 w-full rounded-2xl bg-red-500 text-sm font-black text-white shadow-[0_16px_40px_rgba(239,68,68,0.28)] hover:bg-red-400"
-                >
-                  <LockKeyhole className="size-4" />
-                  Claim This Map Free
-                </Button>
-                <p className="mt-3 text-center text-[10px] font-medium text-zinc-500">
-                  No credit card required. Your first campaign is included.
                 </p>
               </>
             ) : (
@@ -403,8 +398,21 @@ export function SelfServeProspectingFunnel({
                 )}
               </>
             )}
+            </div>
           </div>
-        </div>
+          {showResults ? (
+            <div className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+              <Button
+                type="button"
+                onClick={onStartOnboarding}
+                className="mx-auto h-14 w-full max-w-lg touch-manipulation rounded-2xl bg-red-500 text-sm font-black text-white shadow-[0_16px_40px_rgba(239,68,68,0.35)] hover:bg-red-400"
+              >
+                <LockKeyhole className="size-4" />
+                Claim This Map Free
+              </Button>
+            </div>
+          ) : null}
+        </>
       )}
     </>
   );
