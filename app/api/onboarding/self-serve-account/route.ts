@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 import { normalizeCountryCode } from '@/lib/countries';
+import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
 const SELF_SERVE_CAMPAIGN_NAME = 'FIRST CAMPAIGN';
 
@@ -58,9 +59,10 @@ function normalizeSelfServeCampaignDraft(value: unknown): {
   name: string | null;
   polygon: GeoJSON.Polygon;
   bbox: number[] | null;
+  draftId: string | null;
 } | null {
   if (!value || typeof value !== 'object') return null;
-  const candidate = value as { name?: unknown; polygon?: unknown; bbox?: unknown };
+  const candidate = value as { name?: unknown; polygon?: unknown; bbox?: unknown; draftId?: unknown };
   const polygon = candidate.polygon as GeoJSON.Polygon | null;
   if (
     !polygon ||
@@ -83,7 +85,19 @@ function normalizeSelfServeCampaignDraft(value: unknown): {
     name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name.trim() : null,
     polygon,
     bbox: isFiniteNumberArray(candidate.bbox, 4) ? candidate.bbox : null,
+    draftId:
+      typeof candidate.draftId === 'string' && /^[a-zA-Z0-9-]{8,80}$/.test(candidate.draftId)
+        ? candidate.draftId
+        : null,
   };
+}
+
+function campaignTagsForDraft(draft: ReturnType<typeof normalizeSelfServeCampaignDraft>): string {
+  return [
+    'self-serve-demo',
+    'prospecting-map',
+    draft?.draftId ? `self-serve-draft:${draft.draftId}` : null,
+  ].filter(Boolean).join(',');
 }
 
 async function findUnconfirmedUserByEmail(
@@ -160,6 +174,17 @@ async function createSelfServeCampaignIfNeeded(params: {
 }): Promise<string | null> {
   if (!params.draft) return null;
 
+  if (params.draft.draftId) {
+    const { data: matchingDraftCampaign } = await params.admin
+      .from('campaigns')
+      .select('id')
+      .eq('workspace_id', params.workspaceId)
+      .ilike('tags', `%self-serve-draft:${params.draft.draftId}%`)
+      .limit(1)
+      .maybeSingle();
+    if (matchingDraftCampaign?.id) return matchingDraftCampaign.id;
+  }
+
   const { data: existingCampaign } = await params.admin
     .from('campaigns')
     .select('id')
@@ -189,7 +214,7 @@ async function createSelfServeCampaignIfNeeded(params: {
       address_source: 'map',
       region: params.countryCode,
       seed_query: null,
-      tags: 'self-serve-demo,prospecting-map',
+      tags: campaignTagsForDraft(params.draft),
       bbox: params.draft.bbox,
       territory_boundary: params.draft.polygon,
       total_flyers: 0,
@@ -242,6 +267,54 @@ async function getAccessTokenForProvision(email: string, password: string): Prom
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
+    const selfServeCampaignDraft = normalizeSelfServeCampaignDraft(body?.selfServeCampaignDraft);
+
+    if (body?.mode === 'bootstrap') {
+      const requestUser = await resolveUserFromRequest(request);
+      if (!requestUser) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      const fullName = typeof body?.fullName === 'string' ? body.fullName.trim() : '';
+      const fallbackName = fullName.split(/\s+/)[0] || requestUser.email?.split('@')[0] || 'My Workspace';
+      const admin = createAdminClient();
+      const workspaceId = await ensureWorkspaceForUser(admin, requestUser.id, fallbackName);
+
+      const [{ data: workspace }, { data: firstCampaign }] = await Promise.all([
+        admin
+          .from('workspaces')
+          .select('onboarding_completed_at')
+          .eq('id', workspaceId)
+          .maybeSingle(),
+        admin
+          .from('campaigns')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      let campaignId: string | null = null;
+      if (selfServeCampaignDraft?.draftId) {
+        const { data: matchingDraftCampaign } = await admin
+          .from('campaigns')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .ilike('tags', `%self-serve-draft:${selfServeCampaignDraft.draftId}%`)
+          .limit(1)
+          .maybeSingle();
+        campaignId = matchingDraftCampaign?.id ?? null;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        workspaceId,
+        campaignId,
+        hasExistingCampaign: Boolean(firstCampaign?.id),
+        onboardingCompleted: Boolean(workspace?.onboarding_completed_at),
+      });
+    }
+
     const email = normalizeEmail(body?.email);
     const password = typeof body?.password === 'string' ? body.password : '';
     const firstName = typeof body?.firstName === 'string' ? body.firstName.trim() : '';
@@ -249,7 +322,6 @@ export async function POST(request: NextRequest) {
     const countryCode = normalizeCountryCode(
       typeof body?.countryCode === 'string' ? body.countryCode : undefined
     );
-    const selfServeCampaignDraft = normalizeSelfServeCampaignDraft(body?.selfServeCampaignDraft);
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Enter a valid email.' }, { status: 400 });

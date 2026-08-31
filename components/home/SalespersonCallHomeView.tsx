@@ -1,94 +1,81 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DollarSign, PhoneCall, RefreshCw, Users } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWorkspace } from '@/lib/workspace-context';
-import { HomeHeaderRow } from './HomeHeaderRow';
-import { SalespersonMessenger } from './SalespersonMessenger';
 
-type ProfilePayload = {
-  first_name?: string | null;
-  last_name?: string | null;
-  email?: string | null;
-};
-
-type RevenueTotal = {
-  currency: string;
-  revenueCents: number;
-};
+type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 type PerformancePayload = {
-  outreach?: {
-    calls?: number;
-    answers?: number;
+  period: PeriodKey;
+  salesperson: {
+    fullName: string;
+    email: string;
   };
-  revenue?: {
-    payingUsers?: number;
-    revenueTotals?: RevenueTotal[];
+  outreach: {
+    calls: number;
+    answers: number;
+    outboundMessages: number;
+    emails: number;
+    directMessages: number;
+    posts: number;
+    meetingsBooked: number;
+    meetingsHeld: number;
+  };
+  links: {
+    signups: number;
+  };
+  revenue: {
+    paidTeams: number;
+    mrrByCurrency: Record<string, number>;
+    stripeStatus?: 'connected' | 'unconfigured' | 'error';
   };
   error?: string;
 };
 
-function CallMetricCard({
-  icon: Icon,
-  label,
-  value,
-  caption,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: number | string;
-  caption: string;
-}) {
+const PERIODS: Array<{ value: PeriodKey; label: string; caption: string }> = [
+  { value: 'daily', label: 'Today', caption: 'today' },
+  { value: 'weekly', label: 'Week', caption: 'this week' },
+  { value: 'monthly', label: 'Month', caption: 'this month' },
+  { value: 'yearly', label: 'Year', caption: 'this year' },
+];
+
+function MetricCard({ label, value, caption }: { label: string; value: number; caption: string }) {
   return (
     <Card className="operator-surface rounded-xl border border-border/70 bg-card shadow-none">
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Icon className="h-4 w-4 text-primary" />
-          <span>{label}</span>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p className="text-3xl font-semibold text-foreground tabular-nums">{value}</p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">{caption}</p>
+      <CardContent className="px-5 py-5">
+        <p className="text-3xl font-semibold tracking-tight text-foreground tabular-nums">
+          {new Intl.NumberFormat('en-US').format(value)}
+        </p>
+        <p className="mt-2 text-sm font-medium text-foreground">{label}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
       </CardContent>
     </Card>
   );
 }
 
-function buildDisplayName(profile: ProfilePayload | null): string {
-  const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
-  if (fullName) return fullName;
-  return profile?.email ?? 'there';
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat('en-US').format(value);
-}
-
-function formatRevenue(totals: RevenueTotal[] | undefined): string {
-  if (!totals?.length) return '$0';
-
-  return totals
-    .map((total) =>
-      new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: total.currency || 'USD',
-        maximumFractionDigits: 0,
-      }).format(total.revenueCents / 100)
-    )
-    .join(' / ');
+function formatCurrency(cents: number, currency: string): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency || 'USD',
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
 }
 
 export function SalespersonCallHomeView() {
   const { currentWorkspaceId } = useWorkspace();
-  const [profile, setProfile] = useState<ProfilePayload | null>(null);
-  const [weeklyPerformance, setWeeklyPerformance] = useState<PerformancePayload | null>(null);
-  const [monthlyPerformance, setMonthlyPerformance] = useState<PerformancePayload | null>(null);
+  const [period, setPeriod] = useState<PeriodKey>('daily');
+  const [performance, setPerformance] = useState<PerformancePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,105 +85,137 @@ export function SalespersonCallHomeView() {
     setLoading(true);
     setError(null);
     try {
-      const [weeklyPerformanceResponse, profileResponse, monthlyPerformanceResponse] = await Promise.all([
-        fetch(`/api/salesperson/performance?period=weekly&workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
-          credentials: 'include',
-        }),
-        fetch('/api/profile', { credentials: 'include' }),
-        fetch(`/api/salesperson/performance?period=monthly&workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
-          credentials: 'include',
-        }),
-      ]);
-
-      const weeklyPerformancePayload = (await weeklyPerformanceResponse.json().catch(() => ({}))) as PerformancePayload;
-      if (!weeklyPerformanceResponse.ok) {
-        throw new Error(weeklyPerformancePayload.error ?? 'Failed to load call activity.');
+      const params = new URLSearchParams({ period, workspaceId: currentWorkspaceId });
+      const response = await fetch(`/api/salesperson/performance?${params.toString()}`, {
+        credentials: 'include',
+      });
+      const payload = (await response.json().catch(() => null)) as PerformancePayload | null;
+      if (!response.ok || !payload) {
+        throw new Error(payload?.error ?? 'Failed to load performance.');
       }
-
-      setWeeklyPerformance(weeklyPerformancePayload);
-      if (profileResponse.ok) {
-        setProfile((await profileResponse.json().catch(() => null)) as ProfilePayload | null);
-      }
-      if (monthlyPerformanceResponse.ok) {
-        setMonthlyPerformance(
-          (await monthlyPerformanceResponse.json().catch(() => null)) as PerformancePayload | null
-        );
-      } else {
-        setMonthlyPerformance(null);
-      }
+      setPerformance(payload);
     } catch (loadError) {
-      setWeeklyPerformance(null);
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load call activity.');
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load performance.');
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, period]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const stats = useMemo(() => {
-    return {
-      callsThisWeek: weeklyPerformance?.outreach?.calls ?? 0,
-      connectedThisWeek: weeklyPerformance?.outreach?.answers ?? 0,
-    };
-  }, [weeklyPerformance]);
+  const selectedPeriod = PERIODS.find((option) => option.value === period) ?? PERIODS[0];
+  const metrics = useMemo(() => {
+    const outreach = performance?.outreach;
+    return [
+      { label: 'Calls Made', value: outreach?.calls ?? 0 },
+      { label: 'Answers', value: outreach?.answers ?? 0 },
+      { label: 'Texts', value: outreach?.outboundMessages ?? 0 },
+      { label: 'Emails', value: outreach?.emails ?? 0 },
+      { label: 'DMs', value: outreach?.directMessages ?? 0 },
+      { label: 'Posts', value: outreach?.posts ?? 0 },
+      { label: 'Meetings Booked', value: outreach?.meetingsBooked ?? 0 },
+      { label: 'Meetings Held', value: outreach?.meetingsHeld ?? 0 },
+      { label: 'Sign Ups', value: performance?.links.signups ?? 0 },
+      { label: 'Paid Teams', value: performance?.revenue.paidTeams ?? 0 },
+    ];
+  }, [performance]);
 
-  if (loading && !weeklyPerformance) {
+  const mrrRows = useMemo(() => {
+    const rows = Object.entries(performance?.revenue.mrrByCurrency ?? {}).sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+    return rows.length ? rows : [['USD', 0] as [string, number]];
+  }, [performance]);
+
+  if (loading && !performance) {
     return (
-      <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
-        <Skeleton className="h-16 rounded-xl" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {[1, 2, 3, 4].map((item) => (
-            <Skeleton key={item} className="h-32 rounded-xl" />
+      <div className="mx-auto max-w-7xl space-y-6 py-6 pl-0 pr-4 sm:pr-6 lg:pr-8">
+        <Skeleton className="h-14 rounded-xl" />
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+          {Array.from({ length: 10 }, (_, index) => (
+            <Skeleton key={index} className="h-32 rounded-xl" />
           ))}
         </div>
-        <Skeleton className="h-44 rounded-xl" />
+        <Skeleton className="h-40 rounded-xl" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto pl-0 pr-4 sm:pr-6 lg:pr-8 py-6 space-y-6">
-      <HomeHeaderRow
-        firstName={buildDisplayName(profile)}
-        doorsThisWeek={0}
-        weeklyDoorGoal={0}
-        dayStreak={0}
-        lastSessionAt={null}
-      />
+    <div className="mx-auto max-w-7xl space-y-6 py-6 pl-0 pr-4 sm:pr-6 lg:pr-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-4xl font-bold tracking-tight text-foreground">
+          {performance?.salesperson.fullName || performance?.salesperson.email || 'Home'}
+        </h1>
+        <div className="flex items-center gap-2">
+          <Select value={period} onValueChange={(value) => setPeriod(value as PeriodKey)}>
+            <SelectTrigger className="w-32 bg-card" aria-label="Performance period">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh performance"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      </div>
 
       {error ? (
         <Card className="rounded-xl border border-destructive/30 bg-destructive/10 shadow-none">
           <CardContent className="flex items-center justify-between gap-3 py-4">
             <p className="text-sm text-destructive">{error}</p>
-            <Button type="button" variant="outline" size="sm" onClick={load}>
-              <RefreshCw className="mr-2 h-4 w-4" />
+            <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
               Retry
             </Button>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <CallMetricCard icon={PhoneCall} label="Calls" value={formatCount(stats.callsThisWeek)} caption="this week" />
-        <CallMetricCard icon={Users} label="Answers" value={formatCount(stats.connectedThisWeek)} caption="this week" />
-        <CallMetricCard
-          icon={Users}
-          label="Users"
-          value={formatCount(monthlyPerformance?.revenue?.payingUsers ?? 0)}
-          caption="paying this month"
-        />
-        <CallMetricCard
-          icon={DollarSign}
-          label="Monthly Revenue"
-          value={formatRevenue(monthlyPerformance?.revenue?.revenueTotals)}
-          caption="from referrals"
-        />
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+        {metrics.map((metric) => (
+          <MetricCard
+            key={metric.label}
+            label={metric.label}
+            value={metric.value}
+            caption={selectedPeriod.caption}
+          />
+        ))}
       </div>
 
-      <SalespersonMessenger />
+      <Card className="operator-surface rounded-xl border border-border/70 bg-card shadow-none">
+        <CardContent className="px-6 py-6">
+          <p className="text-sm font-semibold text-muted-foreground">MRR</p>
+          <div className="mt-2 space-y-1">
+            {mrrRows.map(([currency, cents]) => (
+              <p key={currency} className="text-4xl font-bold tracking-tight text-foreground tabular-nums">
+                {formatCurrency(cents, currency)}
+              </p>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {performance?.revenue.stripeStatus === 'unconfigured'
+              ? 'Stripe is not configured for this environment.'
+              : performance?.revenue.stripeStatus === 'error'
+                ? 'Stripe could not be reached. Refresh to try again.'
+                : 'Monthly recurring revenue from active Stripe subscriptions'}
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

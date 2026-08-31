@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { withSharedWolfGridCookie } from '@/lib/supabase/shared-cookie';
 
 function isOnboardingPath(next: string | null): boolean {
   return typeof next === 'string' && next.startsWith('/onboarding');
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              cookieStore.set(name, value, withSharedWolfGridCookie(new URL(request.url).hostname, options));
             });
           },
         },

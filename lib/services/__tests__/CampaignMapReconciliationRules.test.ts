@@ -19,7 +19,9 @@ import {
   normalizedAddressIdentity,
   isBuildingAvailableForCivicAssignment,
   parseMapboxReverseResult,
+  reverseGeocodingConfigurationIssue,
   scoreReconciliationCandidate,
+  shouldQueueMapReconciliationConvergencePass,
   shouldReverseGeocodeBuilding,
   solveGlobalOneToOneAssignment,
   shouldAutoHideAuxiliary,
@@ -48,10 +50,61 @@ assert(
   'temporary Mapbox reverse geocoding must be the safe default'
 );
 assert(
-  configuredMaxReverseGeocodes('') === 100 &&
-    configuredMaxReverseGeocodes('not-a-number') === 100 &&
+  configuredMaxReverseGeocodes('') === 1000 &&
+    configuredMaxReverseGeocodes('not-a-number') === 1000 &&
     configuredMaxReverseGeocodes('0') === 0,
   'blank or invalid reverse-geocode limits must use the fallback while explicit zero disables calls'
+);
+assert(
+  reverseGeocodingConfigurationIssue({
+    unresolvedBuildingCount: 1,
+    enabled: false,
+    maxGeocodes: 1000,
+    hasToken: true,
+  })?.includes('ENABLE_REVERSE_GEOCODE') === true &&
+    reverseGeocodingConfigurationIssue({
+      unresolvedBuildingCount: 1,
+      enabled: true,
+      maxGeocodes: 0,
+      hasToken: true,
+    })?.includes('MAX_GEOCODES_PER_RUN') === true &&
+    reverseGeocodingConfigurationIssue({
+      unresolvedBuildingCount: 1,
+      enabled: true,
+      maxGeocodes: 1000,
+      hasToken: false,
+    })?.includes('MAPBOX_TOKEN') === true,
+  'an unresolved campaign must fail visibly when reverse geocoding is disabled or misconfigured'
+);
+assert(
+  reverseGeocodingConfigurationIssue({
+    unresolvedBuildingCount: 0,
+    enabled: false,
+    maxGeocodes: 0,
+    hasToken: false,
+  }) === null,
+  'a fully linked campaign must not require reverse-geocoding configuration'
+);
+assert(
+  shouldQueueMapReconciliationConvergencePass({
+    mode: 'apply_high_confidence',
+    appliedCount: 8,
+    buildingOrphansBefore: 49,
+    buildingOrphansAfter: 21,
+  }) &&
+    !shouldQueueMapReconciliationConvergencePass({
+      mode: 'apply_high_confidence',
+      appliedCount: 0,
+      buildingOrphansBefore: 21,
+      buildingOrphansAfter: 21,
+    }) &&
+    !shouldQueueMapReconciliationConvergencePass({
+      mode: 'shadow',
+      appliedCount: 8,
+      buildingOrphansBefore: 49,
+      buildingOrphansAfter: 21,
+    }),
+  'apply mode must continue only while a pass makes measurable orphan progress'
 );
 
 const globalAssignment = solveGlobalOneToOneAssignment([
@@ -273,8 +326,12 @@ assert(
 );
 assert(
   !canAutoReassignAddressFromReverseGeocode(0.9) &&
-    canAutoReassignAddressFromReverseGeocode(0.5),
-  'reverse geocoding must not auto-reassign an existing high-confidence address link'
+    canAutoReassignAddressFromReverseGeocode(0.5) &&
+    canAutoReassignAddressFromReverseGeocode(0.9, 'point_on_surface', 'rooftop') &&
+    canAutoReassignAddressFromReverseGeocode(0.9, 'point_on_surface', 'parcel') &&
+    !canAutoReassignAddressFromReverseGeocode(0.9, 'nearest', 'rooftop') &&
+    !canAutoReassignAddressFromReverseGeocode(0.9, 'point_on_surface', 'point'),
+  'only exact rooftop or parcel evidence may override a 0.90 point-on-surface link'
 );
 
 const source1777 = normalizedAddressIdentity({

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type Stripe from 'stripe';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { stripe } from '@/lib/stripe';
+import { isStripeSecretKeyConfigured } from '@/app/lib/billing/stripe-env';
 
 type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -277,6 +280,94 @@ function totalRevenueByCurrency(commissions: CommissionRow[]) {
   return Array.from(totals.values()).sort((a, b) => b.revenueCents - a.revenueCents);
 }
 
+type StripeMrrSummary = {
+  activeSubscriptionCount: number;
+  mrrByCurrency: Record<string, number>;
+  status: 'connected' | 'unconfigured' | 'error';
+};
+
+function monthlyRecurringAmountCents(
+  unitAmount: number,
+  quantity: number,
+  interval: 'day' | 'week' | 'month' | 'year',
+  intervalCount: number
+): number {
+  const recurringTotal = unitAmount * Math.max(1, quantity);
+  const count = Math.max(1, intervalCount);
+
+  switch (interval) {
+    case 'year':
+      return recurringTotal / (12 * count);
+    case 'week':
+      return (recurringTotal * 52) / (12 * count);
+    case 'day':
+      return (recurringTotal * 365) / (12 * count);
+    case 'month':
+    default:
+      return recurringTotal / count;
+  }
+}
+
+async function loadStripeMrr(): Promise<StripeMrrSummary> {
+  if (!isStripeSecretKeyConfigured()) {
+    return { activeSubscriptionCount: 0, mrrByCurrency: {}, status: 'unconfigured' };
+  }
+
+  try {
+    const subscriptions: Stripe.Subscription[] = [];
+    let startingAfter: string | undefined;
+
+    do {
+      const page = await stripe.subscriptions.list({
+        status: 'all',
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+        expand: ['data.items.data.price'],
+      });
+      subscriptions.push(...page.data);
+      startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
+    } while (startingAfter);
+
+    const totals = new Map<string, number>();
+    let activeSubscriptionCount = 0;
+
+    for (const subscription of subscriptions) {
+      if (subscription.status !== 'active' && subscription.status !== 'trialing') continue;
+
+      let hasRecurringRevenue = false;
+      for (const item of subscription.items.data) {
+        const price = item.price;
+        if (!price.recurring || !price.unit_amount || price.unit_amount <= 0) continue;
+
+        const monthlyAmount = monthlyRecurringAmountCents(
+          price.unit_amount,
+          item.quantity ?? 1,
+          price.recurring.interval,
+          price.recurring.interval_count
+        );
+        const currency = (price.currency || 'usd').toUpperCase();
+        totals.set(currency, (totals.get(currency) ?? 0) + monthlyAmount);
+        hasRecurringRevenue = true;
+      }
+
+      if (hasRecurringRevenue) activeSubscriptionCount += 1;
+    }
+
+    return {
+      activeSubscriptionCount,
+      mrrByCurrency: Object.fromEntries(
+        Array.from(totals.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([currency, cents]) => [currency, Math.round(cents)])
+      ),
+      status: 'connected',
+    };
+  } catch (error) {
+    console.error('[salesperson performance] Stripe MRR lookup failed', error);
+    return { activeSubscriptionCount: 0, mrrByCurrency: {}, status: 'error' };
+  }
+}
+
 function summarizeDemoVideoEvents(events: DemoVideoEventRow[]) {
   const count = (eventType: string) =>
     events.filter((event) => event.event_type === eventType).length;
@@ -357,6 +448,7 @@ export async function GET(request: NextRequest) {
 
     const referralCode = salesperson.referral_code?.trim().toUpperCase() ?? '';
     const outreachUserIds = compactStrings([salesperson.user_id, requestUser.id]);
+    const stripeMrrPromise = loadStripeMrr();
 
     const [
       callsCount,
@@ -370,6 +462,8 @@ export async function GET(request: NextRequest) {
       referralsResponse,
       commissionsResponse,
       demoVideoEventsResponse,
+      meetingsBooked,
+      meetingsHeld,
     ] = await Promise.all([
       safeExactCount(
         admin
@@ -458,6 +552,31 @@ export async function GET(request: NextRequest) {
         .gte('created_at', startIso)
         .lt('created_at', endIso)
         .range(0, 9999),
+      safeExactCount(
+        admin
+          .from('calendar_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', effectiveWorkspaceId)
+          .in('user_id', outreachUserIds)
+          .in('event_type', ['appointment', 'meeting'])
+          .is('deleted_at', null)
+          .gte('created_at', startIso)
+          .lt('created_at', endIso),
+        'calendar_events_booked'
+      ),
+      safeExactCount(
+        admin
+          .from('calendar_events')
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', effectiveWorkspaceId)
+          .in('user_id', outreachUserIds)
+          .in('event_type', ['appointment', 'meeting'])
+          .is('deleted_at', null)
+          .gte('start_at', startIso)
+          .lt('start_at', endIso)
+          .lte('end_at', endIso),
+        'calendar_events_held'
+      ),
     ]);
 
     if (callsRowsResponse.error) {
@@ -515,6 +634,7 @@ export async function GET(request: NextRequest) {
     const referrals = ((referralsResponse.data ?? []) as ReferralRow[]);
     const commissions = ((commissionsResponse.data ?? []) as CommissionRow[]);
     const demoVideoEvents = ((demoVideoEventsResponse.data ?? []) as DemoVideoEventRow[]);
+    const stripeMrr = await stripeMrrPromise;
     const trackedLink = referralCode
       ? `${request.nextUrl.origin}/s/${encodeURIComponent(referralCode)}?source=salesperson`
       : null;
@@ -538,6 +658,10 @@ export async function GET(request: NextRequest) {
         inboundMessages,
         emails: Math.max(emails, demoEmailLinks),
         demosSent: demoEmailLinks,
+        directMessages: 0,
+        posts: 0,
+        meetingsBooked,
+        meetingsHeld,
       },
       links: {
         opens: linkOpens,
@@ -545,6 +669,9 @@ export async function GET(request: NextRequest) {
       },
       revenue: {
         payingUsers: referrals.filter((referral) => isPayingReferral(referral, startIso, endIso)).length,
+        paidTeams: stripeMrr.activeSubscriptionCount,
+        mrrByCurrency: stripeMrr.mrrByCurrency,
+        stripeStatus: stripeMrr.status,
         commissionTotals: totalCommissionsByCurrency(commissions),
         revenueTotals: totalRevenueByCurrency(commissions),
       },

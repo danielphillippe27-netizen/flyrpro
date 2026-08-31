@@ -431,6 +431,42 @@ async function run() {
     assertEqual(match.buildingId, 'parcel-main-home');
   });
 
+  test('Exact parcel civic address moves a road-side point to its unique parcel building', () => {
+    const service = new StableLinkerService({} as any);
+    const correctBuilding = makeBuilding(
+      'parcel-address-home',
+      rectangle(-81.73470, 26.15970, -81.73445, 26.15990),
+      { primaryStreet: 'Cutty Sark Lane' }
+    );
+    const roadNeighbor = makeBuilding(
+      'road-neighbor',
+      rectangle(-81.73425, 26.15970, -81.73405, 26.15990),
+      { primaryStreet: 'Cutty Sark Lane' }
+    );
+    const address = {
+      ...makeAddress('6610', -81.73428, 26.15980, 'Cutty Sark Lane'),
+      locality: 'Naples',
+      region: 'FL',
+      postal_code: '34104',
+    };
+    const parcels = (service as any).prepareParcels([{
+      ...makeParcel('parcel-6610', rectangle(-81.73475, 26.15965, -81.73440, 26.15995)),
+      properties: {
+        parcel_id: 'parcel-6610',
+        parceladdr: '6610 CUTTY SARK LN NAPLES FL',
+      },
+    }]);
+
+    const match = (service as any).matchAddressToBuilding(
+      address,
+      [correctBuilding, roadNeighbor],
+      parcels
+    );
+
+    assertEqual(match.matchType, 'parcel_verified');
+    assertEqual(match.buildingId, 'parcel-address-home');
+  });
+
   test('Parcel source selection: locality-specific dataset beats region-wide fallback', () => {
     const service = createParcelHarness();
 

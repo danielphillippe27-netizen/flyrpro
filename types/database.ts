@@ -851,7 +851,7 @@ export interface SalespersonDialerSettings {
 export interface WorkspaceBillingAddon {
   id: string;
   workspace_id: string;
-  addon_key: 'power_dialer';
+  addon_key: 'power_dialer' | 'storm_maps';
   status: WorkspaceBillingAddonStatus;
   stripe_subscription_id?: string | null;
   stripe_subscription_item_id?: string | null;

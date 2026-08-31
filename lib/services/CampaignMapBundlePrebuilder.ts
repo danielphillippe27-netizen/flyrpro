@@ -662,7 +662,7 @@ type AddressParcelOwnership = {
   addressId: string;
   parcelId: string;
   campaignParcelId: string | null;
-  matchType: 'contains';
+  matchType: 'contains' | 'address_identity';
   confidence: number;
   parcelAreaSqm: number;
   distanceMeters: number;
@@ -682,6 +682,14 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
     const bbox = bboxForGeometry(feature.geometry);
     if (!bbox) return [];
     const properties = (feature.properties ?? {}) as JsonRecord;
+    const normalizedAddressText = normalizedText(
+      properties.parceladdr ??
+      properties.parcel_address ??
+      properties.site_address ??
+      properties.address_line ??
+      properties.address ??
+      properties.full_address
+    ).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     const campaignParcelId = stringValue(properties.id);
     const centroid = centroidForFeature(feature);
     return [{
@@ -693,13 +701,69 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
       centroid,
       bbox,
       valid: isDisplayableParcelFeature(feature),
+      normalizedAddressText,
     }];
   });
+  const addressBearingParcelRatio = parcelCandidates.length > 0
+    ? parcelCandidates.filter((candidate) => candidate.normalizedAddressText).length / parcelCandidates.length
+    : 0;
+
+  const normalizedCivic = (value: unknown) => normalizedText(value)
+    .replace(/\bavenue\b/g, 'ave')
+    .replace(/\bboulevard\b/g, 'blvd')
+    .replace(/\bcircle\b/g, 'cir')
+    .replace(/\bcourt\b/g, 'ct')
+    .replace(/\bdrive\b/g, 'dr')
+    .replace(/\blane\b/g, 'ln')
+    .replace(/\bplace\b/g, 'pl')
+    .replace(/\broad\b/g, 'rd')
+    .replace(/\bstreet\b/g, 'st')
+    .replace(/\bterrace\b/g, 'ter')
+    .replace(/\btrail\b/g, 'trl')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   return addresses.features.flatMap((address) => {
     const addressId = addressFeatureIdentifier(address);
     const coordinate = pointCoordinate(address);
     if (!addressId || !coordinate) return [];
+    const addressProperties = (address.properties ?? {}) as JsonRecord;
+    const civic = normalizedCivic(`${addressProperties.house_number ?? addressProperties.street_number ?? ''} ${addressProperties.street_name ?? addressProperties.street ?? ''}`);
+    const locality = normalizedCivic(addressProperties.locality ?? addressProperties.city);
+    const region = normalizedCivic(addressProperties.region ?? addressProperties.state ?? addressProperties.province);
+    const postal = normalizedCivic(addressProperties.postal_code ?? addressProperties.zip);
+    const exactAddressTexts = new Set([
+      civic,
+      [civic, locality].filter(Boolean).join(' '),
+      [civic, region].filter(Boolean).join(' '),
+      [civic, locality, region].filter(Boolean).join(' '),
+      [civic, locality, region, postal].filter(Boolean).join(' '),
+    ].filter(Boolean));
+    const exact = civic
+      ? parcelCandidates.filter((candidate) => {
+          const candidateAddress = normalizedCivic(candidate.normalizedAddressText);
+          return exactAddressTexts.has(candidateAddress) ||
+            Boolean(locality && candidateAddress.startsWith(`${civic} ${locality} `)) ||
+            Boolean(region && candidateAddress.startsWith(`${civic} ${region} `));
+        })
+      : [];
+    if (exact.length === 1) {
+      const winner = exact[0];
+      return [{
+        addressId,
+        parcelId: winner.parcelId,
+        campaignParcelId: winner.campaignParcelId,
+        matchType: 'address_identity' as const,
+        confidence: 0.995,
+        parcelAreaSqm: Number.isFinite(winner.areaSqm) ? winner.areaSqm : 0,
+        distanceMeters: winner.centroid ? distanceMeters(coordinate, winner.centroid) : 0,
+      }];
+    }
+    // Address-rich assessor datasets are more authoritative than road-side
+    // source points. A missing/ambiguous civic identity stays unowned instead
+    // of being attached to a large overlapping master parcel.
+    if (addressBearingParcelRatio >= 0.5) return [];
 
     const containing = parcelCandidates.filter((candidate) =>
       pointInBbox(coordinate, candidate.bbox) && parcelContainsPoint(candidate.feature, coordinate)

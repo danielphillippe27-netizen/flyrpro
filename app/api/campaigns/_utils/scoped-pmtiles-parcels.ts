@@ -387,6 +387,45 @@ export function bboxFromPositions(positions: Array<[number, number]>): [number, 
   return [minLon, minLat, maxLon, maxLat];
 }
 
+function normalizeLongitudeNearParcelBbox(
+  longitude: number,
+  bbox: [number, number, number, number]
+): number {
+  if (!Number.isFinite(longitude)) return longitude;
+  const bboxCenter = (bbox[0] + bbox[2]) / 2;
+  let normalized = longitude;
+  while (normalized - bboxCenter > 180) normalized -= 360;
+  while (bboxCenter - normalized > 180) normalized += 360;
+  return normalized;
+}
+
+/** Normalize vector-tile world copies into the campaign longitude world. */
+export function normalizeParcelGeometryLongitudes(
+  geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon,
+  bbox: [number, number, number, number]
+): GeoJSON.Polygon | GeoJSON.MultiPolygon {
+  const normalizePosition = (position: GeoJSON.Position): GeoJSON.Position => [
+    Number(normalizeLongitudeNearParcelBbox(Number(position[0]), bbox).toFixed(12)),
+    Number(position[1]),
+    ...position.slice(2),
+  ];
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  const uniquePolygons: GeoJSON.Position[][][] = [];
+  const seen = new Set<string>();
+
+  for (const polygon of polygons) {
+    const normalized = polygon.map((ring) => ring.map(normalizePosition));
+    const signature = JSON.stringify(normalized);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    uniquePolygons.push(normalized);
+  }
+
+  return uniquePolygons.length === 1
+    ? { type: 'Polygon', coordinates: uniquePolygons[0] }
+    : { type: 'MultiPolygon', coordinates: uniquePolygons };
+}
+
 function geometryCenter(geometry: GeoJSON.Geometry | null | undefined): [number, number] | null {
   const bbox = bboxFromPositions(flattenPositions(geometry));
   if (!bbox) return null;
@@ -853,14 +892,18 @@ async function extractScopedPmtilesParcels(
       const vectorFeature = layer.feature(index);
       const feature = vectorFeature.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
       if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') continue;
-      if (!featureWithinParcelCampaignScope(feature, bbox, boundary)) continue;
+      const normalizedFeature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon> = {
+        ...feature,
+        geometry: normalizeParcelGeometryLongitudes(feature.geometry, bbox),
+      };
+      if (!featureWithinParcelCampaignScope(normalizedFeature, bbox, boundary)) continue;
       if (options.residentialOnly === true) {
-        if (!isResidentialParcelFeature(feature)) continue;
-      } else if (!isDisplayableParcelFeature(feature)) {
+        if (!isResidentialParcelFeature(normalizedFeature)) continue;
+      } else if (!isDisplayableParcelFeature(normalizedFeature)) {
         continue;
       }
 
-      const externalId = getParcelFeatureExternalId(feature, parcelTiles.promoteId);
+      const externalId = getParcelFeatureExternalId(normalizedFeature, parcelTiles.promoteId);
       if (!externalId) continue;
 
       parcels.push({
@@ -870,9 +913,9 @@ async function extractScopedPmtilesParcels(
           id: externalId,
           campaign_id: campaignId,
           external_id: externalId,
-          geom: JSON.stringify(feature.geometry),
+          geom: JSON.stringify(normalizedFeature.geometry),
           properties: {
-            ...((feature.properties ?? {}) as Record<string, unknown>),
+            ...((normalizedFeature.properties ?? {}) as Record<string, unknown>),
             parcel_id: externalId,
             source: 'bedrock_pmtiles',
           },

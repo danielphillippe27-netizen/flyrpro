@@ -4,6 +4,7 @@ import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
+import { reconcileActiveStripeSubscriptionForUser } from '@/app/lib/billing/stripe-subscription-sync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -300,7 +301,7 @@ export async function POST(request: NextRequest) {
       targetWorkspaceId = fallbackResolution.workspaceId;
     }
 
-    const { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(
+    let { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(
       'workspace_can_create_campaign',
       {
         p_workspace_id: targetWorkspaceId,
@@ -311,9 +312,43 @@ export async function POST(request: NextRequest) {
       console.warn('[POST /api/campaigns] workspace_can_create_campaign RPC missing; allowing create in local fallback', {
         workspace_id: targetWorkspaceId,
       });
+      canCreateCampaign = true;
+      campaignAllowanceError = null;
     } else if (campaignAllowanceError) {
       return NextResponse.json({ error: campaignAllowanceError.message }, { status: 500 });
     } else if (!canCreateCampaign) {
+      // Stripe webhooks and the Checkout success redirect are both asynchronous
+      // and can occasionally be missed. Before rejecting a known Stripe customer,
+      // reconcile directly from Stripe and retry the database allowance check.
+      try {
+        const reconciled = await reconcileActiveStripeSubscriptionForUser(
+          admin,
+          requestUser.id
+        );
+        if (reconciled) {
+          const retry = await admin.rpc('workspace_can_create_campaign', {
+            p_workspace_id: targetWorkspaceId,
+            p_owner_id: requestUser.id,
+          });
+          canCreateCampaign = retry.data;
+          campaignAllowanceError = retry.error;
+        }
+      } catch (reconcileError) {
+        console.warn('[POST /api/campaigns] Stripe entitlement reconciliation failed', {
+          user_id: requestUser.id,
+          error:
+            reconcileError instanceof Error
+              ? reconcileError.message
+              : String(reconcileError),
+        });
+      }
+
+      if (campaignAllowanceError) {
+        return NextResponse.json({ error: campaignAllowanceError.message }, { status: 500 });
+      }
+    }
+
+    if (!canCreateCampaign) {
       return NextResponse.json(
         {
           error: 'This workspace already has its included campaign. Upgrade to create more campaigns.',

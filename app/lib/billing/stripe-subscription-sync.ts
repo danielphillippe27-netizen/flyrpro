@@ -8,6 +8,7 @@ import type { Entitlement } from '@/types/database';
 import { planFromStripePriceId } from '@/app/lib/billing/stripe-products';
 import { syncAmbassadorReferralForSubscription } from '@/app/lib/billing/ambassador-program';
 import { syncWorkspacePowerDialerAddonFromStripe } from '@/app/lib/billing/workspace-addons';
+import { stripe } from '@/lib/stripe';
 
 export type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 export type WorkspaceSubscriptionStatus =
@@ -100,7 +101,7 @@ export async function applyStripeSubscriptionUpdate(
   });
 
   if (Object.keys(update).length > 0) {
-    await supabase
+    const { error: entitlementError } = await supabase
       .from('entitlements')
       .upsert(
         {
@@ -117,11 +118,50 @@ export async function applyStripeSubscriptionUpdate(
         },
         { onConflict: 'user_id' }
       );
+    if (entitlementError) {
+      throw new Error(`Failed to update Stripe entitlement: ${entitlementError.message}`);
+    }
   }
 
   await syncWorkspaceSubscriptionFromStripe(supabase, userId, subscription);
   await syncWorkspacePowerDialerAddonFromStripe(supabase, userId, subscription);
   await syncAmbassadorReferralForSubscription(supabase, userId, subscription);
+}
+
+/**
+ * Repair entitlement state when Checkout succeeded but the webhook/return-page
+ * confirmation did not reach the app. This is intentionally used only on an
+ * inactive entitlement path so normal requests do not call Stripe.
+ */
+export async function reconcileActiveStripeSubscriptionForUser(
+  supabase: SupabaseAdmin,
+  userId: string
+): Promise<boolean> {
+  const entitlement = await getEntitlementForUser(userId);
+  if (
+    entitlement.is_active &&
+    (entitlement.plan === 'pro' || entitlement.plan === 'team')
+  ) {
+    return true;
+  }
+
+  if (!entitlement.stripe_customer_id) return false;
+
+  const subscriptions = await stripe.subscriptions.list({
+    customer: entitlement.stripe_customer_id,
+    status: 'all',
+    limit: 20,
+  });
+  const activeSubscription = subscriptions.data
+    .filter((subscription) =>
+      subscription.status === 'active' || subscription.status === 'trialing'
+    )
+    .sort((a, b) => b.created - a.created)[0];
+
+  if (!activeSubscription) return false;
+
+  await applyStripeSubscriptionUpdate(supabase, userId, activeSubscription);
+  return true;
 }
 
 /**
@@ -178,10 +218,13 @@ export async function updateWorkspaceSubscriptionForUser(
     workspaceUpdate.max_seats = Math.max(1, Math.trunc(payload.maxSeats));
   }
 
-  await supabase
+  const { error } = await supabase
     .from('workspaces')
     .update(workspaceUpdate)
     .eq('id', workspaceId);
+  if (error) {
+    throw new Error(`Failed to update workspace subscription: ${error.message}`);
+  }
 }
 
 function workspaceStatusFromStripe(

@@ -468,8 +468,9 @@ export class CampaignsService {
   }
 
   static async deleteCampaign(id: string): Promise<void> {
-    const response = await fetch(`/api/campaigns/${id}`, {
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      credentials: 'include',
     });
 
     if (!response.ok) {

@@ -11,7 +11,7 @@ import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v17-global-preserve-multi-address';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v19-global-rooftop-convergence';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -963,11 +963,24 @@ export function shouldReverseGeocodeBuilding(
 }
 
 export function canAutoReassignAddressFromReverseGeocode(
-  currentLinkConfidence: number | null
+  currentLinkConfidence: number | null,
+  currentMatchType?: unknown,
+  reverseAccuracy?: unknown
 ): boolean {
+  if (currentLinkConfidence === null) return false;
+  if (currentLinkConfidence < REVERSE_REASSIGN_CONFIDENCE_CEILING) return true;
+
+  // The initial point-on-surface linker intentionally scores containment at
+  // 0.90, but a displaced municipal address point can land inside a nearby
+  // detached footprint. An exact rooftop/parcel reverse identity is stronger
+  // evidence and may correct that machine-generated link. Manual, locked, and
+  // other high-confidence match types remain protected by loadProtectedState.
+  const matchType = normalizeText(currentMatchType);
+  const accuracy = normalizeText(reverseAccuracy);
   return (
-    currentLinkConfidence !== null &&
-    currentLinkConfidence < REVERSE_REASSIGN_CONFIDENCE_CEILING
+    currentLinkConfidence <= 0.90 &&
+    matchType === 'point on surface' &&
+    (accuracy === 'rooftop' || accuracy === 'parcel')
   );
 }
 
@@ -1040,12 +1053,39 @@ export function configuredReverseGeocodingStorageMode(
 
 export function configuredMaxReverseGeocodes(
   configured = process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
-  fallback = 100
+  fallback = 1000
 ): number {
   const raw = String(configured ?? '').trim();
   const parsed = raw === '' ? fallback : Number(raw);
   const safe = Number.isFinite(parsed) ? parsed : fallback;
-  return Math.max(0, Math.min(500, Math.floor(safe)));
+  return Math.max(0, Math.min(1000, Math.floor(safe)));
+}
+
+export function reverseGeocodingConfigurationIssue(input: {
+  unresolvedBuildingCount: number;
+  enabled: boolean;
+  maxGeocodes: number;
+  hasToken: boolean;
+}): string | null {
+  if (input.unresolvedBuildingCount <= 0) return null;
+  if (!input.enabled) return 'MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE must be true';
+  if (input.maxGeocodes <= 0) return 'MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN must be greater than zero';
+  if (!input.hasToken) return 'MAPBOX_TOKEN or NEXT_PUBLIC_MAPBOX_TOKEN is required';
+  return null;
+}
+
+export function shouldQueueMapReconciliationConvergencePass(input: {
+  mode: MapReconciliationMode;
+  appliedCount: number;
+  buildingOrphansBefore: number;
+  buildingOrphansAfter: number;
+}): boolean {
+  return (
+    input.mode === 'apply_high_confidence' &&
+    input.appliedCount > 0 &&
+    input.buildingOrphansAfter > 0 &&
+    input.buildingOrphansAfter < input.buildingOrphansBefore
+  );
 }
 
 export class CampaignMapReconciliationService {
@@ -2052,6 +2092,20 @@ export class CampaignMapReconciliationService {
       ? round(linkedBuildingIds.size / input.buildings.length * 100, 2)
       : 100;
     await this.updateRun(input.run.id, 'geocoding', 'geocoding');
+    const reverseGeocodingIssue = reverseGeocodingConfigurationIssue({
+      unresolvedBuildingCount: input.buildingOrphans.length,
+      enabled: process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE === 'true',
+      maxGeocodes: configuredMaxReverseGeocodes(
+        process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
+        1000
+      ),
+      hasToken: Boolean(
+        process.env.MAPBOX_TOKEN?.trim() || process.env.NEXT_PUBLIC_MAPBOX_TOKEN?.trim()
+      ),
+    });
+    if (reverseGeocodingIssue) {
+      throw new Error(`Map reconciliation reverse geocoding is not configured: ${reverseGeocodingIssue}`);
+    }
     const decisions = await this.globalReverseGeocodeDecisions({
       run: input.run,
       buildings: input.buildings,
@@ -2218,13 +2272,27 @@ export class CampaignMapReconciliationService {
         },
       }
     );
+    const rebuiltSignature = stringValue(asRecord(rebuilt).asset_signature);
     await this.supabase
       .from('map_reconciliation_runs')
       .update({
-        applied_bundle_signature: stringValue(asRecord(rebuilt).asset_signature),
+        applied_bundle_signature: rebuiltSignature,
         updated_at: new Date().toISOString(),
       })
       .eq('id', input.run.id);
+
+    if (
+      rebuiltSignature &&
+      rebuiltSignature !== input.run.source_signature &&
+      shouldQueueMapReconciliationConvergencePass({
+        mode: input.run.mode,
+        appliedCount,
+        buildingOrphansBefore: input.report.building_orphans_before,
+        buildingOrphansAfter: input.report.building_orphans_after,
+      })
+    ) {
+      await this.enqueue(input.run.campaign_id, rebuiltSignature);
+    }
   }
 
   private duplicateBuildingDecisions(input: {
@@ -2357,7 +2425,7 @@ export class CampaignMapReconciliationService {
     if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
     const maxGeocodes = configuredMaxReverseGeocodes(
       process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
-      500
+      1000
     );
     if (maxGeocodes === 0) return [];
 
@@ -2616,7 +2684,11 @@ export class CampaignMapReconciliationService {
         const currentLink = currentLinkByAddress.get(addressIdValue.toLowerCase());
         if (
           currentLink &&
-          !canAutoReassignAddressFromReverseGeocode(numberValue(currentLink.confidence))
+          !canAutoReassignAddressFromReverseGeocode(
+            numberValue(currentLink.confidence),
+            currentLink.match_type ?? currentLink.matchType,
+            item.result.accuracy
+          )
         ) {
           continue;
         }

@@ -341,11 +341,23 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: parcelsError.message }, { status: 500 });
     }
 
-    const { error: deleteError } = await admin.from('campaigns').delete().eq('id', campaignId);
+    const { data: deletedCampaign, error: deleteError } = await admin
+      .from('campaigns')
+      .delete()
+      .eq('id', campaignId)
+      .select('id')
+      .maybeSingle();
 
     if (deleteError) {
       console.error('[DELETE /api/campaigns/[campaignId]] Failed to delete campaign:', deleteError);
       return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+
+    if (!deletedCampaign) {
+      return NextResponse.json(
+        { error: 'Campaign was not deleted' },
+        { status: 409 }
+      );
     }
 
     return NextResponse.json({ success: true });

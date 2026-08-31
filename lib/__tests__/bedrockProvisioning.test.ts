@@ -100,6 +100,47 @@ test('maps Australian state codes to bedrock_au', async () => {
   }
 });
 
+test('uses Queensland footprints first with national Overture fallback', async () => {
+  const snapshot = BedrockAustraliaService.snapshotForCampaign({
+    campaignId: 'campaign-qld',
+    addressCount: 1,
+    regionCode: 'QLD',
+    scanMetric: {
+      hits: 1,
+      scanned: 1,
+      bboxCandidates: 1,
+      seconds: 0,
+      queryEngine: 'bedrock_au_pmtiles',
+      touchedTiles: 1,
+    },
+  });
+  const metrics = snapshot.metadata?.tile_metrics as Record<string, unknown>;
+  assertEqual(metrics.pmtiles_key, 'bedrock/australia/buildings/qld/buildings.pmtiles');
+  assertEqual(
+    metrics.buildings_fallback_pmtiles_key,
+    'bedrock/australia/buildings/national/buildings.pmtiles'
+  );
+});
+
+test('keeps national Overture buildings outside Queensland', async () => {
+  const snapshot = BedrockAustraliaService.snapshotForCampaign({
+    campaignId: 'campaign-nsw',
+    addressCount: 1,
+    regionCode: 'NSW',
+    scanMetric: {
+      hits: 1,
+      scanned: 1,
+      bboxCandidates: 1,
+      seconds: 0,
+      queryEngine: 'bedrock_au_pmtiles',
+      touchedTiles: 1,
+    },
+  });
+  const metrics = snapshot.metadata?.tile_metrics as Record<string, unknown>;
+  assertEqual(metrics.pmtiles_key, 'bedrock/australia/buildings/national/buildings.pmtiles');
+  assertEqual(metrics.buildings_fallback_pmtiles_key, null);
+});
+
 test('maps NZ region code to bedrock_nz', async () => {
   assertEqual(regionCodeToProvisionSource('NZ'), 'bedrock_nz');
 });
