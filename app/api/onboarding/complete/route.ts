@@ -1255,13 +1255,26 @@ export async function POST(request: NextRequest) {
         }
       });
     }
+    const opensTeamAssignmentDemo =
+      clientSource === 'self-serve-demo' &&
+      useCase === 'team' &&
+      (
+        normalizedTeamInviteEmails.length > 0 ||
+        (typeof updates.max_seats === 'number' && updates.max_seats > 1) ||
+        (typeof maxSeats === 'number' && maxSeats > 1)
+      );
+    const selfServeCampaignRedirect = selfServeCampaignId
+      ? opensTeamAssignmentDemo
+        ? `/campaigns/${selfServeCampaignId}?source=self-serve-demo&tab=assignments&tour=0&building=1`
+        : `/campaigns/${selfServeCampaignId}?source=self-serve-demo&tour=0&building=1`
+      : null;
     const redirect =
       openCampaignCreateAfterCompletion
         ? `/campaigns/create?source=self-serve-demo&campaign=self-serve-campaign${
             resumeCampaignAfterOnboarding ? '&resumeCampaign=1' : ''
           }`
-        : selfServeCampaignId
-        ? `/campaigns/${selfServeCampaignId}?source=self-serve-demo`
+        : selfServeCampaignRedirect
+        ? selfServeCampaignRedirect
         : openAppAfterCompletion || clientSource === 'android' || clientSource === 'dialer'
           ? nextPath
           : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;

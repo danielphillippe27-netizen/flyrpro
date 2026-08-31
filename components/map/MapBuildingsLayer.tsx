@@ -12,7 +12,7 @@ import type {
 } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
-import type { BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
+import type { BuildingFeature, BuildingFeatureCollection, BuildingProperties, GetBuildingsInBboxParams } from '@/types/map-buildings';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignBuildingStatus } from '@/lib/campaignStats';
 import {
@@ -751,6 +751,53 @@ function pointToGeneratedHomeFootprint(
   };
 }
 
+function buildAddressFallbackBuildings(addresses?: CampaignAddress[]): BuildingFeatureCollection {
+  const features = (addresses ?? []).flatMap((address, index) => {
+    const coordinates = getAddressCoordinate(address);
+    if (!coordinates) return [];
+    const geometry = pointToGeneratedHomeFootprint(coordinates, {});
+    if (!geometry) return [];
+
+    const id = `address-home-${address.id}`;
+    const properties: BuildingProperties = {
+      id,
+      building_id: id,
+      address_id: address.id,
+      gers_id: id,
+      house_number: address.house_number ?? null,
+      street_name: address.street_name ?? null,
+      height_m: GENERATED_HOME_HEIGHT_METERS,
+      min_height: 0,
+      is_townhome: false,
+      units_count: 1,
+      status: getCampaignBuildingStatus(address),
+      scans_today: 0,
+      scans_total: Number(address.scans ?? 0),
+      qr_scanned: Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at),
+      last_scan_seconds_ago: null,
+      feature_status: 'matched',
+      feature_type: 'matched_house',
+      match_method: 'address_geojson_fallback',
+      address_text: displayAddressText(address),
+      address_status: address.address_status ?? null,
+      address_count: 1,
+      feature_id: id,
+    };
+
+    return [{
+      type: 'Feature',
+      id,
+      geometry,
+      properties: {
+        ...properties,
+        fallback_sequence: address.sequence ?? address.seq ?? index,
+      },
+    } as BuildingFeature];
+  });
+
+  return { type: 'FeatureCollection', features };
+}
+
 export function MapBuildingsLayer({
   map,
   campaignId,
@@ -1188,23 +1235,26 @@ export function MapBuildingsLayer({
       });
 
       if (!response) {
+        const fallbackFeatures = buildAddressFallbackBuildings(addressStateOverrides);
+        const fallbackFeatureCount = fallbackFeatures.features.length;
         setBuildingsDebug({
           source: 'campaign-map-bundle',
           campaignId,
           bundleStatus: 'request_failed',
-          featureCount: 0,
+          featureCount: fallbackFeatureCount,
+          fallbackFeatureCount,
         });
         onRenderStateChangeRef.current?.({
           isFetching: false,
-          hasData: false,
-          hasVisibleFeatures: false,
-          hasBuildingPolygons: false,
-          buildingsUnavailable: true,
-          featureCount: 0,
-          visibleFeatureCount: 0,
+          hasData: fallbackFeatureCount > 0,
+          hasVisibleFeatures: fallbackFeatureCount > 0,
+          hasBuildingPolygons: fallbackFeatureCount > 0,
+          buildingsUnavailable: fallbackFeatureCount === 0,
+          featureCount: fallbackFeatureCount,
+          visibleFeatureCount: fallbackFeatureCount,
           zoomLevel,
         });
-        setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+        setFeatures(fallbackFeatures);
         return;
       }
 
@@ -1215,6 +1265,12 @@ export function MapBuildingsLayer({
       const bundle = await response.json() as CampaignMapBundleResponse;
       const normalizedCampaignFeatures = asBuildingFeatureCollection(bundle.buildings);
       const campaignFeatureCount = normalizedCampaignFeatures.features.length;
+      const addressFallbackFeatures = campaignFeatureCount === 0
+        ? buildAddressFallbackBuildings(addressStateOverrides)
+        : null;
+      const renderedCampaignFeatures = addressFallbackFeatures?.features.length
+        ? addressFallbackFeatures
+        : normalizedCampaignFeatures;
       setBuildingsDebug({
         source: 'campaign-map-bundle',
         campaignId,
@@ -1222,11 +1278,12 @@ export function MapBuildingsLayer({
         sourceVersion: bundle.source_version ?? null,
         bundleStatus: bundle.status ?? null,
         bundlePhase: bundle.phase ?? null,
-        featureCount: campaignFeatureCount,
+        featureCount: renderedCampaignFeatures.features.length,
+        fallbackFeatureCount: addressFallbackFeatures?.features.length ?? 0,
         firstFeatureId:
-          normalizedCampaignFeatures.features[0]?.properties?.gers_id ??
-          normalizedCampaignFeatures.features[0]?.properties?.building_id ??
-          normalizedCampaignFeatures.features[0]?.id ??
+          renderedCampaignFeatures.features[0]?.properties?.gers_id ??
+          renderedCampaignFeatures.features[0]?.properties?.building_id ??
+          renderedCampaignFeatures.features[0]?.id ??
           null,
       });
 
@@ -1234,19 +1291,20 @@ export function MapBuildingsLayer({
       if (campaignFeatureCount > 0) {
         emptyFallbackRetryCountRef.current = 0;
       }
-      setFeatures(normalizedCampaignFeatures);
+      setFeatures(renderedCampaignFeatures);
 
       if (campaignFeatureCount === 0 && isMountedRef.current) {
         if (emptyFallbackRetryCountRef.current >= EMPTY_BUILDINGS_MAX_RETRIES) {
-          console.log('[MapBuildingsLayer] Max retries exhausted, buildings not available');
+          const fallbackFeatureCount = addressFallbackFeatures?.features.length ?? 0;
+          console.log('[MapBuildingsLayer] Max canonical retries exhausted; retaining address GeoJSON fallback');
           onRenderStateChangeRef.current?.({
             isFetching: false,
-            hasData: false,
-            hasVisibleFeatures: false,
-            hasBuildingPolygons: false,
-            buildingsUnavailable: true,
-            featureCount: 0,
-            visibleFeatureCount: 0,
+            hasData: fallbackFeatureCount > 0,
+            hasVisibleFeatures: fallbackFeatureCount > 0,
+            hasBuildingPolygons: fallbackFeatureCount > 0,
+            buildingsUnavailable: fallbackFeatureCount === 0,
+            featureCount: fallbackFeatureCount,
+            visibleFeatureCount: fallbackFeatureCount,
             zoomLevel,
           });
           return;
@@ -1266,16 +1324,18 @@ export function MapBuildingsLayer({
       }
     } catch (err) {
       console.warn('[MapBuildingsLayer] Campaign map-bundle unavailable:', describeRequestError(err));
+      const fallbackFeatures = buildAddressFallbackBuildings(addressStateOverrides);
+      const fallbackFeatureCount = fallbackFeatures.features.length;
       campaignDataLoadedRef.current = null;
-      setFeatures({ type: 'FeatureCollection', features: [] } as BuildingFeatureCollection);
+      setFeatures(fallbackFeatures);
       onRenderStateChangeRef.current?.({
         isFetching: false,
-        hasData: false,
-        hasVisibleFeatures: false,
-        hasBuildingPolygons: false,
-        buildingsUnavailable: true,
-        featureCount: 0,
-        visibleFeatureCount: 0,
+        hasData: fallbackFeatureCount > 0,
+        hasVisibleFeatures: fallbackFeatureCount > 0,
+        hasBuildingPolygons: fallbackFeatureCount > 0,
+        buildingsUnavailable: fallbackFeatureCount === 0,
+        featureCount: fallbackFeatureCount,
+        visibleFeatureCount: fallbackFeatureCount,
         zoomLevel,
       });
     } finally {
@@ -1302,7 +1362,13 @@ export function MapBuildingsLayer({
       emptyFallbackRetryRef.current = null;
     }
 
-    const normalizedFeatures = asBuildingFeatureCollection(buildingFeatures);
+    const canonicalFeatures = asBuildingFeatureCollection(buildingFeatures);
+    const fallbackFeatures = canonicalFeatures.features.length === 0
+      ? buildAddressFallbackBuildings(addressStateOverrides)
+      : null;
+    const normalizedFeatures = fallbackFeatures?.features.length
+      ? fallbackFeatures
+      : canonicalFeatures;
     const featureCount = normalizedFeatures.features.length;
     const controlledKey = [
       campaignId ?? 'no-campaign',
@@ -1312,7 +1378,7 @@ export function MapBuildingsLayer({
       featureCount,
     ].join(':');
 
-    campaignDataLoadedRef.current = featureCount > 0 ? controlledKey : null;
+    campaignDataLoadedRef.current = canonicalFeatures.features.length > 0 ? controlledKey : null;
     emptyFallbackRetryKeyRef.current = controlledKey;
     emptyFallbackRetryCountRef.current = 0;
     setIsFetching(false);
@@ -1322,6 +1388,7 @@ export function MapBuildingsLayer({
       campaignId,
       buildingDataKey: buildingDataKey ?? null,
       featureCount,
+      fallbackFeatureCount: fallbackFeatures?.features.length ?? 0,
       firstFeatureId:
         normalizedFeatures.features[0]?.properties?.gers_id ??
         normalizedFeatures.features[0]?.properties?.building_id ??
