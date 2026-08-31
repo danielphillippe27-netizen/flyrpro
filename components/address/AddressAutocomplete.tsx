@@ -20,6 +20,7 @@ interface AddressAutocompleteProps {
   inputClassName?: string;
   inputId?: string;
   includeCities?: boolean;
+  useCurrentLocation?: boolean;
 }
 
 export function AddressAutocomplete({
@@ -32,6 +33,7 @@ export function AddressAutocomplete({
   inputClassName,
   inputId,
   includeCities = false,
+  useCurrentLocation = true,
 }: AddressAutocompleteProps) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -45,7 +47,7 @@ export function AddressAutocomplete({
 
   // Get user location on mount
   useEffect(() => {
-    if (!navigator.geolocation) {
+    if (!useCurrentLocation || !navigator.geolocation) {
       return;
     }
 
@@ -65,7 +67,7 @@ export function AddressAutocomplete({
         maximumAge: 60000, // Cache for 1 minute
       }
     );
-  }, []);
+  }, [useCurrentLocation]);
 
   // Debounced search function
   const debouncedSearch = useMemo(

@@ -23,7 +23,6 @@ export type SelfServeProspectingStep = 'location' | 'selection' | 'preview';
 export type SelfServeSelectionTool = 'polygon' | 'radius';
 
 type SelfServeProspectingFunnelProps = {
-  mapLoaded: boolean;
   step: SelfServeProspectingStep;
   selectionTool: SelfServeSelectionTool;
   searchQuery: string;
@@ -31,12 +30,8 @@ type SelfServeProspectingFunnelProps = {
   discoveredCount: number;
   previewRevealCount: number;
   hasBoundary: boolean;
-  locationPending: boolean;
-  locationError: string | null;
   onSearchQueryChange: (value: string) => void;
   onSearchSelect: (suggestion: AddressSuggestion) => void;
-  onUseLocation: () => void;
-  onStartDrawing: () => void;
   onSelectionToolChange: (tool: SelfServeSelectionTool) => void;
   onClearBoundary: () => void;
   onGeneratePreview: () => void;
@@ -62,7 +57,6 @@ const lockedPerformanceMetrics = [
 ] as const;
 
 export function SelfServeProspectingFunnel({
-  mapLoaded,
   step,
   selectionTool,
   searchQuery,
@@ -70,12 +64,8 @@ export function SelfServeProspectingFunnel({
   discoveredCount,
   previewRevealCount,
   hasBoundary,
-  locationPending,
-  locationError,
   onSearchQueryChange,
   onSearchSelect,
-  onUseLocation,
-  onStartDrawing,
   onSelectionToolChange,
   onClearBoundary,
   onGeneratePreview,
@@ -116,53 +106,25 @@ export function SelfServeProspectingFunnel({
             </span>
           </div>
 
-          <div className="space-y-3">
-            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-red-300">
-              <Sparkles className="size-3.5" />
-              Built around your latest job
-            </p>
-            <h1 className="text-balance text-[2.45rem] font-black leading-[0.98] tracking-[-0.055em] sm:text-5xl">
-              Create a 3D Prospecting Map Around Your Latest Job
-            </h1>
-            <p className="max-w-md text-base font-medium leading-7 text-zinc-300">
-              Target surrounding homeowners in under 60 seconds.
-            </p>
-          </div>
+          <h1 className="text-balance text-[2.45rem] font-black leading-[0.98] tracking-[-0.055em] sm:text-5xl">
+            1. Choose an area
+          </h1>
+          <p className="mt-3 text-base font-medium leading-7 text-zinc-300">
+            Search an address or city to start.
+          </p>
 
-          <div className="mt-7 space-y-3">
+          <div className="mt-7">
             <AddressAutocomplete
               inputId="campaign-map-search"
               value={searchQuery}
               onChange={onSearchQueryChange}
               onSelect={onSearchSelect}
               includeCities
-              placeholder="Enter property address or city..."
+              useCurrentLocation={false}
+              placeholder="Search an address or city..."
               inputClassName="h-14 rounded-2xl border-white/15 bg-white/10 pl-4 text-base text-white shadow-none placeholder:text-zinc-500 focus-visible:border-red-400 focus-visible:ring-red-400/30 dark:bg-white/10"
             />
-            {locationError ? <p className="px-1 text-xs font-medium text-red-200">{locationError}</p> : null}
-            <Button
-              type="button"
-              onClick={onStartDrawing}
-              disabled={!mapLoaded}
-              className="h-14 w-full rounded-2xl bg-red-500 text-base font-black text-white shadow-[0_18px_45px_rgba(239,68,68,0.28)] hover:bg-red-400"
-            >
-              <Pentagon className="size-5" />
-              {mapLoaded ? 'Draw Map Area' : 'Loading 3D map...'}
-            </Button>
-            <button
-              type="button"
-              onClick={onUseLocation}
-              disabled={locationPending || !mapLoaded}
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 text-sm font-bold text-zinc-300 transition hover:bg-white/[0.08] disabled:opacity-50"
-            >
-              <CircleDot className="size-4" />
-              {locationPending ? 'Finding your neighborhood...' : 'Use my current location'}
-            </button>
           </div>
-
-          <p className="mt-5 text-center text-[11px] font-medium text-zinc-500">
-            No sign-in or credit card required to build your preview.
-          </p>
         </div>
       </div>
     );

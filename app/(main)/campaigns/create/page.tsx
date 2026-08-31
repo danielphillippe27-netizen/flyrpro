@@ -128,8 +128,6 @@ type SelfServeCampaignDraft = {
 
 type SelfServeSelectedBuilding = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon, Record<string, unknown>>;
 
-type SelfServeLocationState = 'idle' | 'requesting' | 'centered' | 'prompt' | 'dismissed';
-
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -477,8 +475,6 @@ export default function CreateCampaignPage() {
   const showCampaignOverlays = false;
   const [campaignOverlays, setCampaignOverlays] = useState<TerritoryOverlayCampaign[]>([]);
   const [feedbackDialog, setFeedbackDialog] = useState<CreateCampaignDialogState | null>(null);
-  const [selfServeLocationState, setSelfServeLocationState] = useState<SelfServeLocationState>('idle');
-  const [selfServeLocationError, setSelfServeLocationError] = useState<string | null>(null);
   const [selfServeStep, setSelfServeStep] = useState<SelfServeProspectingStep>(
     shouldRestoreSelfServeCampaign ? 'selection' : 'location'
   );
@@ -504,7 +500,6 @@ export default function CreateCampaignPage() {
   const selfServeDraftRestoredRef = useRef(false);
   const selfServeDraftSubmitStartedRef = useRef(false);
   const selfServeTerritoryHandoffStartedRef = useRef(false);
-  const selfServeLocationRequestStartedRef = useRef(false);
   const selfServeDraftIdRef = useRef(createSelfServeDraftId());
   const selfServeSelectedBuildingsRef = useRef<SelfServeSelectedBuilding[]>([]);
   const selfServePreviewRevealTimerRef = useRef<number | null>(null);
@@ -1442,84 +1437,6 @@ export default function CreateCampaignPage() {
     };
   }, [mapLoaded, phase]);
 
-  const requestSelfServeUserLocation = async (source: 'auto' | 'manual' = 'manual') => {
-    if (!isSelfServeDemo || !map.current || !mapLoaded || typeof navigator === 'undefined') return;
-
-    if (!navigator.geolocation) {
-      if (source === 'manual') {
-        setSelfServeLocationError('This browser did not expose location access. Search an address to start.');
-        setSelfServeLocationState('prompt');
-      } else {
-        setSelfServeLocationState('prompt');
-      }
-      return;
-    }
-
-    if (source === 'manual' && navigator.permissions?.query) {
-      try {
-        const permission = await navigator.permissions.query({ name: 'geolocation' });
-        if (permission.state === 'denied') {
-          setSelfServeLocationError(
-            'Location is blocked for this site. Allow location in your browser settings, then tap Enable location again.'
-          );
-          setSelfServeLocationState('prompt');
-          return;
-        }
-      } catch {
-        // Some browsers support geolocation but not querying its permission state.
-      }
-    }
-
-    setSelfServeLocationError(null);
-    setSelfServeLocationState('requesting');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { longitude, latitude } = position.coords;
-        hasCenteredOnUserLocationRef.current = true;
-        setSelfServeLocationError(null);
-        setSelfServeLocationState('centered');
-        map.current?.flyTo({
-          center: [longitude, latitude],
-          zoom: 17,
-          pitch: 0,
-          bearing: 0,
-          duration: source === 'auto' ? 1400 : 900,
-        });
-      },
-      (error) => {
-        console.warn('[CreateCampaignPage] Self-serve location unavailable:', error);
-        if (source === 'manual') {
-          const message =
-            error.code === error.PERMISSION_DENIED
-              ? 'Location is blocked for this site. Allow location in your browser settings, then tap Enable location again.'
-              : error.code === error.TIMEOUT
-                ? 'Location lookup timed out. Search an address to start.'
-                : 'Could not get your location here. Search an address to start.';
-          setSelfServeLocationError(message);
-          setSelfServeLocationState('prompt');
-          return;
-        }
-        setSelfServeLocationState('prompt');
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 },
-    );
-  };
-
-  useEffect(() => {
-    if (
-      !isSelfServeDemo ||
-      shouldResumeSelfServeCampaign ||
-      !mapLoaded ||
-      !map.current ||
-      selfServeLocationRequestStartedRef.current
-    ) {
-      return;
-    }
-
-    selfServeLocationRequestStartedRef.current = true;
-    setSelfServeLocationState('prompt');
-  }, [isSelfServeDemo, mapLoaded, shouldResumeSelfServeCampaign]);
-
   // Keep map fully sized when surrounding layout (e.g. campaign sidebar) collapses/expands.
   useEffect(() => {
     if (!mapLoaded || !map.current || !mapContainer.current) return;
@@ -1689,8 +1606,12 @@ export default function CreateCampaignPage() {
     map.current.flyTo({
       center: [suggestion.coordinate.longitude, suggestion.coordinate.latitude],
       zoom: 18,
-      duration: 1500, // Smooth animation
+      duration: 900,
     });
+
+    if (isSelfServeDemo && selfServeStep === 'location') {
+      handleStartCreating();
+    }
   };
 
   const startSelfServeCampaignProvision = async (campaignId: string) => {
@@ -2573,7 +2494,6 @@ export default function CreateCampaignPage() {
 
         {isSelfServeDemo ? (
           <SelfServeProspectingFunnel
-            mapLoaded={mapLoaded}
             step={selfServeStep}
             selectionTool={selfServeSelectionTool}
             searchQuery={mapSearchQuery}
@@ -2581,12 +2501,8 @@ export default function CreateCampaignPage() {
             discoveredCount={selfServeDiscoveredCount}
             previewRevealCount={selfServePreviewRevealCount}
             hasBoundary={selfServeHasBoundary}
-            locationPending={selfServeLocationState === 'requesting'}
-            locationError={selfServeLocationError}
             onSearchQueryChange={setMapSearchQuery}
             onSearchSelect={handleMapSearchSelect}
-            onUseLocation={() => void requestSelfServeUserLocation('manual')}
-            onStartDrawing={handleStartCreating}
             onSelectionToolChange={handleSelfServeSelectionToolChange}
             onClearBoundary={clearDrawing}
             onGeneratePreview={handleGenerateSelfServePreview}
