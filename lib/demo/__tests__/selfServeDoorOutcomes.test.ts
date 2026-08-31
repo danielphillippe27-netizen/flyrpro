@@ -4,17 +4,16 @@ import {
   buildSelfServeDoorOutcomes,
 } from '../selfServeDoorOutcomes';
 
-const counts = allocateSelfServeDoorOutcomeCounts(100);
+const counts = allocateSelfServeDoorOutcomeCounts(90);
 assert.deepEqual(counts, {
-  no_answer: 30,
-  answered: 30,
+  no_answer: 20,
+  answered: 40,
   lead: 20,
   appointment: 10,
-  other: 10,
 });
 
-const outcomes = buildSelfServeDoorOutcomes(100);
-assert.equal(outcomes.length, 100);
+const outcomes = buildSelfServeDoorOutcomes(90);
+assert.equal(outcomes.length, 90);
 assert.deepEqual(
   outcomes.reduce<Record<string, number>>((totals, outcome) => {
     totals[outcome] = (totals[outcome] ?? 0) + 1;
@@ -22,7 +21,8 @@ assert.deepEqual(
   }, {}),
   counts,
 );
-assert.deepEqual(buildSelfServeDoorOutcomes(100), outcomes);
+assert.deepEqual(buildSelfServeDoorOutcomes(90), outcomes);
+assert.equal(outcomes.includes('other' as never), false);
 
 for (const total of [0, 1, 5, 17, 122, 1000]) {
   const allocated = allocateSelfServeDoorOutcomeCounts(total);

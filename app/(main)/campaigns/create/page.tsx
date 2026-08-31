@@ -1273,7 +1273,6 @@ export default function CreateCampaignPage() {
             'answered', '#22c55e',
             'lead', '#3b82f6',
             'appointment', '#facc15',
-            'other', '#64748b',
             '#8293aa',
           ],
           'fill-extrusion-height': 12,

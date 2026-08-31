@@ -2,8 +2,7 @@ export type SelfServeDoorOutcome =
   | 'no_answer'
   | 'answered'
   | 'lead'
-  | 'appointment'
-  | 'other';
+  | 'appointment';
 
 export type SelfServeDoorOutcomeCounts = Record<SelfServeDoorOutcome, number>;
 
@@ -11,17 +10,18 @@ const OUTCOME_WEIGHTS: ReadonlyArray<{
   outcome: SelfServeDoorOutcome;
   weight: number;
 }> = [
-  { outcome: 'no_answer', weight: 0.3 },
-  { outcome: 'answered', weight: 0.3 },
-  { outcome: 'lead', weight: 0.2 },
-  { outcome: 'appointment', weight: 0.1 },
-  { outcome: 'other', weight: 0.1 },
+  { outcome: 'no_answer', weight: 20 },
+  { outcome: 'answered', weight: 40 },
+  { outcome: 'lead', weight: 20 },
+  { outcome: 'appointment', weight: 10 },
 ];
+
+const TOTAL_OUTCOME_WEIGHT = OUTCOME_WEIGHTS.reduce((sum, { weight }) => sum + weight, 0);
 
 export function allocateSelfServeDoorOutcomeCounts(total: number): SelfServeDoorOutcomeCounts {
   const safeTotal = Math.max(0, Math.trunc(total));
   const allocations = OUTCOME_WEIGHTS.map(({ outcome, weight }, order) => {
-    const exact = safeTotal * weight;
+    const exact = safeTotal * (weight / TOTAL_OUTCOME_WEIGHT);
     return {
       outcome,
       order,
@@ -40,7 +40,7 @@ export function allocateSelfServeDoorOutcomeCounts(total: number): SelfServeDoor
 
   return allocations.reduce<SelfServeDoorOutcomeCounts>(
     (counts, allocation) => ({ ...counts, [allocation.outcome]: allocation.count }),
-    { no_answer: 0, answered: 0, lead: 0, appointment: 0, other: 0 },
+    { no_answer: 0, answered: 0, lead: 0, appointment: 0 },
   );
 }
 
@@ -56,7 +56,7 @@ export function buildSelfServeDoorOutcomes(total: number): SelfServeDoorOutcome[
   const counts = allocateSelfServeDoorOutcomeCounts(total);
   const shuffledIndices = Array.from({ length: Math.max(0, Math.trunc(total)) }, (_, index) => index)
     .sort((left, right) => stableShuffleScore(left) - stableShuffleScore(right));
-  const outcomes = Array<SelfServeDoorOutcome>(shuffledIndices.length).fill('other');
+  const outcomes = Array<SelfServeDoorOutcome>(shuffledIndices.length).fill('no_answer');
   let cursor = 0;
 
   for (const { outcome } of OUTCOME_WEIGHTS) {

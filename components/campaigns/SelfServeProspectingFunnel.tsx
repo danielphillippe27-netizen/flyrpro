@@ -46,11 +46,10 @@ type SelfServeProspectingFunnelProps = {
 
 const BUILDING_LIMIT = 1000;
 const doorOutcomeLegend = [
-  ['No answer', '30%', 'bg-red-500'],
-  ['Answer', '30%', 'bg-green-500'],
+  ['No answer', '20%', 'bg-red-500'],
+  ['Answer', '40%', 'bg-green-500'],
   ['Lead', '20%', 'bg-blue-500'],
   ['Appointment', '10%', 'bg-yellow-400'],
-  ['Other', '10%', 'bg-slate-500'],
 ] as const;
 
 const lockedPerformanceMetrics = [
@@ -274,11 +273,11 @@ export function SelfServeProspectingFunnel({
                 </p>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <div className="rounded-2xl border border-red-400/15 bg-red-500/10 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-300">No answer · 30%</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-300">No answer · 20%</p>
                     <p className="mt-1 text-2xl font-black text-red-400">{outcomeCounts.no_answer}</p>
                   </div>
                   <div className="rounded-2xl border border-green-400/15 bg-green-500/10 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-green-300">Answer · 30%</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-green-300">Answer · 40%</p>
                     <p className="mt-1 text-2xl font-black text-green-400">{outcomeCounts.answered}</p>
                   </div>
                   <div className="rounded-2xl border border-blue-400/15 bg-blue-500/10 p-3">
@@ -291,7 +290,7 @@ export function SelfServeProspectingFunnel({
                   </div>
                 </div>
                 <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-500">
-                  {selectedCount} doors hit · {outcomeCounts.other} other / not interested
+                  {selectedCount} doors hit · every outcome saved
                 </p>
                 <div className="mt-3 grid grid-cols-2 gap-2" aria-label="Performance analytics available after claiming this map">
                   {lockedPerformanceMetrics.map(([label, value]) => (
@@ -382,7 +381,7 @@ export function SelfServeProspectingFunnel({
                   </>
                 ) : (
                   <>
-                    <div className="mt-4 grid grid-cols-5 gap-1">
+                    <div className="mt-4 grid grid-cols-4 gap-1.5">
                       {doorOutcomeLegend.map(([label, percentage, color]) => (
                         <div key={label} className="rounded-xl bg-white/5 px-1.5 py-2 text-center">
                           <span className={`mx-auto block size-2.5 rounded-full ${color}`} />
