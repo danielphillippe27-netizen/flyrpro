@@ -54,6 +54,13 @@ const doorOutcomeLegend = [
   ['Other', '10%', 'bg-slate-500'],
 ] as const;
 
+const lockedPerformanceMetrics = [
+  ['Conversation / Lead %', '36.7%'],
+  ['Doors / Conversation', '3.3'],
+  ['Distance', '4.8 km'],
+  ['Time', '2h 14m'],
+] as const;
+
 export function SelfServeProspectingFunnel({
   mapLoaded,
   step,
@@ -285,6 +292,30 @@ export function SelfServeProspectingFunnel({
                 </div>
                 <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-500">
                   {selectedCount} doors hit · {outcomeCounts.other} other / not interested
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2" aria-label="Performance analytics available after claiming this map">
+                  {lockedPerformanceMetrics.map(([label, value]) => (
+                    <div
+                      key={label}
+                      className="relative min-h-20 overflow-hidden rounded-2xl border border-white/8 bg-white/[0.035] p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-[9px] font-bold uppercase leading-4 tracking-[0.12em] text-zinc-400">
+                          {label}
+                        </p>
+                        <LockKeyhole className="size-3.5 shrink-0 text-zinc-600" aria-hidden="true" />
+                      </div>
+                      <p
+                        aria-hidden="true"
+                        className="mt-1 select-none text-xl font-black text-white blur-[5px]"
+                      >
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-center text-[9px] font-bold uppercase tracking-[0.14em] text-zinc-600">
+                  Claim this map to unlock performance analytics
                 </p>
                 <div className="mt-3 flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3">
                   <CheckCircle2 className="size-5 shrink-0 text-emerald-300" />
