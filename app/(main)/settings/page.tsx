@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
+import { StormMapsSettingsCard } from '@/components/settings/StormMapsSettingsCard';
 import {
   SALESPERSON_STRIPE_GUARDIAN_POLICY,
   SALESPERSON_STRIPE_ONBOARDING_POLICY,
@@ -872,6 +873,10 @@ function SettingsPageContent() {
               </CardContent>
             </Card>
           )}
+
+          {!isSalespersonSettings ? (
+            <StormMapsSettingsCard workspaceId={currentWorkspaceId} />
+          ) : null}
 
           {!isSalespersonSettings ? (
             <Card>

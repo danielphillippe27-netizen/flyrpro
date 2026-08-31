@@ -29,6 +29,7 @@ import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmt
 import type { BuildingFeatureCollection } from '@/types/map-buildings';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
+import { GoogleCampaign2DMap } from '@/components/map/GoogleCampaign2DMap';
 import { CreateContactDialog } from '@/components/crm/CreateContactDialog';
 import { Button } from '@/components/ui/button';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
@@ -38,6 +39,7 @@ import { useMapStyle } from '@/lib/map-style-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { useMovieMapControlsEnabled } from '@/lib/hooks/useMovieMapControlsEnabled';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
+import { hasRenderableCampaignBuildings } from '@/lib/map/campaignRenderer';
 import {
   applyPresetVisualTweaks,
   applyResolvedMapStyle,
@@ -835,6 +837,8 @@ export function CampaignDetailMapView({
   const [demoPlaybackColorOverrides, setDemoPlaybackColorOverrides] = useState<Record<string, string> | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapInitFailed, setMapInitFailed] = useState(false);
+  const [mapBundleResolved, setMapBundleResolved] = useState(false);
+  const [mapBundleAvailable, setMapBundleAvailable] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
   const [buildingsRenderState, setBuildingsRenderState] = useState<MapBuildingsRenderState>({
     isFetching: false,
@@ -1008,9 +1012,12 @@ export function CampaignDetailMapView({
     () => (isFeatureCollection(mapBundle?.buildings) ? mapBundle.buildings : null),
     [mapBundle?.buildings],
   );
+  const useGoogle2D =
+    mapBundleResolved && mapBundleAvailable && !hasRenderableCampaignBuildings(bundleBuildings);
   const mapBundleDataKey = mapBundle?.asset_signature ?? mapBundle?.updated_at ?? mapBundle?.source_version ?? null;
   const visibleAddressesRef = useRef(visibleAddresses);
   const mapBundleSignatureRef = useRef<string | null>(null);
+  const mapBundleAvailableRef = useRef(false);
   const lastMapBundleLoadKeyRef = useRef<string | null>(null);
   const mapProvisionRefreshKey = [
     campaign?.provision_status ?? '',
@@ -1268,6 +1275,11 @@ export function CampaignDetailMapView({
     setShowParcelsOverlay(resolvedInitialParcelOverlay);
     setParcels([]);
     setMapBundle(null);
+    setMapBundleResolved(false);
+    setMapBundleAvailable(false);
+    mapBundleAvailableRef.current = false;
+    setMapLoaded(false);
+    setMapInitFailed(false);
     mapBundleSignatureRef.current = null;
     lastMapBundleLoadKeyRef.current = null;
   }, [campaignId, resolvedInitialMapViewMode, resolvedInitialParcelOverlay]);
@@ -1275,6 +1287,9 @@ export function CampaignDetailMapView({
   useEffect(() => {
     if (!campaignId) {
       setMapBundle(null);
+      setMapBundleResolved(true);
+      setMapBundleAvailable(false);
+      mapBundleAvailableRef.current = false;
       mapBundleSignatureRef.current = null;
       lastMapBundleLoadKeyRef.current = null;
       return;
@@ -1316,6 +1331,9 @@ export function CampaignDetailMapView({
         if (cancelled) return;
 
         mapBundleSignatureRef.current = bundle.asset_signature ?? null;
+        mapBundleAvailableRef.current = true;
+        setMapBundleAvailable(true);
+        setMapInitFailed(false);
         setMapBundle(bundle);
 
         if (SHOW_PARCEL_VIEW) {
@@ -1324,6 +1342,13 @@ export function CampaignDetailMapView({
       } catch (error) {
         if (!cancelled) {
           console.warn('[CampaignDetailMapView] Failed to load campaign map bundle:', error);
+          if (!mapBundleAvailableRef.current) {
+            setMapInitFailed(true);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setMapBundleResolved(true);
         }
       }
     };
@@ -1930,6 +1955,7 @@ export function CampaignDetailMapView({
   };
 
   useEffect(() => {
+    if (!mapBundleResolved || !mapBundleAvailable || useGoogle2D) return;
     if (map.current || initAttemptedRef.current) return;
     setMapInitFailed(false);
     retryCountRef.current = 0;
@@ -2152,7 +2178,7 @@ export function CampaignDetailMapView({
         setMapLoaded(false);
       }
     };
-  }, [resolvedMapStyle]);
+  }, [mapBundleAvailable, mapBundleResolved, resolvedMapStyle, useGoogle2D]);
 
   // Keep Mapbox canvas in sync with container size (sidebar collapse/expand, viewport changes).
   useEffect(() => {
@@ -3458,7 +3484,34 @@ export function CampaignDetailMapView({
       onPointerDown={handleMapShellPointerDown}
       className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
     >
-      <div ref={mapContainer} className="h-full w-full" />
+      {!mapBundleResolved ? (
+        <div className="flex h-full w-full items-center justify-center bg-background">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+        </div>
+      ) : useGoogle2D ? (
+        <GoogleCampaign2DMap
+          key={theme}
+          addresses={mapAddresses}
+          boundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
+          bbox={campaignBbox}
+          theme={theme === 'dark' ? 'dark' : 'light'}
+          onReady={() => {
+            setMapInitFailed(false);
+            setMapLoaded(true);
+          }}
+          onError={() => {
+            setMapLoaded(false);
+            setMapInitFailed(true);
+          }}
+          onAddressClick={({ addressId, buildingId }) => {
+            handleMapTargetClick({ addressId, buildingId, parcelId: null });
+          }}
+        />
+      ) : mapBundleAvailable ? (
+        <div ref={mapContainer} className="h-full w-full" />
+      ) : (
+        <div className="h-full w-full bg-background" />
+      )}
       {reconciliationProcessing ? (
         <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2">
           <div className="rounded-full border border-border bg-background/92 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
@@ -3893,6 +3946,19 @@ export function CampaignDetailMapView({
           )}
         </>
       )}
+
+      {useGoogle2D && mapLoaded && locationCardOpen && selectedBuildingId ? (
+        <div className="absolute bottom-6 left-4 z-20">
+          <LocationCard
+            gersId={selectedBuildingId}
+            campaignId={campaignId}
+            preferredAddressId={selectedAddressIdForCard}
+            onSelectAddress={(id) => setSelectedAddressIdForCard(id ?? null)}
+            onClose={handleCloseLocationCard}
+            onAddContact={handleAddContact}
+          />
+        </div>
+      ) : null}
 
       {/* Create Contact Dialog */}
       {userId && (

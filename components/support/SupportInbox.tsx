@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Send, Loader2 } from 'lucide-react';
@@ -49,6 +49,8 @@ export function SupportInbox({
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messageScrollerRef = useRef<HTMLDivElement>(null);
+  const replyInputRef = useRef<HTMLInputElement>(null);
 
   const loadThreads = useCallback(async (showLoader = false) => {
     if (showLoader) setLoadingThreads(true);
@@ -124,6 +126,17 @@ export function SupportInbox({
     if (!threads.some((thread) => thread.id === threadFromQuery)) return;
     void loadMessages(threadFromQuery);
   }, [threadFromQuery, threads, selectedThreadId, loadMessages]);
+
+  useLayoutEffect(() => {
+    if (!selectedThreadId || loadingMessages) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = messageScrollerRef.current;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      replyInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedThreadId, loadingMessages, messages.length]);
 
   const sendReply = useCallback(async () => {
     if (!selectedThreadId || !replyBody.trim()) return;
@@ -251,7 +264,11 @@ export function SupportInbox({
             </div>
           ) : (
             <>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div
+                ref={messageScrollerRef}
+                data-testid="support-message-thread"
+                className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4"
+              >
                 {loadingMessages ? (
                   <div className="flex justify-center py-8">
                     <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -280,6 +297,7 @@ export function SupportInbox({
               </div>
               <div className="shrink-0 border-t border-border bg-white dark:bg-card p-3 flex gap-2">
                 <Input
+                  ref={replyInputRef}
                   placeholder="Type your reply..."
                   value={replyBody}
                   onChange={(event) => setReplyBody(event.target.value)}

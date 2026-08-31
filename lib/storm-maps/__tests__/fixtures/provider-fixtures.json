@@ -1,0 +1,58 @@
+{
+  "ecccCapabilities": "<WMS_Capabilities><Layer><Dimension name=\"time\" units=\"ISO8601\" default=\"2026-08-30T12:30:00Z\">2026-08-30T09:30:00Z/2026-08-30T12:30:00Z/PT6M</Dimension></Layer></WMS_Capabilities>",
+  "noaaAlert": {
+    "type": "Feature",
+    "id": "noaa-1",
+    "geometry": { "type": "Polygon", "coordinates": [[[-97, 32], [-96, 32], [-96, 33], [-97, 32]]] },
+    "properties": {
+      "event": "Tornado Warning",
+      "severity": "Extreme",
+      "headline": "Tornado Warning issued for test county",
+      "description": "Take shelter now.",
+      "sent": "2026-08-30T12:00:00Z",
+      "ends": "2026-08-30T13:00:00Z",
+      "@id": "https://api.weather.gov/alerts/noaa-1"
+    }
+  },
+  "ecccAlert": {
+    "type": "Feature",
+    "id": "eccc-1",
+    "geometry": { "type": "Polygon", "coordinates": [[[-80, 43], [-79, 43], [-79, 44], [-80, 43]]] },
+    "properties": {
+      "alert_name_en": "severe thunderstorm watch",
+      "alert_text_en": "Conditions are favourable for severe thunderstorms.",
+      "impact_en": "severe",
+      "publication_datetime": "2026-08-30T12:00:00Z",
+      "expiration_datetime": "2026-08-30T16:00:00Z"
+    }
+  },
+  "ecccOutlook": {
+    "type": "Feature",
+    "id": "eccc-outlook-1",
+    "geometry": { "type": "Polygon", "coordinates": [[[-81, 43], [-79, 43], [-79, 45], [-81, 43]]] },
+    "properties": {
+      "metobject_hail_value": 2.5,
+      "metobject_hail_unit": "cm",
+      "metobject_risk_swo_value": 3,
+      "metobject_thunderstorm_value": "organized",
+      "metobject_gust_value": 90,
+      "metobject_gust_unit": "km/h",
+      "metobject_confidence_value": 3,
+      "metobject_impact_value": 3,
+      "publication_datetime": "2026-08-30T12:00:00Z",
+      "validity_datetime": "2026-08-30T18:00:00Z",
+      "expiration_datetime": "2026-08-31T05:00:00Z"
+    }
+  },
+  "iemReport": {
+    "type": "Feature",
+    "id": "iem-1",
+    "geometry": { "type": "Point", "coordinates": [-96.7, 32.8] },
+    "properties": {
+      "typetext": "HAIL",
+      "magnitude": "1.50 INCH",
+      "remark": "Quarter to ping pong ball sized hail.",
+      "valid": "2026-08-30T12:15:00Z"
+    }
+  }
+}

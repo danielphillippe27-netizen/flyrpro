@@ -252,7 +252,10 @@ function MainLayoutShell({
               'flex flex-1 flex-col min-h-0 p-0 m-0',
               pathname?.startsWith('/campaigns') ||
               pathname?.startsWith('/offers') ||
-              pathname?.startsWith('/map')
+              pathname?.startsWith('/map') ||
+              pathname?.startsWith('/inbox') ||
+              pathname?.startsWith('/support') ||
+              pathname?.startsWith('/admin/support')
                 ? 'overflow-hidden'
                 : 'overflow-auto'
             )}
@@ -262,7 +265,10 @@ function MainLayoutShell({
                 'flex flex-col min-h-0',
                 pathname?.startsWith('/campaigns') ||
                 pathname?.startsWith('/offers') ||
-                pathname?.startsWith('/map')
+                pathname?.startsWith('/map') ||
+                pathname?.startsWith('/inbox') ||
+                pathname?.startsWith('/support') ||
+                pathname?.startsWith('/admin/support')
                   ? 'flex-1 flex flex-col overflow-hidden min-h-0 [&>*]:flex-1 [&>*]:min-h-0'
                   : 'min-h-full'
               )}

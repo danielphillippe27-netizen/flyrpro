@@ -38,6 +38,7 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
+import { StormMapsControl } from '@/components/storm-maps/StormMapsControl';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
 import { CalendarDays, CircleAlert, Map, Minus, Pencil, Plus, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
@@ -1749,6 +1750,11 @@ export default function CreateCampaignPage() {
       <div className="relative min-h-0 flex-1">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <MapInfoButton show={mapLoaded} />
+        <StormMapsControl
+          map={map.current}
+          mapLoaded={mapLoaded}
+          workspaceId={currentWorkspaceId}
+        />
         {mapLoaded && map.current && (
           <UserLocationLayer
             map={map.current}
