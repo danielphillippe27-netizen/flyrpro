@@ -2505,6 +2505,8 @@ export default function CreateCampaignPage() {
             onSearchSelect={handleMapSearchSelect}
             onSelectionToolChange={handleSelfServeSelectionToolChange}
             onClearBoundary={clearDrawing}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
             onGeneratePreview={handleGenerateSelfServePreview}
             onRevealPreview={handleRevealSelfServePreview}
             onBackToSelection={() => {

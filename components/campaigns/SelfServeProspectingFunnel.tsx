@@ -10,7 +10,9 @@ import {
   DoorOpen,
   LockKeyhole,
   MapPinned,
+  Minus,
   Pentagon,
+  Plus,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -34,6 +36,8 @@ type SelfServeProspectingFunnelProps = {
   onSearchSelect: (suggestion: AddressSuggestion) => void;
   onSelectionToolChange: (tool: SelfServeSelectionTool) => void;
   onClearBoundary: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
   onGeneratePreview: () => void;
   onRevealPreview: () => void;
   onBackToSelection: () => void;
@@ -68,6 +72,8 @@ export function SelfServeProspectingFunnel({
   onSearchSelect,
   onSelectionToolChange,
   onClearBoundary,
+  onZoomIn,
+  onZoomOut,
   onGeneratePreview,
   onRevealPreview,
   onBackToSelection,
@@ -132,52 +138,84 @@ export function SelfServeProspectingFunnel({
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
-        <div className="pointer-events-auto mx-auto flex w-full max-w-2xl items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2.5 text-white shadow-2xl backdrop-blur-xl">
-          <button
-            type="button"
-            onClick={step === 'preview' ? handlePreviewBack : onClearBoundary}
-            className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
-            aria-label={step === 'preview' && showResults ? 'Back to 3D map' : step === 'preview' ? 'Back to selection' : 'Clear boundary'}
-          >
-            <ArrowLeft className="size-5" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-400">
-              {step === 'preview' ? (showResults ? 'Mock campaign results' : 'Live 3D campaign preview') : 'Live territory estimate'}
-            </p>
-            <p className="truncate text-sm font-black">
-              {showResults ? 'Doors Hit' : 'Buildings Selected'}: <span className="text-red-300">{selectedCount}</span>
-            </p>
+      {step === 'preview' ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
+          <div className="pointer-events-auto mx-auto flex w-full max-w-2xl items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2.5 text-white shadow-2xl backdrop-blur-xl">
+            <button
+              type="button"
+              onClick={handlePreviewBack}
+              className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+              aria-label={showResults ? 'Back to 3D map' : 'Back to selection'}
+            >
+              <ArrowLeft className="size-5" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-400">
+                {showResults ? 'Mock campaign results' : 'Live 3D campaign preview'}
+              </p>
+              <p className="truncate text-sm font-black">
+                {showResults ? 'Doors Hit' : 'Buildings Selected'}: <span className="text-red-300">{selectedCount}</span>
+              </p>
+            </div>
+            <span
+              aria-live="polite"
+              className="rounded-full bg-white/10 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-zinc-200"
+            >
+              {showResults ? '100% worked' : selectionLabel}
+            </span>
           </div>
-          <span
-            aria-live="polite"
-            className={`rounded-full px-3 py-2 text-[10px] font-black uppercase tracking-wide ${limitExceeded ? 'bg-red-500 text-white' : 'bg-white/10 text-zinc-200'}`}
-          >
-            {showResults ? '100% worked' : selectionLabel}
-          </span>
         </div>
-      </div>
+      ) : null}
 
       {step === 'selection' ? (
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-[5.5rem] z-20 px-3 sm:px-5">
-            <div className="pointer-events-auto mx-auto grid w-full max-w-sm grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2 shadow-2xl backdrop-blur-xl">
-              {([
-                ['polygon', Pentagon, 'Tap boundary'],
-                ['radius', CircleDot, 'Drag radius'],
-              ] as const).map(([tool, Icon, label]) => (
-                <button
-                  key={tool}
-                  type="button"
-                  onClick={() => onSelectionToolChange(tool)}
-                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-3 text-xs font-black transition ${selectionTool === tool ? 'bg-red-500 text-white shadow-[0_10px_28px_rgba(239,68,68,0.28)]' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}`}
-                >
-                  <Icon className="size-4" />
-                  {label}
-                </button>
-              ))}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
+            <div className="pointer-events-auto mx-auto flex w-full max-w-lg items-center gap-2">
+              <button
+                type="button"
+                onClick={onClearBoundary}
+                className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-[#08090c]/86 text-white shadow-2xl backdrop-blur-xl transition hover:bg-white/10"
+                aria-label="Clear boundary"
+              >
+                <ArrowLeft className="size-5" />
+              </button>
+              <div className="grid min-w-0 flex-1 grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2 shadow-2xl backdrop-blur-xl">
+                {([
+                  ['polygon', Pentagon, 'Tap boundary'],
+                  ['radius', CircleDot, 'Drag radius'],
+                ] as const).map(([tool, Icon, label]) => (
+                  <button
+                    key={tool}
+                    type="button"
+                    onClick={() => onSelectionToolChange(tool)}
+                    className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-2 text-[11px] font-black transition sm:px-3 sm:text-xs ${selectionTool === tool ? 'bg-red-500 text-white shadow-[0_10px_28px_rgba(239,68,68,0.28)]' : 'bg-white/5 text-zinc-300 hover:bg-white/10'}`}
+                  >
+                    <Icon className="size-4 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
+          </div>
+
+          <div className="pointer-events-auto absolute right-3 top-[calc(env(safe-area-inset-top)+5.25rem)] z-20 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#08090c]/86 text-white shadow-2xl backdrop-blur-xl sm:right-5">
+            <button
+              type="button"
+              onClick={onZoomIn}
+              className="flex size-12 items-center justify-center transition hover:bg-white/10 active:bg-white/15"
+              aria-label="Zoom in"
+            >
+              <Plus className="size-5" />
+            </button>
+            <div className="h-px bg-white/10" />
+            <button
+              type="button"
+              onClick={onZoomOut}
+              className="flex size-12 items-center justify-center transition hover:bg-white/10 active:bg-white/15"
+              aria-label="Zoom out"
+            >
+              <Minus className="size-5" />
+            </button>
           </div>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
