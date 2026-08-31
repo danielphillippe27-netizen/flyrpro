@@ -55,6 +55,7 @@ import {
   isDemo44TeamTrialOffer,
 } from '@/lib/demo/demo44TeamTrial';
 import { initTracking, track } from '@/lib/demo/analytics/track';
+import { buildSelfServeDoorOutcomes } from '@/lib/demo/selfServeDoorOutcomes';
 
 const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimizing', 'optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -260,14 +261,6 @@ function featureCentroid(feature: mapboxgl.MapboxGeoJSONFeature): [number, numbe
     count += 1;
   }
   return count > 0 ? [longitude / count, latitude / count] : null;
-}
-
-function selfServeDoorOutcome(index: number): 'no_answer' | 'contacted' | 'follow_up' | 'lead' {
-  const bucket = (index * 37 + 11) % 100;
-  if (bucket < 5) return 'lead';
-  if (bucket < 17) return 'follow_up';
-  if (bucket < 45) return 'contacted';
-  return 'no_answer';
 }
 
 function querySelectedBuildings(
@@ -525,6 +518,10 @@ export default function CreateCampaignPage() {
   });
   const isBusy = loading || provisioning || generatingAddresses;
   const campaignBuildingLimitExceeded = campaignBuildingCount > CAMPAIGN_BUILDING_LIMIT;
+  const selfServePreviewOutcomes = useMemo(
+    () => buildSelfServeDoorOutcomes(selfServeSelectedCount),
+    [selfServeSelectedCount],
+  );
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] : null;
   const canAssignOnCreate = !isSelfServeDemo && (currentWorkspaceRole === 'owner' || currentWorkspaceRole === 'admin');
   const selectedTeamMembers = useMemo(
@@ -1250,7 +1247,7 @@ export default function CreateCampaignPage() {
             ...feature,
             properties: {
               ...(feature.properties ?? {}),
-              demo_outcome: index < selfServePreviewRevealCount ? selfServeDoorOutcome(index) : 'ready',
+              demo_outcome: index < selfServePreviewRevealCount ? selfServePreviewOutcomes[index] : 'ready',
             },
           }))
         : [];
@@ -1271,10 +1268,11 @@ export default function CreateCampaignPage() {
           'fill-extrusion-color': [
             'match',
             ['get', 'demo_outcome'],
-            'lead', '#34d399',
-            'follow_up', '#38bdf8',
-            'contacted', '#fbbf24',
-            'no_answer', '#64748b',
+            'no_answer', '#ef4444',
+            'answered', '#22c55e',
+            'lead', '#3b82f6',
+            'appointment', '#facc15',
+            'other', '#64748b',
             '#8293aa',
           ],
           'fill-extrusion-height': 12,
@@ -1336,6 +1334,7 @@ export default function CreateCampaignPage() {
     isSelfServeDemo,
     mapLoaded,
     mapStyleRevision,
+    selfServePreviewOutcomes,
     selfServePreviewRevealCount,
     selfServeSelectedCount,
     selfServeStep,

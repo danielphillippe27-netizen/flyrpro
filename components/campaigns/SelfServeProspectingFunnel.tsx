@@ -17,6 +17,7 @@ import {
 import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
 import { Button } from '@/components/ui/button';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
+import { allocateSelfServeDoorOutcomeCounts } from '@/lib/demo/selfServeDoorOutcomes';
 
 export type SelfServeProspectingStep = 'location' | 'selection' | 'preview';
 export type SelfServeSelectionTool = 'polygon' | 'radius';
@@ -46,10 +47,11 @@ type SelfServeProspectingFunnelProps = {
 
 const BUILDING_LIMIT = 1000;
 const doorOutcomeLegend = [
-  ['No answer', 'bg-slate-500'],
-  ['Contact', 'bg-amber-400'],
-  ['Follow-up', 'bg-sky-400'],
-  ['Lead', 'bg-emerald-400'],
+  ['No answer', '30%', 'bg-red-500'],
+  ['Answer', '30%', 'bg-green-500'],
+  ['Lead', '20%', 'bg-blue-500'],
+  ['Appointment', '10%', 'bg-yellow-400'],
+  ['Other', '10%', 'bg-slate-500'],
 ] as const;
 
 export function SelfServeProspectingFunnel({
@@ -80,9 +82,7 @@ export function SelfServeProspectingFunnel({
   const selectionLabel = limitExceeded ? '1,000 limit · area too large' : `${selectedCount} selected`;
   const previewRevealInProgress = previewRevealCount > 0 && previewRevealCount < selectedCount;
   const previewRevealed = selectedCount > 0 && previewRevealCount >= selectedCount;
-  const mockConversations = Math.round(selectedCount * 0.32);
-  const mockFollowUps = Math.round(selectedCount * 0.12);
-  const mockLeads = selectedCount > 0 ? Math.max(1, Math.round(selectedCount * 0.05)) : 0;
+  const outcomeCounts = allocateSelfServeDoorOutcomeCounts(selectedCount);
 
   const handlePreviewBack = () => {
     if (step === 'preview' && showResults) {
@@ -266,23 +266,26 @@ export function SelfServeProspectingFunnel({
                   Sample field data generated from working every door in this territory.
                 </p>
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-2xl bg-white/5 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Doors hit</p>
-                    <p className="mt-1 text-2xl font-black">{selectedCount}</p>
+                  <div className="rounded-2xl border border-red-400/15 bg-red-500/10 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-300">No answer · 30%</p>
+                    <p className="mt-1 text-2xl font-black text-red-400">{outcomeCounts.no_answer}</p>
                   </div>
-                  <div className="rounded-2xl bg-white/5 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Conversations</p>
-                    <p className="mt-1 text-2xl font-black text-amber-300">{mockConversations}</p>
+                  <div className="rounded-2xl border border-green-400/15 bg-green-500/10 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-green-300">Answer · 30%</p>
+                    <p className="mt-1 text-2xl font-black text-green-400">{outcomeCounts.answered}</p>
                   </div>
-                  <div className="rounded-2xl bg-white/5 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">Follow-ups</p>
-                    <p className="mt-1 text-2xl font-black text-sky-300">{mockFollowUps}</p>
+                  <div className="rounded-2xl border border-blue-400/15 bg-blue-500/10 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">Lead · 20%</p>
+                    <p className="mt-1 text-2xl font-black text-blue-400">{outcomeCounts.lead}</p>
                   </div>
-                  <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-300">Hot leads</p>
-                    <p className="mt-1 text-2xl font-black text-emerald-300">{mockLeads}</p>
+                  <div className="rounded-2xl border border-yellow-400/15 bg-yellow-400/10 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-yellow-300">Appointment · 10%</p>
+                    <p className="mt-1 text-2xl font-black text-yellow-300">{outcomeCounts.appointment}</p>
                   </div>
                 </div>
+                <p className="mt-2 text-center text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-500">
+                  {selectedCount} doors hit · {outcomeCounts.other} other / not interested
+                </p>
                 <div className="mt-3 flex items-center gap-3 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3">
                   <CheckCircle2 className="size-5 shrink-0 text-emerald-300" />
                   <p className="text-xs font-bold leading-5 text-zinc-300">
@@ -329,7 +332,7 @@ export function SelfServeProspectingFunnel({
                     </p>
                     <div className="mt-4 overflow-hidden rounded-full bg-white/8">
                       <div
-                        className="h-2 rounded-full bg-gradient-to-r from-slate-400 via-amber-400 to-emerald-400 transition-[width] duration-200"
+                        className="h-2 rounded-full bg-gradient-to-r from-red-500 via-green-500 to-blue-500 transition-[width] duration-200"
                         style={{ width: `${selectedCount > 0 ? Math.round((previewRevealCount / selectedCount) * 100) : 0}%` }}
                       />
                     </div>
@@ -348,11 +351,12 @@ export function SelfServeProspectingFunnel({
                   </>
                 ) : (
                   <>
-                    <div className="mt-4 grid grid-cols-4 gap-1.5">
-                      {doorOutcomeLegend.map(([label, color]) => (
+                    <div className="mt-4 grid grid-cols-5 gap-1">
+                      {doorOutcomeLegend.map(([label, percentage, color]) => (
                         <div key={label} className="rounded-xl bg-white/5 px-1.5 py-2 text-center">
                           <span className={`mx-auto block size-2.5 rounded-full ${color}`} />
-                          <p className="mt-1.5 text-[8px] font-bold uppercase tracking-wide text-zinc-400">{label}</p>
+                          <p className="mt-1.5 text-[7px] font-bold uppercase leading-tight tracking-wide text-zinc-400">{label}</p>
+                          <p className="mt-1 text-[8px] font-black text-white">{percentage}</p>
                         </div>
                       ))}
                     </div>
