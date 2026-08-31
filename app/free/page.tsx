@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowRight, BadgeCheck, Building2, MapPinned, MousePointer2, Sparkles } from 'lucide-react';
+import { ArrowRight, BadgeCheck } from 'lucide-react';
 import { normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 
 export const metadata: Metadata = {
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Build your first 3D prospecting map free',
     description:
-      'No sign-up required to start. Pick a neighborhood, watch the map fill in, and test a live field campaign.',
+      'Pick a neighborhood, watch the map fill in, and test a live field campaign.',
     url: 'https://wolfgrid.app/free',
     type: 'website',
   },
@@ -51,12 +51,6 @@ async function buildCampaignHref(searchParams?: FreePageProps['searchParams']) {
   return `/campaigns/create?${campaignParams.toString()}`;
 }
 
-const journey = [
-  { icon: MapPinned, label: 'Find your neighborhood' },
-  { icon: MousePointer2, label: 'Choose your houses' },
-  { icon: Building2, label: 'Watch the 3D map fill in' },
-];
-
 export default async function FreeProspectingMapPage({ searchParams }: FreePageProps) {
   const campaignHref = await buildCampaignHref(searchParams);
 
@@ -86,11 +80,8 @@ export default async function FreeProspectingMapPage({ searchParams }: FreePageP
 
         <section className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[0.9fr_1.1fr] lg:gap-14 lg:py-14">
           <div className="text-center lg:text-left">
-            <p className="inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-3.5 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-red-300">
-              <Sparkles className="size-3.5" /> No sign-up required
-            </p>
-            <h1 className="mx-auto mt-5 max-w-2xl text-balance text-[3.15rem] font-black leading-[0.91] tracking-[-0.065em] sm:text-6xl lg:mx-0 lg:text-7xl">
-              Press here to build your first 3D prospecting map.
+            <h1 className="mx-auto max-w-2xl text-balance text-[3.15rem] font-black leading-[0.91] tracking-[-0.065em] sm:text-6xl lg:mx-0 lg:text-7xl">
+              Press here to build your 3D prospecting map.
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-pretty text-base font-medium leading-7 text-zinc-300 sm:text-lg lg:mx-0">
               Pick a neighborhood, choose up to 1,000 homes, watch your map fill in, then test what it feels like to work the doors.
@@ -127,20 +118,6 @@ export default async function FreeProspectingMapPage({ searchParams }: FreePageP
                   <span className="rounded-xl border border-white/15 bg-black/60 px-3 py-2 text-xs font-black text-emerald-300 backdrop-blur-xl">
                     $0
                   </span>
-                </div>
-
-                <div className="absolute inset-x-4 bottom-4 rounded-[1.5rem] border border-white/10 bg-[#08090b]/90 p-3 shadow-2xl backdrop-blur-2xl sm:p-4">
-                  <div className="space-y-2">
-                    {journey.map(({ icon: Icon, label }, index) => (
-                      <div key={label} className="flex min-h-12 items-center gap-3 rounded-xl bg-white/[0.055] px-3">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500 text-xs font-black">
-                          {index + 1}
-                        </span>
-                        <Icon className="size-4 text-red-300" />
-                        <span className="text-xs font-black text-zinc-100">{label}</span>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             </div>
