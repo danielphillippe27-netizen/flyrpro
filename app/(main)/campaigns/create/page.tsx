@@ -356,6 +356,7 @@ function buildSelfServeOnboardingPath(searchParams: { get(name: string): string 
     resumeCampaign: '1',
   });
   if (isDemo44TeamTrial) onboardingParams.set('offer', DEMO_44_TEAM_TRIAL_OFFER);
+  if (searchParams.get('entry') === 'free') onboardingParams.set('entry', 'free');
   const referralCode = searchParams.get('referralCode') ?? searchParams.get('ref');
   if (referralCode) onboardingParams.set('referralCode', referralCode);
   return `/onboarding?${onboardingParams.toString()}`;

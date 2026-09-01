@@ -331,6 +331,8 @@ function OnboardingContent() {
   const isSelfServeDemoOnboarding =
     searchParams.get('source') === 'self-serve-demo' ||
     searchParams.get('campaign') === 'self-serve-campaign';
+  const isFreeMapOnboarding =
+    isSelfServeDemoOnboarding && searchParams.get('entry') === 'free';
   const onboardingFinalStep = FINAL_ONBOARDING_STEP;
   const requiresOnboardingAuth =
     isExclusivePartnerOnboarding ||
@@ -1056,6 +1058,7 @@ function OnboardingContent() {
               ? normalizedInviteEmails
               : undefined,
           openAppAfterCompletion: true,
+          downloadAppAfterCompletion: isFreeMapOnboarding,
           openCampaignCreateAfterCompletion: isSelfServeDemoOnboarding && !selfServeCampaignDraft,
           resumeCampaignAfterOnboarding:
             isSelfServeDemoOnboarding && !selfServeCampaignDraft && searchParams.get('resumeCampaign') === '1',

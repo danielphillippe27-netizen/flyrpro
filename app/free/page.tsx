@@ -45,6 +45,7 @@ async function buildCampaignHref(searchParams?: FreePageProps['searchParams']) {
   const campaignParams = new URLSearchParams({
     source: 'self-serve-demo',
     campaign: 'self-serve-campaign',
+    entry: 'free',
   });
 
   if (referralCode) campaignParams.set('referralCode', referralCode);

@@ -406,6 +406,7 @@ export async function POST(request: NextRequest) {
       clientSource?: string;
       teamMemberEmails?: string[];
       openAppAfterCompletion?: boolean;
+      downloadAppAfterCompletion?: boolean;
       openCampaignCreateAfterCompletion?: boolean;
       resumeCampaignAfterOnboarding?: boolean;
       selfServeCampaignDraft?: unknown;
@@ -1172,6 +1173,8 @@ export async function POST(request: NextRequest) {
     const hasAccess = isSelfServeDemoCompletion || isValidPartnerExclusiveOffer;
     const nextPath = hasAccess ? ownerInviteMembersPath : '/subscribe';
     const openAppAfterCompletion = body?.openAppAfterCompletion === true;
+    const downloadAppAfterCompletion =
+      isSelfServeDemoCompletion && body?.downloadAppAfterCompletion === true;
     const openCampaignCreateAfterCompletion = body?.openCampaignCreateAfterCompletion === true;
     const resumeCampaignAfterOnboarding = body?.resumeCampaignAfterOnboarding === true;
     let selfServeDemoSeed: Awaited<ReturnType<typeof seedStarterCampaignForWorkspace>> | null = null;
@@ -1268,7 +1271,7 @@ export async function POST(request: NextRequest) {
         ? `/campaigns/${selfServeCampaignId}?source=self-serve-demo&tab=assignments&tour=0&building=1`
         : `/campaigns/${selfServeCampaignId}?source=self-serve-demo&tour=0&building=1`
       : null;
-    const redirect =
+    const postOnboardingWebRedirect =
       openCampaignCreateAfterCompletion
         ? `/campaigns/create?source=self-serve-demo&campaign=self-serve-campaign${
             resumeCampaignAfterOnboarding ? '&resumeCampaign=1' : ''
@@ -1278,6 +1281,9 @@ export async function POST(request: NextRequest) {
         : openAppAfterCompletion || clientSource === 'android' || clientSource === 'dialer'
           ? nextPath
           : `/download-ios?stage=post-onboarding&next=${encodeURIComponent(nextPath)}`;
+    const redirect = downloadAppAfterCompletion
+      ? `/download-ios?stage=post-onboarding&source=free&next=${encodeURIComponent(postOnboardingWebRedirect)}`
+      : postOnboardingWebRedirect;
 
     return NextResponse.json({
       success: true,
