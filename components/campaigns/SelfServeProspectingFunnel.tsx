@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import {
-  ArrowLeft,
   ArrowRight,
   BarChart3,
   CircleDot,
@@ -35,12 +34,10 @@ type SelfServeProspectingFunnelProps = {
   onSearchQueryChange: (value: string) => void;
   onSearchSelect: (suggestion: AddressSuggestion) => void;
   onSelectionToolChange: (tool: SelfServeSelectionTool) => void;
-  onClearBoundary: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onGeneratePreview: () => void;
   onRevealPreview: () => void;
-  onBackToSelection: () => void;
   onStartOnboarding: () => void;
 };
 
@@ -70,12 +67,10 @@ export function SelfServeProspectingFunnel({
   onSearchQueryChange,
   onSearchSelect,
   onSelectionToolChange,
-  onClearBoundary,
   onZoomIn,
   onZoomOut,
   onGeneratePreview,
   onRevealPreview,
-  onBackToSelection,
   onStartOnboarding,
 }: SelfServeProspectingFunnelProps) {
   const [showResults, setShowResults] = useState(false);
@@ -85,15 +80,6 @@ export function SelfServeProspectingFunnel({
   const previewRevealInProgress = previewRevealCount > 0 && previewRevealCount < selectedCount;
   const previewRevealed = selectedCount > 0 && previewRevealCount >= selectedCount;
   const outcomeCounts = allocateSelfServeDoorOutcomeCounts(selectedCount);
-
-  const handlePreviewBack = () => {
-    if (step === 'preview' && showResults) {
-      setShowResults(false);
-      return;
-    }
-    setShowResults(false);
-    onBackToSelection();
-  };
 
   if (step === 'location') {
     return (
@@ -115,7 +101,7 @@ export function SelfServeProspectingFunnel({
             1. Choose an area
           </h1>
           <p className="mt-3 text-base font-medium leading-7 text-zinc-300">
-            Search an address or city to start.
+            Search an address to start.
           </p>
 
           <div className="mt-7">
@@ -124,9 +110,8 @@ export function SelfServeProspectingFunnel({
               value={searchQuery}
               onChange={onSearchQueryChange}
               onSelect={onSearchSelect}
-              includeCities
               useCurrentLocation={false}
-              placeholder="Search an address or city..."
+              placeholder="Search an address..."
               inputClassName="h-14 rounded-2xl border-white/15 bg-white/10 pl-4 text-base text-white shadow-none placeholder:text-zinc-500 focus-visible:border-red-400 focus-visible:ring-red-400/30 dark:bg-white/10"
             />
           </div>
@@ -140,14 +125,6 @@ export function SelfServeProspectingFunnel({
       {step === 'preview' ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
           <div className="pointer-events-auto mx-auto flex w-full max-w-2xl items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2.5 text-white shadow-2xl backdrop-blur-xl">
-            <button
-              type="button"
-              onClick={handlePreviewBack}
-              className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 transition hover:bg-white/10"
-              aria-label={showResults ? 'Back to 3D map' : 'Back to selection'}
-            >
-              <ArrowLeft className="size-5" />
-            </button>
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-400">
                 {showResults ? 'Mock campaign results' : 'Live 3D campaign preview'}
@@ -169,16 +146,8 @@ export function SelfServeProspectingFunnel({
       {step === 'selection' ? (
         <>
           <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5">
-            <div className="pointer-events-auto mx-auto flex w-full max-w-lg items-center gap-2">
-              <button
-                type="button"
-                onClick={onClearBoundary}
-                className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-[#08090c]/86 text-white shadow-2xl backdrop-blur-xl transition hover:bg-white/10"
-                aria-label="Clear boundary"
-              >
-                <ArrowLeft className="size-5" />
-              </button>
-              <div className="grid min-w-0 flex-1 grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2 shadow-2xl backdrop-blur-xl">
+            <div className="pointer-events-auto mx-auto w-full max-w-lg">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#08090c]/86 p-2 shadow-2xl backdrop-blur-xl">
                 {([
                   ['polygon', Pentagon, 'Tap boundary'],
                   ['radius', CircleDot, 'Drag radius'],

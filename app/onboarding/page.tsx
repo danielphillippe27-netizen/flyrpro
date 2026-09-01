@@ -1768,6 +1768,24 @@ function OnboardingContent() {
                         ? 'Create an account so your first campaign is saved in your dashboard.'
                         : 'We will sign in or create this account before continuing.'}
                   </p>
+                  {isSelfServeDemoOnboarding ? (
+                    <>
+                      <Button
+                        type="submit"
+                        disabled={loading || authLoading || !canStep1}
+                        className="mt-2 h-14 w-full rounded-xl bg-[#09090b] text-lg font-bold text-white shadow-sm hover:bg-[#27272a] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a]"
+                      >
+                        {authLoading && authMode === 'credentials' ? 'Creating account...' : 'Next'}
+                      </Button>
+                      <div className="flex items-center gap-3 py-2" aria-hidden>
+                        <div className="h-px flex-1 bg-[#e3e5e8]" />
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[#8a8f99]">
+                          Or create with
+                        </span>
+                        <div className="h-px flex-1 bg-[#e3e5e8]" />
+                      </div>
+                    </>
+                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Button type="button" variant="outline" className={outlineButtonClass} onClick={() => void handleExclusiveOAuthSignIn('google')} disabled={authLoading}>
                       {authLoading && authMode === 'google'
@@ -2134,7 +2152,7 @@ function OnboardingContent() {
           {authError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{authError}</p> : null}
           {checkoutError ? <p className="mt-5 text-center text-sm font-semibold text-red-600">{checkoutError}</p> : null}
 
-          <div className={`${step === 1 ? 'mt-4' : 'mt-6'} flex items-center justify-center gap-14 sm:gap-24`}>
+          <div className={`${step === 1 ? 'mt-4' : 'mt-6'} ${isSelfServeDemoOnboarding && step === 1 ? 'hidden' : 'flex'} items-center justify-center gap-14 sm:gap-24`}>
             {step > 1 ? (
               <Button
                 type="button"

@@ -2578,21 +2578,10 @@ export default function CreateCampaignPage() {
             onSearchQueryChange={setMapSearchQuery}
             onSearchSelect={handleMapSearchSelect}
             onSelectionToolChange={handleSelfServeSelectionToolChange}
-            onClearBoundary={clearDrawing}
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onGeneratePreview={handleGenerateSelfServePreview}
             onRevealPreview={handleRevealSelfServePreview}
-            onBackToSelection={() => {
-              if (selfServePreviewRevealTimerRef.current !== null) {
-                window.clearInterval(selfServePreviewRevealTimerRef.current);
-                selfServePreviewRevealTimerRef.current = null;
-              }
-              setSelfServePreviewRevealCount(0);
-              setSelfServeStep('selection');
-              setSelfServeSelectionTool('polygon');
-              drawRef.current?.changeMode('simple_select');
-            }}
             onStartOnboarding={handleStartSelfServeOnboarding}
           />
         ) : null}

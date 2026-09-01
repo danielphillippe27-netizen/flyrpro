@@ -4,11 +4,10 @@ import { Suspense, useMemo } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { ExternalLink, LogIn } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 
 const IOS_APP_STORE_URL =
   'https://apps.apple.com/ca/app/wolfgrid/id6755614702';
-const IOS_APP_SIGN_IN_URL = 'wolfgrid://signin';
 
 type DownloadStage = 'pre-onboarding' | 'post-onboarding';
 
@@ -40,7 +39,7 @@ function DownloadIosContent() {
     isFreeMapHandoff
       ? {
           title: 'Your map is ready. Get the WolfGrid app.',
-          description: 'Download WolfGrid, open it, and sign in with the same email and password you just created. Your campaign will be waiting.',
+          description: 'Download WolfGrid for iPhone, open it, and sign in with the same email and password you just created. Your campaign will be waiting.',
           primaryCta: 'Download WolfGrid for iPhone',
           secondaryCta: 'Continue to my map on web',
         }
@@ -85,7 +84,7 @@ function DownloadIosContent() {
         <div className="flex flex-col gap-3">
           <Button
             asChild
-            className="h-14 w-full rounded-xl border-0 bg-[#09090b] text-lg font-semibold text-white hover:bg-[#27272a]"
+            className="h-14 w-full rounded-xl border-0 bg-[#09090b] text-base font-semibold text-white hover:bg-[#27272a]"
           >
             <a
               href={IOS_APP_STORE_URL}
@@ -97,26 +96,16 @@ function DownloadIosContent() {
               <ExternalLink className="h-4 w-4 opacity-90" aria-hidden />
             </a>
           </Button>
-          {isFreeMapHandoff ? (
+          {!isFreeMapHandoff ? (
             <Button
-              asChild
+              type="button"
               variant="outline"
-              className="h-14 w-full rounded-xl border-[#17181c] bg-white text-base font-bold text-[#17181c] hover:bg-[#f5f6f8] hover:text-[#17181c]"
+              onClick={() => router.push(nextPath)}
+              className="h-12 w-full rounded-xl border-[#d9dce2] bg-white text-base font-semibold text-[#202124] hover:bg-[#f5f6f8] hover:text-[#202124]"
             >
-              <a href={IOS_APP_SIGN_IN_URL} className="inline-flex items-center justify-center gap-2">
-                Open WolfGrid &amp; sign in
-                <LogIn className="h-4 w-4" aria-hidden />
-              </a>
+              {content.secondaryCta}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => router.push(nextPath)}
-            className={`${isFreeMapHandoff ? 'h-11 border-transparent text-sm text-[#6f7480]' : 'h-12 border-[#d9dce2] text-base text-[#202124]'} w-full rounded-xl bg-white font-semibold hover:bg-[#f5f6f8] hover:text-[#202124]`}
-          >
-            {content.secondaryCta}
-          </Button>
         </div>
 
       </div>
