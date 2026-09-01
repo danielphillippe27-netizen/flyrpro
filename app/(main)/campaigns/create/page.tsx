@@ -1190,12 +1190,26 @@ export default function CreateCampaignPage() {
     ) return;
 
     const mapInstance = map.current;
+    const isMultiTouch = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) =>
+      'touches' in event.originalEvent && event.originalEvent.touches.length > 1;
+    const releaseRadiusGesture = () => {
+      selfServeRadiusCenterRef.current = null;
+      mapInstance.dragPan.enable();
+    };
     const beginRadius = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
+      if (isMultiTouch(event)) {
+        releaseRadiusGesture();
+        return;
+      }
       selfServeRadiusCenterRef.current = [event.lngLat.lng, event.lngLat.lat];
       mapInstance.dragPan.disable();
       event.preventDefault();
     };
     const updateRadius = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
+      if (isMultiTouch(event)) {
+        releaseRadiusGesture();
+        return;
+      }
       const center = selfServeRadiusCenterRef.current;
       if (!center || !drawRef.current) return;
       const radiusKm = Math.max(
@@ -1216,6 +1230,9 @@ export default function CreateCampaignPage() {
       drawRef.current?.changeMode('simple_select');
       track('radius_completed', 2, { buildings: selfServeSelectedBuildingsRef.current.length });
     };
+    const cancelRadius = () => {
+      releaseRadiusGesture();
+    };
 
     drawRef.current.changeMode('simple_select');
     mapInstance.on('mousedown', beginRadius);
@@ -1224,6 +1241,7 @@ export default function CreateCampaignPage() {
     mapInstance.on('touchstart', beginRadius);
     mapInstance.on('touchmove', updateRadius);
     mapInstance.on('touchend', finishRadius);
+    mapInstance.on('touchcancel', cancelRadius);
     return () => {
       mapInstance.off('mousedown', beginRadius);
       mapInstance.off('mousemove', updateRadius);
@@ -1231,6 +1249,7 @@ export default function CreateCampaignPage() {
       mapInstance.off('touchstart', beginRadius);
       mapInstance.off('touchmove', updateRadius);
       mapInstance.off('touchend', finishRadius);
+      mapInstance.off('touchcancel', cancelRadius);
       mapInstance.dragPan.enable();
       selfServeRadiusCenterRef.current = null;
     };
