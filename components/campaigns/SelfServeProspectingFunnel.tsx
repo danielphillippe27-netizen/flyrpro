@@ -97,7 +97,7 @@ export function SelfServeProspectingFunnel({
 
   if (step === 'location') {
     return (
-      <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-end bg-[linear-gradient(180deg,rgba(3,5,8,0.15)_0%,rgba(3,5,8,0.42)_34%,rgba(3,5,8,0.96)_100%)] px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-white sm:justify-center sm:px-6">
+      <div className="pointer-events-none absolute inset-0 z-20 flex flex-col justify-start bg-[linear-gradient(180deg,rgba(3,5,8,0.15)_0%,rgba(3,5,8,0.42)_34%,rgba(3,5,8,0.96)_100%)] px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-white sm:justify-center sm:px-6">
         <div className="pointer-events-auto mx-auto w-full max-w-lg rounded-[2rem] border border-white/12 bg-[#090a0d]/88 p-5 shadow-[0_28px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-7">
           <div className="mb-8 flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-black tracking-[0.16em]">
