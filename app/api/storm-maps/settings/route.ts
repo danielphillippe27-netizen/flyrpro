@@ -69,7 +69,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Only workspace owners and admins can manage add-ons' }, { status: 403 });
   }
   if (body.enabled && !isStormMapsBetaAvailable()) {
-    return NextResponse.json({ error: 'Storm Maps Beta is temporarily unavailable' }, { status: 503 });
+    return NextResponse.json({ error: 'Storm Maps is coming soon' }, { status: 503 });
   }
   if (body.enabled) {
     const validation = await validateTomorrowFullSuiteAccess();

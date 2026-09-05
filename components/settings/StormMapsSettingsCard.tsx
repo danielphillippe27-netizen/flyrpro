@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CloudLightning, Loader2, ShieldCheck } from 'lucide-react';
+import { Clock3, CloudLightning, Loader2, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -73,6 +73,7 @@ export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | n
   };
 
   const active = data?.addon?.isActive === true;
+  const comingSoon = data?.betaAvailable !== true;
 
   return (
     <Card className="overflow-hidden border-cyan-200/70 bg-gradient-to-br from-white via-cyan-50/40 to-violet-50/60 dark:border-cyan-900/60 dark:from-card dark:via-cyan-950/20 dark:to-violet-950/20">
@@ -84,15 +85,17 @@ export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | n
                 <CloudLightning className="h-5 w-5" />
               </span>
               <CardTitle>Storm Maps</CardTitle>
-              <Badge className="border-0 bg-gradient-to-r from-cyan-500 to-violet-600 text-[10px] tracking-[0.16em] text-white">BETA</Badge>
+              <Badge className="border-0 bg-gradient-to-r from-cyan-500 to-violet-600 text-[10px] tracking-[0.16em] text-white">
+                {comingSoon ? 'COMING SOON' : 'BETA'}
+              </Badge>
             </div>
             <CardDescription>
               Live radar, official alerts, storm reports, and forecast overlays while building campaign territories.
             </CardDescription>
           </div>
           <div className="rounded-xl border border-cyan-200 bg-white/80 px-3 py-2 text-right shadow-sm dark:border-cyan-900 dark:bg-background/70">
-            <p className="text-sm font-semibold text-foreground">$0</p>
-            <p className="text-[11px] text-muted-foreground">during Beta</p>
+            <p className="text-sm font-semibold text-foreground">{comingSoon ? 'Coming soon' : '$0'}</p>
+            <p className="text-[11px] text-muted-foreground">{comingSoon ? 'No setup yet' : 'during Beta'}</p>
           </div>
         </div>
       </CardHeader>
@@ -102,34 +105,44 @@ export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | n
             {message.text}
           </p>
         ) : null}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-cyan-600" />
-              <p className="text-sm font-medium text-foreground">Workspace add-on</p>
-              <Badge variant={active ? 'default' : 'outline'} className={active ? 'bg-emerald-600 hover:bg-emerald-600' : ''}>
-                {loading ? 'Loading' : active ? 'Enabled' : 'Not enabled'}
-              </Badge>
+        {comingSoon ? (
+          <div className="flex items-start gap-3 rounded-xl border border-cyan-200/80 bg-white/70 p-4 dark:border-cyan-900/70 dark:bg-background/50">
+            <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-cyan-600" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Weather intelligence is coming soon</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                We’re finishing the provider setup so radar and severe-weather overlays are reliable before launch. No card or setup is required yet.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {data?.betaAvailable === false
-                ? 'Beta activation is paused until the weather providers are fully configured.'
-                : data?.canManage
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-cyan-600" />
+                <p className="text-sm font-medium text-foreground">Workspace add-on</p>
+                <Badge variant={active ? 'default' : 'outline'} className={active ? 'bg-emerald-600 hover:bg-emerald-600' : ''}>
+                  {loading ? 'Loading' : active ? 'Enabled' : 'Not enabled'}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {data?.canManage
                   ? 'Owners and admins can change this for every workspace member.'
                   : 'Ask a workspace owner or admin to change this add-on.'}
-            </p>
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={active ? 'outline' : 'default'}
+              onClick={() => void updateAddon(!active)}
+              disabled={loading || saving || !workspaceId || !data?.canManage}
+              className={!active ? 'bg-gradient-to-r from-cyan-600 to-violet-600 text-white hover:from-cyan-700 hover:to-violet-700' : ''}
+            >
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {active ? 'Disable' : 'Enable free add-on'}
+            </Button>
           </div>
-          <Button
-            type="button"
-            variant={active ? 'outline' : 'default'}
-            onClick={() => void updateAddon(!active)}
-            disabled={loading || saving || !workspaceId || !data?.canManage || data?.betaAvailable === false}
-            className={!active ? 'bg-gradient-to-r from-cyan-600 to-violet-600 text-white hover:from-cyan-700 hover:to-violet-700' : ''}
-          >
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {active ? 'Disable' : 'Enable free add-on'}
-          </Button>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

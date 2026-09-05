@@ -15,7 +15,6 @@ import {
   Users,
 } from 'lucide-react';
 import { LandingVideo } from '@/components/landing/LandingVideo';
-import { PhoneVideoFrame } from '@/components/landing/PhoneVideoFrame';
 import { PublicSiteFooter } from '@/components/landing/PublicSiteFooter';
 import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
 
@@ -183,58 +182,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="product" className="scroll-mt-24 px-5 py-20 md:px-8 md:py-32">
-          <div className="mx-auto max-w-7xl">
-            <div className="grid items-end gap-8 lg:grid-cols-[1.15fr_0.85fr]">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-600">One source of truth</p>
-                <h2 className="mt-4 max-w-4xl text-4xl font-black leading-[1.02] tracking-[-0.04em] md:text-6xl">
-                  Your team is outside. Your system should be too.
-                </h2>
-              </div>
-              <p className="max-w-xl text-lg leading-8 text-zinc-600 lg:pb-1">
-                Stop piecing together maps, notes, spreadsheets, texts, and follow-up lists. WolfGrid keeps the work connected from the first street to the next conversation.
-              </p>
-            </div>
-
-            <div className="mt-14 grid gap-5 lg:grid-cols-12">
-              <article className="rounded-[2rem] bg-zinc-950 p-6 text-white md:p-8 lg:col-span-7">
-                <div className="flex h-full flex-col">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-600">
-                    <MapPinned className="h-5 w-5" />
-                  </span>
-                  <h3 className="mt-8 text-3xl font-black tracking-tight">See the territory before you step into it.</h3>
-                  <p className="mt-3 max-w-xl leading-7 text-zinc-400">
-                    Turn real buildings and addresses into a campaign, then understand the opportunity at a glance.
-                  </p>
-                  <PhoneVideoFrame
-                    videoId="e3a3a6c8b6950f328f505fc1968e744a"
-                    label="WolfGrid desktop territory demonstration"
-                    orientation="landscape"
-                    className="mt-8 w-full"
-                  />
-                </div>
-              </article>
-
-              <article className="flex flex-col rounded-[2rem] border border-zinc-200 bg-white p-6 md:p-8 lg:col-span-5">
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-600">
-                  <Target className="h-5 w-5" />
-                </span>
-                <h3 className="mt-8 text-3xl font-black tracking-tight">Keep the next move obvious.</h3>
-                <p className="mt-3 leading-7 text-zinc-600">
-                  Reps know where to go, what happened, and which doors need another conversation.
-                </p>
-                <PhoneVideoFrame
-                  videoId="092563d94330b121261327e9d9f84e6e"
-                  label="WolfGrid mobile canvassing route demonstration"
-                  orientation="portrait"
-                  className="mx-auto mt-8 w-full max-w-[320px]"
-                />
-              </article>
-            </div>
-          </div>
-        </section>
-
         <section id="workflow" className="scroll-mt-24 bg-[#111] px-5 py-20 text-white md:px-8 md:py-32">
           <div className="mx-auto max-w-7xl">
             <div className="max-w-3xl">
@@ -266,7 +213,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="px-5 py-20 md:px-8 md:py-32">
+        <section id="product" className="scroll-mt-24 px-5 py-20 md:px-8 md:py-32">
           <div className="mx-auto max-w-7xl">
             <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
               <div>
@@ -312,31 +259,6 @@ export default function LandingPage() {
                   videoClassName="object-cover"
                 />
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="px-5 pb-20 md:px-8 md:pb-32">
-          <div className="mx-auto grid max-w-7xl overflow-hidden rounded-[2.5rem] bg-red-600 text-white lg:grid-cols-[0.9fr_1.1fr]">
-            <div className="p-8 md:p-12 lg:p-16">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-100">Customer proof</p>
-              <blockquote className="mt-7 text-3xl font-black leading-tight tracking-tight md:text-4xl">
-                “I’ve never seen field sales software that can detect when you’ve knocked a door without taking out your phone. WolfGrid understands how agents actually knock doors.”
-              </blockquote>
-              <div className="mt-8 border-t border-white/20 pt-6">
-                <p className="font-bold">Walid Dorani</p>
-                <p className="mt-1 text-sm text-red-100">Broker · REVEL Realty Inc.</p>
-              </div>
-            </div>
-            <div className="relative min-h-96 overflow-hidden bg-zinc-950 lg:min-h-full">
-              <Image
-                src="/walid-dorani-testimonial.png"
-                alt="Portrait of Walid Dorani"
-                fill
-                sizes="(min-width: 1024px) 55vw, 100vw"
-                className="object-cover object-[center_34%]"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" aria-hidden="true" />
             </div>
           </div>
         </section>
