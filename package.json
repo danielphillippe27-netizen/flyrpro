@@ -34,6 +34,7 @@
     "test:ambassador-payout": "npx tsx scripts/test-ambassador-payout.ts",
     "test:salesperson-payout": "npx tsx scripts/test-salesperson-payout.ts",
     "test:campaign-polygon-parity": "npx tsx scripts/campaign-polygon-parity-e2e.ts",
+    "test:demo100": "npx tsx lib/demo100/__tests__/flow.test.ts",
     "test:townhouse-identity": "npx tsx lib/services/__tests__/TownhouseUnitIdentity.test.ts",
     "test:map-reconciliation-rules": "npx tsx lib/services/__tests__/CampaignMapReconciliationRules.test.ts",
     "test:map-reconciliation-mississauga": "DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/test-map-reconciliation-mississauga.ts",
