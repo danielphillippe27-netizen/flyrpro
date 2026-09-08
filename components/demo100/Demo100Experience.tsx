@@ -99,7 +99,6 @@ const VIDEO_STAGES: Partial<Record<Demo100Stage, {
   uidKey: keyof VideoUids;
   title: string;
   eyebrow: string;
-  portrait?: boolean;
 }>> = {
   intro_video: { uidKey: 'intro', title: 'Meet WolfGrid', eyebrow: 'Chapter 1 · The field, connected' },
   post_create_video: { uidKey: 'postCreate', title: 'From territory to outcomes', eyebrow: 'Chapter 3 · Your campaign' },
@@ -658,8 +657,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           videoUid={videoUids[video.uidKey]}
           title={video.title}
           eyebrow={video.eyebrow}
-          firstChapter={stage === 'intro_video'}
-          portrait={video.portrait}
           onStarted={handleVideoStarted}
           onComplete={handleVideoComplete}
         />

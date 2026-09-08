@@ -18,8 +18,6 @@ type CloudflareChapterPlayerProps = {
   videoUid?: string;
   title: string;
   eyebrow: string;
-  firstChapter?: boolean;
-  portrait?: boolean;
   onStarted?: () => void;
   onComplete: () => void;
 };
@@ -41,8 +39,6 @@ export function CloudflareChapterPlayer({
   videoUid,
   title,
   eyebrow,
-  firstChapter = false,
-  portrait = false,
   onStarted,
   onComplete,
 }: CloudflareChapterPlayerProps) {
@@ -92,6 +88,7 @@ export function CloudflareChapterPlayer({
     const player = streamFactory(iframeRef.current);
     if (!player) return;
     playerRef.current = player;
+    player.pause?.();
     const handleEnded = () => onComplete();
     const handlePlay = () => markStarted();
     const handleError = () => {
@@ -102,14 +99,6 @@ export function CloudflareChapterPlayer({
     player.addEventListener('play', handlePlay);
     player.addEventListener('error', handleError);
 
-    if (!firstChapter) {
-      player.muted = false;
-      player.play().then(() => {
-        markStarted();
-        setNeedsGesture(false);
-      }).catch(() => setNeedsGesture(true));
-    }
-
     return () => {
       player.removeEventListener?.('ended', handleEnded);
       player.removeEventListener?.('play', handlePlay);
@@ -117,7 +106,7 @@ export function CloudflareChapterPlayer({
       player.pause?.();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [firstChapter, markStarted, onComplete, scriptReady, url]);
+  }, [markStarted, onComplete, scriptReady, url]);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#050505] text-white">
@@ -128,7 +117,7 @@ export function CloudflareChapterPlayer({
         onError={() => setSdkFailed(true)}
       />
 
-      <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-4 bg-gradient-to-b from-black/75 via-black/25 to-transparent px-5 pb-16 pt-5 sm:px-8">
         <div>
           <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-400">{eyebrow}</p>
           <p className="mt-1 text-sm font-bold text-white/80">{title}</p>
@@ -152,7 +141,7 @@ export function CloudflareChapterPlayer({
           </Button>
         </div>
       ) : (
-        <div className={`relative mx-auto overflow-hidden bg-black shadow-2xl shadow-black ${portrait ? 'h-[min(82dvh,780px)] aspect-[9/16] rounded-[2rem] border border-white/10' : 'w-full max-w-[min(100vw,1600px)] aspect-video'}`}>
+        <div className="absolute inset-0 size-full overflow-hidden bg-black">
           <iframe
             ref={iframeRef}
             title={title}
@@ -173,7 +162,7 @@ export function CloudflareChapterPlayer({
                 <span className="mr-4 grid size-10 place-items-center rounded-full bg-red-500 text-white">
                   {starting ? <Loader2 className="size-5 animate-spin" /> : playbackError ? <RotateCcw className="size-5" /> : <Play className="size-5 fill-current" />}
                 </span>
-                {playbackError ? 'Try playing again' : firstChapter ? 'Play demo with sound' : 'Continue with sound'}
+                {playbackError ? 'Try playing again' : 'Continue with sound'}
                 <Volume2 className="ml-3 size-5 text-red-500" />
               </button>
               {playbackError ? (
