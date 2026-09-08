@@ -76,7 +76,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-07-24-reconciliation-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-09-08-occupied-parcels-v1';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -608,6 +608,74 @@ function parcelContainsPoint(feature: GeoJSON.Feature, point: [number, number]):
     return geometry.coordinates.some((polygon) => pointInPolygon(point, polygon as number[][][]));
   }
   return false;
+}
+
+function representativeCoordinate(feature: GeoJSON.Feature): [number, number] | null {
+  const point = pointCoordinate(feature);
+  if (point) return point;
+  try {
+    const pointOnFeature = turf.pointOnFeature(feature);
+    const lon = Number(pointOnFeature.geometry.coordinates[0]);
+    const lat = Number(pointOnFeature.geometry.coordinates[1]);
+    return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : null;
+  } catch {
+    return centroidForFeature(feature);
+  }
+}
+
+function parcelHasExplicitOccupant(feature: GeoJSON.Feature): boolean {
+  const properties = (feature.properties ?? {}) as JsonRecord;
+  const positiveCounts = [
+    properties.address_count,
+    properties.linked_address_count,
+    properties.building_count,
+    properties.linked_building_count,
+  ].some((value) => (numberValue(value) ?? 0) > 0);
+  if (positiveCounts) return true;
+
+  return uniqueStrings([
+    properties.address_id,
+    properties.campaign_address_id,
+    properties.building_id,
+    properties.linked_building_id,
+    ...stringArrayValue(properties.address_ids),
+    ...stringArrayValue(properties.linked_address_ids),
+    ...stringArrayValue(properties.building_ids),
+    ...stringArrayValue(properties.linked_building_ids),
+  ]).length > 0;
+}
+
+/**
+ * Keep only campaign parcels that contain an address or a renderable building.
+ * Explicit link metadata is also honored because source coordinates can sit just outside
+ * a parcel boundary even when the canonical ownership/link is known.
+ */
+export function filterParcelsWithoutBuildingsOrAddresses(params: {
+  parcels: FeatureCollection;
+  addresses: FeatureCollection;
+  buildings: FeatureCollection;
+}): FeatureCollection {
+  if (params.parcels.features.length === 0) return params.parcels;
+
+  const occupantCoordinates = [...params.addresses.features, ...params.buildings.features]
+    .flatMap((feature) => {
+      const coordinate = representativeCoordinate(feature);
+      return coordinate ? [coordinate] : [];
+    });
+
+  const features = params.parcels.features.filter((parcel) => {
+    if (parcelHasExplicitOccupant(parcel)) return true;
+    const parcelBbox = bboxForGeometry(parcel.geometry);
+    if (!parcelBbox) return false;
+
+    return occupantCoordinates.some((coordinate) =>
+      pointInBbox(coordinate, parcelBbox) && parcelContainsPoint(parcel, coordinate)
+    );
+  });
+
+  return features.length === params.parcels.features.length
+    ? params.parcels
+    : { ...params.parcels, features };
 }
 
 function centroidForFeature(feature: GeoJSON.Feature): [number, number] | null {
@@ -2134,7 +2202,22 @@ export async function prebuildCampaignMapBundle(
   });
   const addresses = applyAddressAdjustments(ownershipApplied.addresses, addressAdjustments);
   const buildings = manualPinsApplied.buildings;
-  const ownedParcels = ownershipApplied.parcels;
+  const ownedParcels = await measure('parcel_occupancy_filter', recordTiming, async () => {
+    const filtered = filterParcelsWithoutBuildingsOrAddresses({
+      parcels: ownershipApplied.parcels,
+      addresses,
+      buildings,
+    });
+    const removed = ownershipApplied.parcels.features.length - filtered.features.length;
+    if (removed > 0) {
+      console.log('[CampaignMapBundlePrebuilder] Filtered parcels without buildings or addresses:', {
+        campaignId,
+        removed,
+        kept: filtered.features.length,
+      });
+    }
+    return filtered;
+  });
   const buildingOrphans = enriched.buildingOrphans;
   const computedLinksStatus = 'ready';
   const linksStatus = typeof options?.linksStatusOverride === 'string' && options.linksStatusOverride.trim()
