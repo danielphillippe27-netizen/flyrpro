@@ -525,7 +525,17 @@ function hideResidentialOnlyBaseExtras(mapInstance: mapboxgl.Map) {
 
 function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: number } | null {
   if (address.coordinate) {
-    return address.coordinate;
+    const coordinate = address.coordinate as unknown as {
+      lon?: unknown;
+      lat?: unknown;
+      longitude?: unknown;
+      latitude?: unknown;
+    };
+    const lon = coordinate.lon ?? coordinate.longitude;
+    const lat = coordinate.lat ?? coordinate.latitude;
+    if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
+      return { lon, lat };
+    }
   }
 
   const addressWithGeo = address as CampaignAddress & {
@@ -539,7 +549,7 @@ function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: num
     addressWithGeo.geom_json.coordinates.length >= 2
   ) {
     const [lon, lat] = addressWithGeo.geom_json.coordinates;
-    if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+    if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
       return { lon, lat };
     }
   }
@@ -566,7 +576,7 @@ function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: num
     geometryPoint.coordinates.length >= 2
   ) {
     const [lon, lat] = geometryPoint.coordinates;
-    if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+    if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
       return { lon, lat };
     }
   }
@@ -579,7 +589,7 @@ function getAddressCoordinate(address: CampaignAddress): { lon: number; lat: num
         const parsed = JSON.parse(geomValue) as { coordinates?: number[] };
         if (Array.isArray(parsed.coordinates) && parsed.coordinates.length >= 2) {
           const [lon, lat] = parsed.coordinates;
-          if (typeof lon === 'number' && typeof lat === 'number' && !Number.isNaN(lon) && !Number.isNaN(lat)) {
+          if (typeof lon === 'number' && typeof lat === 'number' && Number.isFinite(lon) && Number.isFinite(lat)) {
             return { lon, lat };
           }
         }

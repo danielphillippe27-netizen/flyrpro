@@ -24,6 +24,11 @@ import {
   DEMO_44_TEAM_TRIAL_OFFER,
   isDemo44TeamTrialOffer,
 } from '@/lib/demo/demo44TeamTrial';
+import {
+  DEMO_100_CLIENT_SOURCE,
+  DEMO_100_REFERRAL_CAMPAIGN,
+  isDemo100TrialOffer,
+} from '@/lib/demo/demo100Trial';
 
 type BrokerageSuggestion = { id: string; name: string };
 type SalespersonInviteHint = {
@@ -308,6 +313,7 @@ function OnboardingContent() {
   const searchParams = useSearchParams();
   const offerType = searchParams.get('offer');
   const isDemo44TeamTrial = isDemo44TeamTrialOffer(offerType);
+  const isDemo100Trial = isDemo100TrialOffer(offerType);
   const partnerOfferToken = searchParams.get('partnerOfferToken');
   const salespersonInviteToken = searchParams.get('salespersonInvite');
   const handoffCode = searchParams.get('code')?.trim() ?? '';
@@ -758,7 +764,29 @@ function OnboardingContent() {
           showLaunchPricing: false,
         },
       ] as const)
-    : ([
+    : isDemo100Trial
+      ? ([
+          {
+            id: 'demo100-trial',
+            title: '30-Day Free Trial',
+            seatCount: selectedSeatCount,
+            priceLabel: '$0',
+            priceSuffix: ' for 30 days',
+            billingLabel: 'No credit card required.',
+            description: 'Use WolfGrid free for 30 days with the campaign and map you just created.',
+            features: [
+              'Unlimited campaigns for 30 days',
+              '3D prospecting maps',
+              'GPS door tracking',
+              'Lead capture and follow-up',
+              'Team invites and assignments',
+              'iOS and Android mobile apps',
+            ],
+            buttonLabel: 'Start my 30-day free trial',
+            showLaunchPricing: false,
+          },
+        ] as const)
+      : ([
         {
           id: 'free',
           title: 'Free',
@@ -799,7 +827,7 @@ function OnboardingContent() {
           buttonLabel: 'Select Pro',
           showLaunchPricing: true,
         },
-      ] as const);
+        ] as const);
 
   const buildResumePath = useCallback(() => {
     const resumeParams = new URLSearchParams(searchParams.toString());
@@ -1035,6 +1063,8 @@ function OnboardingContent() {
           referralCampaign: isSelfServeDemoOnboarding
             ? isDemo44TeamTrial
               ? DEMO_44_REFERRAL_CAMPAIGN
+              : isDemo100Trial
+                ? DEMO_100_REFERRAL_CAMPAIGN
               : 'self-serve-campaign'
             : draft?.referralCampaign ?? referralCampaign,
           brokerage: (draft?.brokerage ?? brokerage).trim() || undefined,
@@ -1049,6 +1079,8 @@ function OnboardingContent() {
           salespersonInviteToken: isSalespersonOnboarding ? salespersonInviteToken : undefined,
           clientSource: isDemo44TeamTrial
             ? DEMO_44_CLIENT_SOURCE
+            : isDemo100Trial
+              ? DEMO_100_CLIENT_SOURCE
             : isSelfServeDemoOnboarding
               ? 'self-serve-demo'
             : searchParams.get('source') ?? undefined,
@@ -1486,6 +1518,8 @@ function OnboardingContent() {
       ? isSelfServeDemoOnboarding
         ? isDemo44TeamTrial
           ? 'Start your team\'s 90-day trial'
+          : isDemo100Trial
+            ? 'Continue to claim your 30-day free trial'
           : searchParams.get('resumeCampaign') === '1'
           ? 'Your 3D map is building'
           : 'Build your first 3D prospecting map'
@@ -1500,6 +1534,8 @@ function OnboardingContent() {
             ? 'Ambassador referral code'
             : isDemo44TeamTrial
               ? 'Your whole team. 90 days. Free.'
+              : isDemo100Trial
+                ? 'Everything you need. Free for 30 days.'
               : 'Reach your potential with WolfGrid';
 
   const subheading =
@@ -1507,6 +1543,8 @@ function OnboardingContent() {
       ? isSelfServeDemoOnboarding
         ? isDemo44TeamTrial
           ? 'Create your account while we prepare the prospecting map you just drew.'
+          : isDemo100Trial
+            ? 'Create your account while we prepare the prospecting map you just drew. No credit card required.'
           : searchParams.get('resumeCampaign') === '1'
           ? 'Create your free account while we prepare the homes in your neighborhood.'
           : 'Create a free account to get started'
@@ -1525,6 +1563,8 @@ function OnboardingContent() {
             ? 'Enter an ambassador code to unlock your offer, or skip this step.'
             : isDemo44TeamTrial
               ? 'Try everything, then use the feedback button in WolfGrid to tell us what your team thinks.'
+              : isDemo100Trial
+                ? 'Your 30-day trial begins when your workspace opens.'
               : 'Select a plan based on your needs';
 
   useEffect(() => {
@@ -1590,7 +1630,21 @@ function OnboardingContent() {
             <h1 className={step === FINAL_ONBOARDING_STEP ? 'text-4xl font-bold leading-tight tracking-normal sm:text-5xl' : 'text-3xl font-bold leading-tight tracking-normal sm:text-4xl'}>
               {heading}
             </h1>
-            {subheading ? (
+            {step === FINAL_ONBOARDING_STEP && isSelfServeDemoOnboarding ? (
+              <Button
+                type="button"
+                onClick={async () => {
+                  await handleSubmit({
+                    checkoutSeats: selectedSeatCount,
+                    checkoutUseCase: useCase,
+                  });
+                }}
+                disabled={loading || authLoading}
+                className="mx-auto h-14 w-full max-w-md rounded-xl bg-[#09090b] text-lg font-bold text-white shadow-sm hover:bg-[#27272a] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a]"
+              >
+                {loading ? 'Creating...' : 'Show my map'}
+              </Button>
+            ) : subheading ? (
               <p className="text-lg font-semibold text-[#7b7f89]">{subheading}</p>
             ) : null}
           </div>
@@ -2065,7 +2119,7 @@ function OnboardingContent() {
             <div className="space-y-8">
               <div
                 className={`mx-auto grid gap-6 ${
-                  isDemo44TeamTrial ? 'max-w-xl grid-cols-1' : 'max-w-none md:grid-cols-2'
+                  isDemo44TeamTrial || isDemo100Trial ? 'max-w-xl grid-cols-1' : 'max-w-none md:grid-cols-2'
                 }`}
               >
                 {pricingCards.map((card) => {
@@ -2082,6 +2136,15 @@ function OnboardingContent() {
                           </p>
                           <p className="mt-1 text-sm font-semibold text-[#17181c]">
                             Full team access for 90 days
+                          </p>
+                        </div>
+                      ) : isDemo100Trial ? (
+                        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-700">
+                            Demo 100 offer
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-[#17181c]">
+                            Full WolfGrid access for 30 days
                           </p>
                         </div>
                       ) : card.showLaunchPricing ? (
@@ -2201,7 +2264,7 @@ function OnboardingContent() {
                         ? 'Next'
                       : 'Next'}
               </Button>
-            ) : (
+            ) : !isSelfServeDemoOnboarding ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -2214,9 +2277,9 @@ function OnboardingContent() {
                 disabled={loading || authLoading || (step === 3 && !canStep3)}
                 className={onboardingNavButtonClass}
               >
-                {loading ? 'Creating...' : isSelfServeDemoOnboarding ? 'Show my map' : 'Skip'}
+                {loading ? 'Creating...' : 'Skip'}
               </Button>
-            )}
+            ) : null}
           </div>
         </section>
       </main>

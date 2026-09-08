@@ -121,6 +121,22 @@ export async function POST(request: NextRequest) {
     }
 
     const nowIso = new Date().toISOString();
+    const { error: hostParticipantError } = await admin.from('session_participants').upsert(
+      {
+        session_id: session.id,
+        campaign_id: campaign.id,
+        user_id: requestUser.id,
+        role: 'host',
+        left_at: null,
+        last_seen_at: nowIso,
+      },
+      { onConflict: 'session_id,user_id' }
+    );
+    if (hostParticipantError) {
+      console.error('[live-sessions/codes/create] host participant upsert error:', hostParticipantError);
+      return NextResponse.json({ error: 'Unable to prepare the session chat.' }, { status: 500 });
+    }
+
     const revokeResult = await admin
       .from('live_session_codes')
       .update({ revoked_at: nowIso })

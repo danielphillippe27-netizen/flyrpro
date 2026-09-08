@@ -32,6 +32,12 @@ test('moves through the complete demo in order', () => {
     assert(nextDemo100Stage(stage) === DEMO100_STAGES[index + 1], `${stage} should advance once`);
   });
   assert(nextDemo100Stage('cta') === 'cta', 'CTA should be terminal');
+  assert(DEMO100_STAGES[2] === 'territory_preview', 'The 3D territory should appear immediately after creation');
+  assert(DEMO100_STAGES[3] === 'post_create_video', 'The second video should follow the 3D territory reveal');
+  assert(
+    DEMO100_STAGES.indexOf('iphone_chapters') === DEMO100_STAGES.indexOf('team_stats') + 1,
+    'The synchronized iPhone chapter guide should follow team stats',
+  );
 });
 
 test('derives one consistent outcome and metrics set', () => {
@@ -68,7 +74,7 @@ test('restores valid state and rejects incompatible storage', () => {
     coordinates: [[[-79.4, 43.7], [-79.39, 43.7], [-79.39, 43.71], [-79.4, 43.7]]],
   };
   const restored = parseDemo100StoredState(JSON.stringify({
-    version: 1,
+    version: 2,
     stage: 'assignments',
     selectedCount: 24,
     campaignName: 'Downtown launch',
@@ -79,8 +85,8 @@ test('restores valid state and rejects incompatible storage', () => {
   assert(restored?.stage === 'assignments', 'stage should restore');
   assert(restored.selectedCount === 24, 'selected count should restore');
   assert(restored.campaignName === 'Downtown launch', 'campaign name should restore');
-  assert(parseDemo100StoredState('{"version":2}') === null, 'unknown versions should be rejected');
-  assert(parseDemo100StoredState('{"version":1,"stage":"unknown"}') === null, 'unknown stages should be rejected');
+  assert(parseDemo100StoredState('{"version":1,"stage":"campaign_builder"}') === null, 'old versions should be rejected');
+  assert(parseDemo100StoredState('{"version":2,"stage":"unknown"}') === null, 'unknown stages should be rejected');
 });
 
 if (failed > 0) process.exit(1);

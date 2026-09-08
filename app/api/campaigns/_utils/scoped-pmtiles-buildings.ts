@@ -7,6 +7,7 @@ import {
   resolveArtifactUrl,
   resolvePmtilesKey,
 } from '@/lib/diamond/geometry';
+import { sanitizeBuildingExtrusionHeightMeters } from '@/lib/map/buildingHeight';
 
 export type ScopedBuildingFeatureCollection = {
   type: 'FeatureCollection';
@@ -455,6 +456,9 @@ async function extractScopedPmtilesBuildingFeatures(
         if (!geometryIntersectsBbox(geometry, bbox)) continue;
         if (boundary && !featureInCampaignBoundary(normalizedFeature, boundary)) continue;
 
+        const source = properties.source ?? 'bedrock_pmtiles';
+        const buildingHeight = sanitizeBuildingExtrusionHeightMeters({ ...properties, source });
+
         const normalizedBuildingFeature: PolygonalBuildingFeature = {
           ...feature,
           id: buildingId,
@@ -464,10 +468,10 @@ async function extractScopedPmtilesBuildingFeatures(
             id: buildingId,
             building_id: buildingId,
             gers_id: buildingId,
-            height: Math.max(Number(properties.height ?? properties.height_m ?? 10), 10),
-            height_m: Math.max(Number(properties.height_m ?? properties.height ?? 10), 10),
+            height: buildingHeight,
+            height_m: buildingHeight,
             min_height: Number(properties.min_height ?? 0),
-            source: properties.source ?? 'bedrock_pmtiles',
+            source,
             feature_type: 'matched_house',
             feature_status: 'matched',
             status: 'not_visited',

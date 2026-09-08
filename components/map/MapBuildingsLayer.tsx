@@ -28,6 +28,11 @@ import {
   type StatusFilters,
 } from '@/lib/constants/mapStatus';
 import { displayAddressText, resolveHouseNumberLabel } from '@/lib/map/addressPresentation';
+import {
+  DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS,
+  getBuildingExtrusionHeightExpression,
+  sanitizeBuildingExtrusionHeightMeters,
+} from '@/lib/map/buildingHeight';
 
 interface MapBuildingsLayerProps {
   map: MapboxMap;
@@ -81,11 +86,9 @@ const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
 const ADDRESS_LABEL_MIN_ZOOM = 16;
 const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
-// Minimum rendered building height, reduced by 35% from the previous 8 m floor.
-const MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
 const GENERATED_HOME_WIDTH_METERS = 9;
 const GENERATED_HOME_DEPTH_METERS = 7;
-const GENERATED_HOME_HEIGHT_METERS = 5.5;
+const GENERATED_HOME_HEIGHT_METERS = DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS;
 const POLYGON_GEOMETRY_FILTER: FilterSpecification = [
   'match',
   ['geometry-type'],
@@ -1511,6 +1514,8 @@ export function MapBuildingsLayer({
           return [];
         }
 
+        const buildingHeightMeters = sanitizeBuildingExtrusionHeightMeters(propsRecord);
+
         const assignmentSelected =
           (featureAddressId && selectedAddressIdSet.has(featureAddressId)) ||
           (primaryInferredAddress?.id && selectedAddressIdSet.has(primaryInferredAddress.id)) ||
@@ -1552,9 +1557,8 @@ export function MapBuildingsLayer({
             assignment_color: getStringRecordValue(propsRecord, 'assignment_color') ?? assignmentColor ?? undefined,
             assignment_selected: Boolean(assignmentSelected),
             generated_home_footprint: Boolean(generatedHomeFootprint),
-            height_m:
-              Number(props.height_m ?? propsRecord.height ?? GENERATED_HOME_HEIGHT_METERS) ||
-              GENERATED_HOME_HEIGHT_METERS,
+            height: buildingHeightMeters,
+            height_m: buildingHeightMeters,
             gers_id: props.gers_id ?? stableBuildingId,
             building_id: props.building_id ?? stableBuildingId,
             feature_id: props.feature_id ?? stableBuildingId,
@@ -2103,16 +2107,7 @@ export function MapBuildingsLayer({
 
           // Filter for polygon features only
           const polygonFilter: FilterSpecification = POLYGON_GEOMETRY_FILTER;
-          const buildingHeightExpression = [
-            'max',
-            [
-              'coalesce',
-              ['get', 'height'],
-              ['get', 'height_m'],
-              MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
-            ],
-            MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
-          ] as ExpressionSpecification;
+          const buildingHeightExpression = getBuildingExtrusionHeightExpression();
 
           safeRemoveLayer(map, surfaceLayerId);
           

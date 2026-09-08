@@ -42,6 +42,11 @@ import {
   DEMO_44_REFERRAL_CODE,
   resolveDemo44TrialGrant,
 } from '@/lib/demo/demo44TeamTrial';
+import {
+  DEMO_100_CLIENT_SOURCE,
+  DEMO_100_REFERRAL_CODE,
+  resolveDemo100TrialGrant,
+} from '@/lib/demo/demo100Trial';
 
 const INDUSTRIES = [
   'Home service',
@@ -416,8 +421,9 @@ export async function POST(request: NextRequest) {
       typeof body?.clientSource === 'string' ? body.clientSource.trim().toLowerCase() : '';
     requestedClientSource = clientSource;
     const isDemo44TeamTrialCompletion = clientSource === DEMO_44_CLIENT_SOURCE;
+    const isDemo100TrialCompletion = clientSource === DEMO_100_CLIENT_SOURCE;
     const isSelfServeDemoCompletion =
-      clientSource === 'self-serve-demo' || isDemo44TeamTrialCompletion;
+      clientSource === 'self-serve-demo' || isDemo44TeamTrialCompletion || isDemo100TrialCompletion;
     const selfServeCampaignDraft = isSelfServeDemoCompletion
       ? normalizeSelfServeCampaignDraft(body?.selfServeCampaignDraft)
       : null;
@@ -816,7 +822,15 @@ export async function POST(request: NextRequest) {
           referralCodeUsed: currentWorkspace?.referral_code_used,
         })
       : null;
-    const preserveDemo44PaidStatus = demo44TrialGrant?.preservePaidStatus === true;
+    const demo100TrialGrant = isDemo100TrialCompletion
+      ? resolveDemo100TrialGrant({
+          subscriptionStatus: currentWorkspace?.subscription_status,
+          trialEndsAt: currentWorkspace?.trial_ends_at,
+          referralCodeUsed: currentWorkspace?.referral_code_used,
+        })
+      : null;
+    const preserveTrialPaidStatus =
+      demo44TrialGrant?.preservePaidStatus === true || demo100TrialGrant?.preservePaidStatus === true;
 
     const partnerOfferToken =
       typeof body?.partnerOfferToken === 'string' && body.partnerOfferToken.trim()
@@ -861,7 +875,7 @@ export async function POST(request: NextRequest) {
         ? industry
         : industry.trim();
     }
-    if ((referralCode !== undefined || partnerOfferReferralCode) && !preserveDemo44PaidStatus) {
+    if ((referralCode !== undefined || partnerOfferReferralCode) && !preserveTrialPaidStatus) {
       let normalizedReferralCode =
         partnerOfferReferralCode ??
         (typeof referralCode === 'string' && referralCode.trim()
@@ -907,9 +921,11 @@ export async function POST(request: NextRequest) {
     }
     if (
       isDemo44TeamTrialCompletion &&
-      !preserveDemo44PaidStatus
+      !preserveTrialPaidStatus
     ) {
       updates.referral_code_used = DEMO_44_REFERRAL_CODE;
+    } else if (isDemo100TrialCompletion && !preserveTrialPaidStatus) {
+      updates.referral_code_used = DEMO_100_REFERRAL_CODE;
     } else if (isSelfServeDemoCompletion && !isDemo44TeamTrialCompletion) {
       updates.referral_code_used = 'SELF_SERVE_DEMO';
     }
@@ -919,7 +935,12 @@ export async function POST(request: NextRequest) {
       updates.trial_ends_at = demo44TrialGrant.trialEndsAt;
     }
 
-    if ((maxSeats !== undefined || useCase !== undefined) && !preserveDemo44PaidStatus) {
+    if (demo100TrialGrant?.shouldGrant && demo100TrialGrant.trialEndsAt) {
+      updates.subscription_status = 'trialing';
+      updates.trial_ends_at = demo100TrialGrant.trialEndsAt;
+    }
+
+    if ((maxSeats !== undefined || useCase !== undefined) && !preserveTrialPaidStatus) {
       const requestedSeats =
         Number.isFinite(maxSeats) && typeof maxSeats === 'number'
           ? Math.trunc(maxSeats)
@@ -1300,7 +1321,8 @@ export async function POST(request: NextRequest) {
     console.error('Onboarding complete error:', e);
     if (
       requestedClientSource === 'self-serve-demo' ||
-      requestedClientSource === DEMO_44_CLIENT_SOURCE
+      requestedClientSource === DEMO_44_CLIENT_SOURCE ||
+      requestedClientSource === DEMO_100_CLIENT_SOURCE
     ) {
       return NextResponse.json(
         { error: 'We could not create your starter campaign. Please try again.' },

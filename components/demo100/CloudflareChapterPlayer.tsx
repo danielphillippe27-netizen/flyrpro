@@ -18,15 +18,16 @@ type CloudflareChapterPlayerProps = {
   videoUid?: string;
   title: string;
   eyebrow: string;
+  autoPlayWithSound?: boolean;
   onStarted?: () => void;
   onComplete: () => void;
 };
 
-function streamUrl(customerCode: string | undefined, videoUid: string) {
+function streamUrl(customerCode: string | undefined, videoUid: string, autoPlayWithSound: boolean) {
   const url = customerCode
     ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
     : new URL(`https://iframe.videodelivery.net/${videoUid}`);
-  url.searchParams.set('autoplay', 'false');
+  url.searchParams.set('autoplay', autoPlayWithSound ? 'true' : 'false');
   url.searchParams.set('muted', 'false');
   url.searchParams.set('preload', 'auto');
   url.searchParams.set('primaryColor', '#ef4444');
@@ -39,6 +40,7 @@ export function CloudflareChapterPlayer({
   videoUid,
   title,
   eyebrow,
+  autoPlayWithSound = false,
   onStarted,
   onComplete,
 }: CloudflareChapterPlayerProps) {
@@ -46,11 +48,21 @@ export function CloudflareChapterPlayer({
   const playerRef = useRef<Demo100StreamPlayer | null>(null);
   const startedRef = useRef(false);
   const [scriptReady, setScriptReady] = useState(false);
-  const [needsGesture, setNeedsGesture] = useState(true);
+  const [needsGesture, setNeedsGesture] = useState(!autoPlayWithSound);
   const [starting, setStarting] = useState(false);
   const [playbackError, setPlaybackError] = useState(false);
   const [sdkFailed, setSdkFailed] = useState(false);
-  const url = useMemo(() => (videoUid ? streamUrl(customerCode, videoUid) : null), [customerCode, videoUid]);
+  const url = useMemo(
+    () => (videoUid ? streamUrl(customerCode, videoUid, autoPlayWithSound) : null),
+    [autoPlayWithSound, customerCode, videoUid],
+  );
+
+  useEffect(() => {
+    const streamFactory = (window as typeof window & {
+      Stream?: (element: HTMLIFrameElement | null) => Demo100StreamPlayer;
+    }).Stream;
+    if (typeof streamFactory === 'function') setScriptReady(true);
+  }, []);
 
   const markStarted = useCallback(() => {
     if (startedRef.current) return;
@@ -88,7 +100,6 @@ export function CloudflareChapterPlayer({
     const player = streamFactory(iframeRef.current);
     if (!player) return;
     playerRef.current = player;
-    player.pause?.();
     const handleEnded = () => onComplete();
     const handlePlay = () => markStarted();
     const handleError = () => {
@@ -99,6 +110,20 @@ export function CloudflareChapterPlayer({
     player.addEventListener('play', handlePlay);
     player.addEventListener('error', handleError);
 
+    if (autoPlayWithSound) {
+      setStarting(true);
+      player.muted = false;
+      player.play()
+        .then(() => {
+          markStarted();
+          setNeedsGesture(false);
+        })
+        .catch(() => setNeedsGesture(true))
+        .finally(() => setStarting(false));
+    } else {
+      player.pause?.();
+    }
+
     return () => {
       player.removeEventListener?.('ended', handleEnded);
       player.removeEventListener?.('play', handlePlay);
@@ -106,14 +131,14 @@ export function CloudflareChapterPlayer({
       player.pause?.();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [markStarted, onComplete, scriptReady, url]);
+  }, [autoPlayWithSound, markStarted, onComplete, scriptReady, url]);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#050505] text-white">
       <Script
         src="https://embed.cloudflarestream.com/embed/sdk.latest.js"
         strategy="afterInteractive"
-        onLoad={() => setScriptReady(true)}
+        onReady={() => setScriptReady(true)}
         onError={() => setSdkFailed(true)}
       />
 
@@ -162,7 +187,7 @@ export function CloudflareChapterPlayer({
                 <span className="mr-4 grid size-10 place-items-center rounded-full bg-red-500 text-white">
                   {starting ? <Loader2 className="size-5 animate-spin" /> : playbackError ? <RotateCcw className="size-5" /> : <Play className="size-5 fill-current" />}
                 </span>
-                {playbackError ? 'Try playing again' : 'Continue with sound'}
+                {playbackError ? 'Try playing again' : autoPlayWithSound ? 'Play with sound' : 'Continue with sound'}
                 <Volume2 className="ml-3 size-5 text-red-500" />
               </button>
               {playbackError ? (

@@ -7,12 +7,13 @@ import {
 export const DEMO100_STAGES = [
   'intro_video',
   'campaign_builder',
+  'territory_preview',
   'post_create_video',
   'campaign_results',
   'assignments',
   'live_map',
   'team_stats',
-  'iphone_video',
+  'iphone_chapters',
   'outro_video',
   'cta',
 ] as const;
@@ -37,16 +38,16 @@ export type Demo100Member = {
 export const DEMO100_MEMBERS: readonly Demo100Member[] = [
   { id: 'demo100-maya', name: 'Maya', color: '#ef4444' },
   { id: 'demo100-leo', name: 'Leo', color: '#2563eb' },
-  { id: 'demo100-ava', name: 'Ava', color: '#16a34a' },
+  { id: 'demo100-ava', name: 'Ava', color: '#a16207' },
   { id: 'demo100-noah', name: 'Noah', color: '#7c3aed' },
 ] as const;
 
-export const DEMO100_SESSION_STORAGE_KEY = 'wolfgrid.demo100.session.v1';
+export const DEMO100_SESSION_STORAGE_KEY = 'wolfgrid.demo100.session.v2';
 export const SELF_SERVE_CAMPAIGN_DRAFT_PRIMARY_KEY = 'wolfgrid.selfServeCampaignDraft';
 export const SELF_SERVE_CAMPAIGN_DRAFT_KEY = 'flyr.selfServeCampaignDraft';
 
 export type Demo100StoredState = {
-  version: 1;
+  version: 2;
   stage: Demo100Stage;
   selectedCount: number;
   campaignName: string;
@@ -93,12 +94,12 @@ export function getDemo100StageNumber(stage: Demo100Stage): number {
   if (stage === 'cta') return 9;
   if (stage === 'intro_video') return 1;
   if (stage === 'campaign_builder') return 2;
-  if (stage === 'post_create_video') return 3;
+  if (stage === 'territory_preview' || stage === 'post_create_video') return 3;
   if (stage === 'campaign_results') return 4;
   if (stage === 'assignments') return 5;
   if (stage === 'live_map') return 6;
   if (stage === 'team_stats') return 7;
-  if (stage === 'iphone_video') return 8;
+  if (stage === 'iphone_chapters') return 8;
   return 9;
 }
 
@@ -106,10 +107,10 @@ export function parseDemo100StoredState(value: string | null): Demo100StoredStat
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<Demo100StoredState>;
-    if (parsed.version !== 1 || !isDemo100Stage(parsed.stage)) return null;
+    if (parsed.version !== 2 || !isDemo100Stage(parsed.stage)) return null;
     const polygon = parsed.polygon?.type === 'Polygon' ? parsed.polygon : null;
     return {
-      version: 1,
+      version: 2,
       stage: parsed.stage,
       selectedCount: Math.max(0, Math.trunc(Number(parsed.selectedCount) || 0)),
       campaignName: typeof parsed.campaignName === 'string' && parsed.campaignName.trim()
