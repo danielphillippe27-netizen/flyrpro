@@ -33,6 +33,7 @@ type IphoneChapterExperienceProps = {
   chapters: readonly IphoneChapter[];
   customerCode?: string;
   videoUid?: string;
+  playbackEndSeconds?: number;
   onComplete: () => void;
   onChapterStarted?: (chapterIndex: number) => void;
   onChapterCompleted?: (chapterIndex: number) => void;
@@ -55,6 +56,7 @@ export function IphoneChapterExperience({
   chapters,
   customerCode,
   videoUid,
+  playbackEndSeconds,
   onComplete,
   onChapterStarted,
   onChapterCompleted,
@@ -62,6 +64,7 @@ export function IphoneChapterExperience({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const playerRef = useRef<Demo100StreamPlayer | null>(null);
   const pendingSeekSecondsRef = useRef<number | null>(null);
+  const cutReachedRef = useRef(false);
   const startedIndexesRef = useRef<Set<number>>(new Set());
   const completedIndexesRef = useRef<Set<number>>(new Set());
   const [activeIndex, setActiveIndex] = useState(0);
@@ -128,7 +131,11 @@ export function IphoneChapterExperience({
     const player = playerRef.current;
     const startSeconds = chapters[safeIndex]?.startSeconds ?? 0;
     if (player && Number.isFinite(player.duration) && player.duration > 0) {
-      player.currentTime = Math.min(startSeconds, player.duration);
+      const seekLimit = playbackEndSeconds && playbackEndSeconds > 0
+        ? Math.min(player.duration, playbackEndSeconds)
+        : player.duration;
+      cutReachedRef.current = false;
+      player.currentTime = Math.min(startSeconds, seekLimit);
       pendingSeekSecondsRef.current = null;
       void player.play().catch(() => undefined);
     } else {
@@ -137,7 +144,7 @@ export function IphoneChapterExperience({
     setActiveIndex(safeIndex);
     setHighestUnlockedIndex((current) => Math.max(current, safeIndex));
     markStarted(safeIndex);
-  }, [chapters, markStarted]);
+  }, [chapters, markStarted, playbackEndSeconds]);
 
   const advance = useCallback(() => {
     markCompleted(activeIndex);
@@ -156,9 +163,27 @@ export function IphoneChapterExperience({
     const player = streamFactory(iframeRef.current);
     if (!player) return;
     playerRef.current = player;
+    const handleEnded = () => {
+      for (let index = 0; index < chapters.length; index += 1) markCompleted(index);
+      setActiveIndex(chapters.length - 1);
+      setHighestUnlockedIndex(chapters.length - 1);
+      setPlaybackProgress(100);
+    };
     const syncToPlayback = () => {
       if (!Number.isFinite(player.duration) || player.duration <= 0) return;
-      const ratio = Math.max(0, Math.min(1, player.currentTime / player.duration));
+      const playbackDuration = playbackEndSeconds && playbackEndSeconds > 0
+        ? Math.min(player.duration, playbackEndSeconds)
+        : player.duration;
+      if (playbackEndSeconds && playbackEndSeconds > 0 && player.currentTime >= playbackEndSeconds) {
+        if (!cutReachedRef.current) {
+          cutReachedRef.current = true;
+          player.pause?.();
+          player.currentTime = playbackEndSeconds;
+          handleEnded();
+        }
+        return;
+      }
+      const ratio = Math.max(0, Math.min(1, player.currentTime / playbackDuration));
       let chapterIndex = 0;
       for (let index = 1; index < chapters.length; index += 1) {
         if (player.currentTime < chapters[index].startSeconds) break;
@@ -170,17 +195,15 @@ export function IphoneChapterExperience({
       for (let index = 0; index < chapterIndex; index += 1) markCompleted(index);
       markStarted(chapterIndex);
     };
-    const handleEnded = () => {
-      for (let index = 0; index < chapters.length; index += 1) markCompleted(index);
-      setActiveIndex(chapters.length - 1);
-      setHighestUnlockedIndex(chapters.length - 1);
-      setPlaybackProgress(100);
-    };
     const handlePlay = () => syncToPlayback();
     const handleLoadedMetadata = () => {
       const pendingSeekSeconds = pendingSeekSecondsRef.current;
       if (pendingSeekSeconds !== null && Number.isFinite(player.duration) && player.duration > 0) {
-        player.currentTime = Math.min(pendingSeekSeconds, player.duration);
+        const seekLimit = playbackEndSeconds && playbackEndSeconds > 0
+          ? Math.min(player.duration, playbackEndSeconds)
+          : player.duration;
+        cutReachedRef.current = false;
+        player.currentTime = Math.min(pendingSeekSeconds, seekLimit);
         pendingSeekSecondsRef.current = null;
         void player.play().catch(() => undefined);
       }
@@ -212,7 +235,7 @@ export function IphoneChapterExperience({
       player.pause?.();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [chapters, markCompleted, markStarted, scriptReady, url]);
+  }, [chapters, markCompleted, markStarted, playbackEndSeconds, scriptReady, url]);
 
   if (!activeChapter) return null;
 
