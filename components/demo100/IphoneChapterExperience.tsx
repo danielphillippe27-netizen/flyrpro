@@ -6,8 +6,10 @@ import {
   ArrowRight,
   Check,
   ChevronRight,
+  Loader2,
   LockKeyhole,
   Play,
+  Volume2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -41,7 +43,7 @@ function streamUrl(customerCode: string | undefined, videoUid: string) {
     ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
     : new URL(`https://iframe.videodelivery.net/${videoUid}`);
   url.searchParams.set('autoplay', 'true');
-  url.searchParams.set('muted', 'true');
+  url.searchParams.set('muted', 'false');
   url.searchParams.set('controls', 'false');
   url.searchParams.set('preload', 'auto');
   url.searchParams.set('primaryColor', '#ef4444');
@@ -68,6 +70,9 @@ export function IphoneChapterExperience({
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const [scriptReady, setScriptReady] = useState(false);
   const [sdkFailed, setSdkFailed] = useState(false);
+  const [needsSoundGesture, setNeedsSoundGesture] = useState(true);
+  const [startingSound, setStartingSound] = useState(false);
+  const [soundError, setSoundError] = useState(false);
   const activeChapter = chapters[activeIndex];
   const url = useMemo(
     () => videoUid ? streamUrl(customerCode, videoUid) : null,
@@ -93,6 +98,30 @@ export function IphoneChapterExperience({
     setCompletedIndexes(new Set(completedIndexesRef.current));
     onChapterCompleted?.(chapterIndex);
   }, [onChapterCompleted]);
+
+  const playWithSound = useCallback(async () => {
+    const streamFactory = (window as typeof window & {
+      Stream?: (element: HTMLIFrameElement | null) => Demo100StreamPlayer;
+    }).Stream;
+    const player = playerRef.current
+      ?? (typeof streamFactory === 'function' ? streamFactory(iframeRef.current) : null);
+    if (!player) return;
+
+    playerRef.current = player;
+    setStartingSound(true);
+    setSoundError(false);
+    try {
+      player.muted = false;
+      await player.play();
+      markStarted(activeIndex);
+      setNeedsSoundGesture(false);
+    } catch {
+      setSoundError(true);
+      setNeedsSoundGesture(true);
+    } finally {
+      setStartingSound(false);
+    }
+  }, [activeIndex, markStarted]);
 
   const goToChapter = useCallback((chapterIndex: number) => {
     const safeIndex = Math.max(0, Math.min(chapters.length - 1, chapterIndex));
@@ -161,10 +190,19 @@ export function IphoneChapterExperience({
     player.addEventListener('play', handlePlay);
     player.addEventListener('timeupdate', syncToPlayback);
     player.addEventListener('loadedmetadata', handleLoadedMetadata);
-    player.muted = true;
+    player.muted = false;
     player.play()
-      .then(() => markStarted(0))
-      .catch(() => undefined);
+      .then(() => {
+        markStarted(0);
+        setNeedsSoundGesture(false);
+      })
+      .catch(() => {
+        player.muted = true;
+        setNeedsSoundGesture(true);
+        void player.play()
+          .then(() => markStarted(0))
+          .catch(() => undefined);
+      });
 
     return () => {
       player.removeEventListener?.('ended', handleEnded);
@@ -190,7 +228,7 @@ export function IphoneChapterExperience({
       />
 
       <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1440px] flex-col px-4 pb-6 pt-[max(5rem,calc(env(safe-area-inset-top)+4rem))] sm:px-6 lg:h-[100dvh] lg:flex-row lg:gap-8 lg:overflow-hidden lg:px-10 lg:pb-6 lg:pt-16">
-        <section className="flex min-h-0 flex-1 flex-col lg:max-w-[600px]">
+        <section className="order-2 mt-8 flex min-h-0 flex-1 flex-col lg:order-1 lg:mt-0 lg:max-w-[600px]">
           <div className="shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -242,7 +280,7 @@ export function IphoneChapterExperience({
           </ol>
         </section>
 
-        <section className="mt-8 flex min-w-0 flex-1 flex-col items-center justify-center lg:mt-0">
+        <section className="order-1 flex min-w-0 flex-1 flex-col items-center justify-center lg:order-2">
           <div className="w-full max-w-[480px]">
             <div className="relative mx-auto aspect-[9/16] h-[min(78dvh,880px)] max-w-full overflow-hidden rounded-[3.5rem] border-[8px] border-[#202126] bg-black shadow-[0_30px_90px_rgba(0,0,0,.75),0_0_0_1px_rgba(255,255,255,.16)]">
               <div className="pointer-events-none absolute left-1/2 top-2 z-30 h-7 w-28 -translate-x-1/2 rounded-full bg-black" />
@@ -264,6 +302,24 @@ export function IphoneChapterExperience({
                   </div>
                 </div>
               )}
+
+              {url && !sdkFailed && needsSoundGesture ? (
+                <div className="absolute inset-0 z-40 grid place-items-center bg-black/15 px-6">
+                  <button
+                    type="button"
+                    onClick={() => void playWithSound()}
+                    disabled={!scriptReady || startingSound}
+                    className="flex min-h-14 items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white px-6 text-sm font-black text-black shadow-2xl transition hover:scale-[1.02] hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-70"
+                  >
+                    {startingSound ? (
+                      <Loader2 className="size-5 animate-spin text-red-500" />
+                    ) : (
+                      <Volume2 className="size-5 text-red-500" />
+                    )}
+                    {soundError ? 'Try sound again' : 'Play with sound'}
+                  </button>
+                </div>
+              ) : null}
 
             </div>
 
