@@ -13,6 +13,7 @@ export const DEMO100_STAGES = [
   'assignments',
   'live_map',
   'team_stats',
+  'field_guide_intro_video',
   'iphone_chapters',
   'outro_video',
   'cta',
@@ -99,7 +100,7 @@ export function getDemo100StageNumber(stage: Demo100Stage): number {
   if (stage === 'assignments') return 5;
   if (stage === 'live_map') return 6;
   if (stage === 'team_stats') return 7;
-  if (stage === 'iphone_chapters') return 8;
+  if (stage === 'field_guide_intro_video' || stage === 'iphone_chapters') return 8;
   return 9;
 }
 

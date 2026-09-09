@@ -35,8 +35,12 @@ test('moves through the complete demo in order', () => {
   assert(DEMO100_STAGES[2] === 'territory_preview', 'The 3D territory should appear immediately after creation');
   assert(DEMO100_STAGES[3] === 'post_create_video', 'The second video should follow the 3D territory reveal');
   assert(
-    DEMO100_STAGES.indexOf('iphone_chapters') === DEMO100_STAGES.indexOf('team_stats') + 1,
-    'The synchronized iPhone chapter guide should follow team stats',
+    DEMO100_STAGES.indexOf('field_guide_intro_video') === DEMO100_STAGES.indexOf('team_stats') + 1,
+    'The standalone field guide video should follow team stats',
+  );
+  assert(
+    DEMO100_STAGES.indexOf('iphone_chapters') === DEMO100_STAGES.indexOf('field_guide_intro_video') + 1,
+    'The synchronized iPhone chapter guide should follow its standalone introduction',
   );
 });
 

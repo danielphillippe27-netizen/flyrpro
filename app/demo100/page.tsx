@@ -25,7 +25,7 @@ export default async function Demo100Page({ searchParams }: Demo100PageProps) {
   const params = await searchParams;
   const iphoneOverviewUid =
     process.env.NEXT_PUBLIC_DEMO100_IPHONE_STREAM_VIDEO_UID ||
-    'c0872931ae8d5c162b3387c56bc5ce67';
+    '667f3cc919bb749d35801c545fbf0ec5';
   return (
     <Demo100Experience
       customerCode={process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE}
@@ -36,6 +36,9 @@ export default async function Demo100Page({ searchParams }: Demo100PageProps) {
         postCreate:
           process.env.NEXT_PUBLIC_DEMO100_POST_CREATE_STREAM_VIDEO_UID ||
           'fbc8bc2dcb7b96baf1a229b9397f12a8',
+        fieldGuideIntro:
+          process.env.NEXT_PUBLIC_DEMO100_FIELD_GUIDE_INTRO_STREAM_VIDEO_UID ||
+          'c0872931ae8d5c162b3387c56bc5ce67',
         iphone:
           iphoneOverviewUid,
         outro:

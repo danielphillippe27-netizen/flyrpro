@@ -11,7 +11,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  CircleDot,
   DoorOpen,
   MapPinned,
   MessageSquare,
@@ -75,6 +74,7 @@ type Demo100Building = DemoBuildingCandidate & {
 type VideoUids = {
   intro?: string;
   postCreate?: string;
+  fieldGuideIntro?: string;
   iphone?: string;
   outro?: string;
 };
@@ -107,6 +107,7 @@ const VIDEO_STAGES: Partial<Record<Demo100Stage, {
 }>> = {
   intro_video: { uidKey: 'intro', title: 'Meet WolfGrid', eyebrow: 'Chapter 1 · The field, connected' },
   post_create_video: { uidKey: 'postCreate', title: 'From territory to outcomes', eyebrow: 'Chapter 3 · Your campaign' },
+  field_guide_intro_video: { uidKey: 'fieldGuideIntro', title: 'WolfGrid at the door', eyebrow: 'Chapter 8 · Take it into the field' },
   outro_video: { uidKey: 'outro', title: 'One system from map to CRM', eyebrow: 'Final chapter · Put it to work' },
 };
 
@@ -299,7 +300,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const selectedLocationRef = useRef<[number, number]>([-79.3832, 43.6532]);
   const pendingRestoreRef = useRef<ReturnType<typeof parseDemo100StoredState>>(null);
   const videoStartedStageRef = useRef<Demo100Stage | null>(null);
-  const radiusCenterRef = useRef<[number, number] | null>(null);
   const selectionFrameRef = useRef(0);
   const livePolygonTimerRef = useRef(0);
   const preserveDraftOnDrawDeleteRef = useRef(false);
@@ -307,7 +307,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const [stage, setStage] = useState<Demo100Stage>('intro_video');
   const [mapLoaded, setMapLoaded] = useState(false);
   const [builderStep, setBuilderStep] = useState<'location' | 'selection'>('location');
-  const [selectionTool, setSelectionTool] = useState<'polygon' | 'radius'>('polygon');
   const [searchValue, setSearchValue] = useState('');
   const [campaignName, setCampaignName] = useState('FIRST CAMPAIGN');
   const [polygon, setPolygon] = useState<GeoJSON.Polygon | null>(null);
@@ -527,7 +526,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     const container = map.getContainer();
     container.classList.add('flyr-territory-draw-cursor');
     const readLiveBoundary = () => {
-      if (selectionTool !== 'polygon') return;
       window.clearTimeout(livePolygonTimerRef.current);
       livePolygonTimerRef.current = window.setTimeout(() => {
         const livePolygon = getLiveDrawnPolygon(draw);
@@ -541,7 +539,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       map.off('draw.render', readLiveBoundary);
       container.classList.remove('flyr-territory-draw-cursor');
     };
-  }, [builderStep, mapLoaded, selectBuildings, selectionTool, stage]);
+  }, [builderStep, mapLoaded, selectBuildings, stage]);
 
   useEffect(() => {
     const draw = drawRef.current;
@@ -550,11 +548,10 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       || !mapLoaded
       || stage !== 'campaign_builder'
       || builderStep !== 'selection'
-      || selectionTool !== 'polygon'
       || polygon
     ) return;
     draw.changeMode('draw_polygon');
-  }, [builderStep, mapLoaded, polygon, selectionTool, stage]);
+  }, [builderStep, mapLoaded, polygon, stage]);
 
   const addBaseBuildings = useCallback((map: mapboxgl.Map) => {
     if (map.getLayer('demo100-base-buildings') || !map.getSource('composite')) return;
@@ -924,7 +921,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   };
 
   const startPolygon = () => {
-    setSelectionTool('polygon');
     setSelectionError(null);
     drawRef.current?.deleteAll();
     setPolygon(null);
@@ -933,96 +929,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     drawRef.current?.changeMode('draw_polygon');
     track('selection_tool_changed', 2, { tool: 'polygon' });
   };
-
-  const startRadius = () => {
-    setSelectionTool('radius');
-    setSelectionError(null);
-    drawRef.current?.deleteAll();
-    drawRef.current?.changeMode('simple_select');
-    setPolygon(null);
-    setBuildings([]);
-    setDiscoveredCount(0);
-    track('selection_tool_changed', 2, { tool: 'radius' });
-  };
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const draw = drawRef.current;
-    if (
-      stage !== 'campaign_builder'
-      || builderStep !== 'selection'
-      || selectionTool !== 'radius'
-      || !mapLoaded
-      || !map
-      || !draw
-    ) return;
-
-    let radiusFrame = 0;
-    const isMultiTouch = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) =>
-      'touches' in event.originalEvent && event.originalEvent.touches.length > 1;
-    const releaseRadiusGesture = () => {
-      radiusCenterRef.current = null;
-      map.dragPan.enable();
-    };
-    const beginRadius = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
-      if (isMultiTouch(event)) {
-        releaseRadiusGesture();
-        return;
-      }
-      radiusCenterRef.current = [event.lngLat.lng, event.lngLat.lat];
-      map.dragPan.disable();
-      event.preventDefault();
-    };
-    const updateRadius = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
-      if (isMultiTouch(event)) {
-        releaseRadiusGesture();
-        return;
-      }
-      const center = radiusCenterRef.current;
-      if (!center) return;
-      const edge: [number, number] = [event.lngLat.lng, event.lngLat.lat];
-      window.cancelAnimationFrame(radiusFrame);
-      radiusFrame = window.requestAnimationFrame(() => {
-        const radiusKm = Math.max(
-          0.03,
-          turf.distance(turf.point(center), turf.point(edge), { units: 'kilometers' }),
-        );
-        const circle = turf.circle(center, radiusKm, { steps: 64, units: 'kilometers' });
-        draw.set({ type: 'FeatureCollection', features: [circle] });
-        selectBuildings(circle.geometry);
-      });
-      event.preventDefault();
-    };
-    const finishRadius = (event: mapboxgl.MapMouseEvent | mapboxgl.MapTouchEvent) => {
-      if (!radiusCenterRef.current) return;
-      updateRadius(event);
-      radiusCenterRef.current = null;
-      map.dragPan.enable();
-      draw.changeMode('simple_select');
-      track('radius_completed', 2);
-    };
-
-    draw.changeMode('simple_select');
-    map.on('mousedown', beginRadius);
-    map.on('mousemove', updateRadius);
-    map.on('mouseup', finishRadius);
-    map.on('touchstart', beginRadius);
-    map.on('touchmove', updateRadius);
-    map.on('touchend', finishRadius);
-    map.on('touchcancel', releaseRadiusGesture);
-    return () => {
-      window.cancelAnimationFrame(radiusFrame);
-      map.off('mousedown', beginRadius);
-      map.off('mousemove', updateRadius);
-      map.off('mouseup', finishRadius);
-      map.off('touchstart', beginRadius);
-      map.off('touchmove', updateRadius);
-      map.off('touchend', finishRadius);
-      map.off('touchcancel', releaseRadiusGesture);
-      map.dragPan.enable();
-      radiusCenterRef.current = null;
-    };
-  }, [builderStep, mapLoaded, selectBuildings, selectionTool, stage]);
 
   const createDraft = useCallback(() => {
     if (!polygon || buildings.length < MIN_HOMES || buildings.length > MAX_HOMES) return;
@@ -1107,7 +1013,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       setAndTrackStage('team_stats', 'team_stats_viewed');
       return;
     }
-    if (stage === 'team_stats') setAndTrackStage('iphone_chapters', 'stage_enter');
+    if (stage === 'team_stats') setAndTrackStage('field_guide_intro_video', 'stage_enter');
   }, [allMembersSelected, assignmentMode, buildings.length, createDraft, setAndTrackStage, stage, video]);
 
   const resetDemo = () => {
@@ -1222,19 +1128,14 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           ) : (
             <>
               <section className="pointer-events-auto absolute inset-x-4 top-[max(4.25rem,calc(env(safe-area-inset-top)+3.5rem))] mx-auto max-w-xl rounded-2xl border border-white/10 bg-[#090b10]/90 p-2 shadow-2xl backdrop-blur-xl">
-                <div className="grid grid-cols-2 gap-2">
-                  <Button type="button" onClick={startPolygon} className={`h-12 rounded-xl ${selectionTool === 'polygon' ? 'bg-red-500 hover:bg-red-400' : 'bg-white/10 hover:bg-white/15'}`}>
+                <div>
+                  <Button type="button" onClick={startPolygon} className="h-12 w-full rounded-xl bg-red-500 hover:bg-red-400">
                     <Pentagon className="size-4" /> Draw boundary
                   </Button>
-                  <Button type="button" onClick={startRadius} className={`h-12 rounded-xl ${selectionTool === 'radius' ? 'bg-red-500 hover:bg-red-400' : 'bg-white/10 hover:bg-white/15'}`}>
-                    <CircleDot className="size-4" /> Drag radius
-                  </Button>
                 </div>
-                {selectionTool === 'polygon' ? (
-                  <p className="pointer-events-none absolute inset-x-0 top-[calc(100%+0.65rem)] text-center text-xs font-black tracking-wide text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
-                    Click to start · Double-click to finish
-                  </p>
-                ) : null}
+                <p className="pointer-events-none absolute inset-x-0 top-[calc(100%+0.65rem)] text-center text-xs font-black tracking-wide text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.95)]">
+                  Click to start · Double-click to finish
+                </p>
               </section>
 
               <section className="pointer-events-auto absolute inset-x-4 bottom-[max(5rem,calc(env(safe-area-inset-bottom)+5rem))] mx-auto max-w-md rounded-[1.5rem] border border-white/10 bg-[#090b10]/94 p-4 shadow-2xl backdrop-blur-2xl sm:bottom-[max(1rem,env(safe-area-inset-bottom))]">
@@ -1461,7 +1362,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                 </div>
               ))}
             </div>
-            <Button type="button" onClick={() => setAndTrackStage('iphone_chapters', 'stage_enter')} className="mt-5 h-12 w-full rounded-xl bg-red-500 font-black hover:bg-red-400">
+            <Button type="button" onClick={() => setAndTrackStage('field_guide_intro_video', 'stage_enter')} className="mt-5 h-12 w-full rounded-xl bg-red-500 font-black hover:bg-red-400">
               Take WolfGrid into the field <Phone className="size-4" />
             </Button>
           </section>
@@ -1486,7 +1387,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
               >
                 Start Free Trial <ArrowRight className="size-5" />
               </Button>
-              <Button asChild variant="outline" className="h-14 rounded-xl border-white/15 bg-white text-base font-black text-zinc-950 hover:bg-zinc-100">
+              <Button asChild variant="outline" className="h-14 rounded-xl border-white/15 bg-white/[0.06] text-base font-black text-white hover:bg-white/[0.12] hover:text-white">
                 <a href={founderCallHref} target="_blank" rel="noreferrer" onClick={() => track('book_call_click', 10, { homes: buildings.length })}>
                   <CalendarDays className="size-5 text-red-500" /> Book a Call
                 </a>
