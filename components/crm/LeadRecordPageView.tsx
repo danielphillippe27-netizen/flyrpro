@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { RecordSaleLink } from '@/components/field-sales/SalesCard';
 import { useRouter } from 'next/navigation';
 import {
   ChevronRight,
@@ -861,6 +862,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <RecordSaleLink contactId={contact.id} />
               <div className="mr-1 text-sm font-medium text-slate-500 dark:text-muted-foreground">
                 Person {currentIndex >= 0 ? currentIndex + 1 : 1} of {orderedContacts.length}
               </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useFieldSales } from '@/lib/field-sales/client';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
@@ -358,12 +359,20 @@ function MainLayoutContent({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
+  const { data: fieldSales } = useFieldSales({}, true);
   const isSelfServeDemoFlow = searchParams.get('source') === 'self-serve-demo';
   const isSelfServeCampaignCreate =
     pathname === '/campaigns/create' && isSelfServeDemoFlow;
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
+      if (fieldSales?.enabled && accessLevel !== 'salesperson') {
+        items = [
+          ...items.slice(0, 1),
+          { href: '/sales', icon: BriefcaseBusiness, label: 'Sales · Beta' },
+          ...items.slice(1),
+        ];
+      }
       if (!isAmbassador) return items;
       if (items.some((tab) => tab.href === ambassadorPortalTab.href)) return items;
       const settingsIndex = items.findIndex((tab) => tab.href === '/settings');

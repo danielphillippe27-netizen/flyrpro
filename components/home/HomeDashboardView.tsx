@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { fetchHomeDashboard, type HomeDashboardData } from '@/lib/home-dashboard';
+import { SalesCard } from '@/components/field-sales/SalesCard';
 import { HomeHeaderRow } from './HomeHeaderRow';
 import { WeeklyGoalsCard } from './WeeklyGoalsCard';
 import { HomeMetricsRow } from './HomeMetricsRow';
@@ -142,6 +143,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
           <WeeklyAccountabilityBanner />
       */}
 
+      <SalesCard />
       <QuoteCard noCard className="min-h-[160px]" />
 
       <HomeMetricsRow
