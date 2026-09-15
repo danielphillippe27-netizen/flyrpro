@@ -1,5 +1,6 @@
 'use client';
 
+import { SalesCard } from '@/components/field-sales/SalesCard';
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HomeDashboardView } from '@/components/home/HomeDashboardView';
@@ -35,6 +36,7 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
 
   return (
     <div data-testid="web.dashboard" className="min-h-screen bg-gray-50 dark:bg-background">
+      {resolvedAccessLevel !== 'salesperson' && <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6"><SalesCard /></div>}
       {showSelfServeTeamDemo || isWorkspaceManager || resolvedAccessLevel === 'team_leader' || resolvedAccessLevel === 'solo_owner' ? (
         <TeamOwnerDashboardView />
       ) : resolvedAccessLevel === 'salesperson' ? (
