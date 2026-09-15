@@ -11,7 +11,7 @@ export const contextSchema = z.object({
 export type CoachContext = z.infer<typeof contextSchema>;
 export const requestSchema = z.object({
   workspaceId: z.string().uuid(), timezone: z.string().min(1).max(80),
-  mode: z.enum(['brief', 'chat']), message: z.string().trim().max(1000).optional(),
+  mode: z.enum(['brief', 'chat', 'report']), scope: z.enum(['self','team']).default('self'), days: z.union([z.literal(30),z.literal(90),z.literal(365)]).default(90), message: z.string().trim().max(1000).optional(),
   history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(1400) }).strict()).max(6).default([]),
 }).strict().refine(v => v.mode !== 'chat' || !!v.message, 'A question is required');
 export type CoachRequest = z.infer<typeof requestSchema>;

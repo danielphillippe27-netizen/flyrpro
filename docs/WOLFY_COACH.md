@@ -1,37 +1,158 @@
-# Wolfy hybrid coach
+# Wolfy field intelligence
 
-Home keeps the deterministic next step and displays a separate AI coaching tip. The Den adds **Ask Wolfy**, quick questions, a bounded conversation, clear and retry. Portraits, accessories, XP accounting and the live map are independent of coaching.
+Wolfy now uses a read-only projection of field data for rep coaching, historical
+comparisons, territory analysis and owner/admin team coaching. The iOS chat has
+My performance / My team controls, a 30/90/365-day history selector, an All KPIs
+report and expandable verified figures on replies.
 
-## Data and rules
+## KPI coverage
 
-`POST /api/wolfy/coach` requires a Supabase bearer session and verified workspace membership. It accepts only workspace ID, IANA device timezone, mode, question and up to six recent conversation messages. Client-supplied metrics, user IDs and system roles are rejected.
+See [the KPI catalog](WOLFY_KPI_CATALOG.md) for the 63 base definitions. The report
+also includes derived rates, complete-period changes, custom pipeline-stage counts
+and values, goal progress, rep ranks, and the user's existing lifetime stats.
 
-`wolfy_coach_context` reads through caller RLS, explicitly filters the authenticated owner/workspace, and reuses `wolfy_home_metrics`. It returns today's doors/conversations/leads/appointments, weekly doors, personal targets, overdue follow-ups and upcoming appointments. No contact names, notes, addresses or emails are automatically sent to OpenAI. Questions can contain user-entered information; the chat explains this. There is no persisted chat transcript.
+- Visits: event doors, conversations, flyer visits and no-answer, do-not-knock and
+  not-interested outcomes. Legacy session totals are distinct measures.
+- Sessions: started/completed sessions, completed-session tracked time and distance,
+  eligible door/flyer session goals and productivity.
+- Leads: field leads created, contacted cohorts, current hot/warm/cold/new status,
+  stale hot leads, never-contacted leads and overdue reminders.
+- Appointments/contact activity: meetings created, scheduled/upcoming meetings,
+  recorded meeting outcomes where supported, and logged calls, texts, emails,
+  notes, knocks and flyers. Logged communication is not proof of delivery/contact.
+- Sales: verified/pending/cancelled counts, exact verified revenue, average value,
+  sales without appointment links and creation-date lead-to-sale cohorts.
+- Pipeline: open/won/lost opportunities, known and weighted values, missing values,
+  custom stage breakdowns, overdue expected closes and hot opportunities without
+  next steps. Pipeline estimates and marked-won opportunities are not revenue.
+- Tasks: due, completed, cancelled, on-time and overdue; completion rates exclude
+  cancelled tasks from their denominator.
+- Goals: personal daily/weekly doors, doors remaining and required daily pace,
+  personal monthly sales targets and the configured team monthly sales target.
+- Marketing/farms: QR scan events, landing-page view/click events and planned/
+  completed farm touches where workspace attribution is supported.
+- Lifetime: existing user_stats metrics, QR rates, XP and streaks. These are
+  explicitly all-workspace personal totals, never workspace/team figures.
 
-Priority: overdue follow-ups, upcoming appointments, then remaining weekly doors and rounded-up daily pace through Sunday (including today), then setting goals. Local day and Monday–Sunday boundaries are computed in PostgreSQL using the validated device timezone. Missing metrics return unavailable, never fabricated zeros. Counts represent synced activity, not unsynced local work. Historical trends, sales totals and leaderboard position are not part of this first coaching context.
+## Calculation contract
 
-## Model and spending
+`wolfy_field_context(workspace, timezone, scope, days)` returns a versioned,
+aggregated projection. A maximum of twice the selected history length is read for
+comparison periods. Today/week/month are incomplete. Historical comparisons use
+last 7 vs previous 7 complete local days, last 30 vs previous 30, selected history
+vs the preceding equal period, and four complete Monday–Sunday weeks.
 
-The model is deliberately fixed to `gpt-5-nano`, with minimal reasoning, 1,000 maximum output tokens (including reasoning), no tools, no retries and an 18-second provider timeout. There is no expensive model fallback. Responses API uses `store:false` and strict JSON output. Numeric claims, links, malformed output and common false action claims are rejected. This is a guardrail, not a guarantee that generated prose is correct. Exact figures and destinations come from code; coaching cannot mutate records, XP or purchases.
+Latest visit state wins per session and address/building; an undo removes the
+visit. No-answer/do-not-knock outcomes are excluded from conversation counts.
+Session-reported counters are never added to event counts. A detected legacy
+counter/event gap is disclosed, not interpreted as a performance decline.
+Completed-session time/distance belong to their start day; live time and splitting
+cross-midnight sessions are not inferred. Sales use the configured sales timezone;
+a mismatch with activity timezone is disclosed. There is no invented hourly
+schedule or finish-time estimate.
 
-A service-only cache holds one brief per user/workspace. It is reused for 15 minutes only while facts and local day are unchanged. Changed data uses fixed rules during a 60-second brief cooldown. An atomic service-only database reservation limits **all workspaces combined to 30 model attempts per user per UTC day**, with a five-second cooldown. Failures consume an attempt. Missing cache/quota storage fails closed to fixed rules. There is no scheduled or background model loop. Home requests on launch, foreground, refresh and relevant activity/goal refreshes; chat requests only on send/retry. Account/workspace changes create a new scoped store; late replies cannot update another scope.
+Period lead/conversation, appointment/lead and sale/door ratios compare activity
+volumes, not the same people. Lead-sale conversion is explicitly a lead-creation
+cohort followed through now, with an age-bias caveat for newer cohorts. No baseline
+or a zero denominator means unavailable; growth from zero is not a percentage.
+Small denominators are flagged. Current pipeline/contact status is not reconstructed
+as historical status. Session goal rates include only door/flyer goal types.
 
-## Activation
+Currency sums and formatting use exact decimal strings/BigInt. Values above the
+JavaScript safe integer limit remain intact. Rates are rounded to two decimals.
+Unknown optional sources, disabled Sales and absent targets remain unavailable.
+Meeting outcome counts require the status column. Data synced after a request
+appears on the next refresh; there is no background model loop.
 
-1. Apply existing Home migration `20260915150000_wolfy_home.sql`, then `20260915220000_wolfy_coach.sql` to the matching Supabase project. The new tables reference existing auth users and workspaces. Do not apply unrelated pending migrations blindly.
-2. Set server-only `OPENAI_API_KEY` for the backend. Never add it to Xcode, Info.plist, a public environment variable or source control. Configure a project spending limit in the provider dashboard.
-3. Deploy the private route/library with existing Supabase URL, anon and service-role configuration. Ship the iOS build pointing to that backend through `Config.backendAPIURL`.
-4. Verify two real accounts/workspaces, actual synced activity and a real nano response on the deployed endpoint. Until activation, Home retains rule-based advice and Ask Wolfy reports unavailable.
+Territories use explicit sales territory IDs and campaign territory assignments;
+campaigns without a territory remain separate. Unassigned records are labelled.
+Up to 60 territory/campaign groups are detailed, with an explicit coverage notice
+if more exist; full scope totals still include all records. QR/page/farm attribution
+is to the owner, not a claim that an individual rep caused the engagement.
 
-No hosted migration, backend deployment, real OpenAI call or device installation is implied by local build/tests.
+## Permissions and privacy
 
-## Verification
+The server verifies the bearer session and workspace membership. The database
+independently enforces membership and derives the actor from auth.uid(). Self
+scope returns only the actor's records. Team scope requires owner/admin and
+includes current workspace members only. Downgrades are checked on every call.
 
-- `npx tsx --test lib/wolfy/__tests__/*.test.ts` (from backend): policy, malformed/hostile input, unavailable metrics, cache invalidation, bearer/membership checks, model contract, budget denial and provider fallback through mocked HTTP.
-- `PGLITE_MODULE=/tmp/wolfy-db-test/node_modules/@electric-sql/pglite/dist/index.js node supabase/tests/wolfy_coach.mjs`: PostgreSQL migration execution, owner scope, anonymous/foreign access, private tables, service-only atomic budget/cooldown/day rollover.
-- `npx tsc --noEmit --incremental false`: backend type check.
-- Build field `WolfGrid` iOS simulator target. Debug UI launch: `--wolfy-lab --wolfy-coach` (explicitly labelled fixture, no real account data).
+The SECURITY DEFINER projection is necessary because financial/pipeline tables
+have no direct authenticated read grants. Every source uses explicit workspace
+and actor/authorized-rep filtering; no client metric or user ID is trusted.
+No raw read grants or existing CRM RLS policies are broadened.
 
-### Local verification result (2026-09-15)
+Manager coaching receives aggregate rep performance, not team customer names,
+notes, phone/email/address, GPS paths, private messages or recordings. Self scope
+can identify up to ten of the user's priority leads, with name/status/due date and
+last-contact date. Notes and contact details are excluded. Current goals are the
+existing personal goals; lifetime stats remain private to self scope.
 
-Seven backend tests passed, PostgreSQL isolation/budget tests passed, and TypeScript passed. Field simulator build succeeded; a transient link error during concurrent live-canvassing edits cleared on rebuild. Installed and launched the explicit coach fixture on the dedicated iPhone 16e simulator. Light and dark/max Dynamic Type screenshots are in `art/wolfy/coach-review/`; text wraps in the scroll view and the composer stays available. A final privacy-copy correction was syntax-checked after the simulator build. Real authenticated data, production configuration, live provider quality and physical-device behavior remain unverified.
+Manager attention flags identify overdue work, hot opportunities without next
+steps and enough conversations with no new leads. Being below the daily target
+is labelled an open goal, not being behind an assumed hourly pace. Ranks use last
+seven complete days and share ranks for ties. Alerts are coaching prompts, not
+assertions about why a rep is struggling.
+
+## Grounded answers and cost
+
+`POST /api/wolfy/coach` accepts brief, chat or report mode, self/team scope and
+30/90/365 history days. Report mode makes no model call. Full reports expose every
+calculated KPI in the selected projection. The model receives a bounded selection
+of evidence matched to the question, named group and manager attention flags.
+
+The model selects `[[fact.id]]` references. The server validates IDs and inserts
+the exact metric label, value and period. Raw generated numbers, unknown references,
+links and common unsupported action claims are rejected. Evidence is returned with
+the answer. This prevents invented arithmetic; the advice still needs human judgment.
+The implementation follows the [OpenAI Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+The existing gpt-5-nano model is retained, store:false, minimal reasoning,
+1,600 output-token cap, no tools, no retries, 18-second provider timeout. Existing
+atomic quota remains 30 paid attempts/user/UTC day with a five-second cooldown.
+Brief caching includes scope, role, dates, history, coverage, labels and values.
+Cache/quota failures fall back to verified data. No chat transcript is persisted.
+Account, workspace, scope or history changes clear the conversation and invalidate
+late responses. Home briefs remain personal even while team chat is selected.
+
+## Activation and release
+
+This change is source-only until its database migration and API are released.
+Apply `20260916010000_wolfy_field_intelligence.sql` to the actual field database
+with the existing Home schema and coach cache/budget migration. Optional field
+Sales, pipeline, QR, landing-page and farm sources are detected and labelled
+unavailable if absent. Do not apply every pending migration from this dirty tree.
+
+Deploy the matching coach route and intelligence library to the backend referenced
+by the field iOS app, with its matching Supabase configuration and server-only
+OpenAI key. The route returns unavailable when the new projection is missing;
+it never substitutes another account/database or silently falls back to old data.
+Ship the iOS build for the new controls. Before production acceptance, compare
+real rep/manager KPIs against source records and verify a real provider response.
+
+## Local verification
+
+- `PGLITE_MODULE=/tmp/wolfy-intelligence-db/node_modules/@electric-sql/pglite/dist/index.js node supabase/tests/wolfy_field_intelligence.mjs`
+- Backend: `npx tsx --test lib/wolfy/__tests__/*.test.ts`
+- Backend: `npx tsc --noEmit --incremental false`
+- Build the field `WolfGrid` simulator target.
+- Debug-only visual entry: `--wolfy-lab --wolfy-kpis`. Fixture data is synthetic,
+  explicitly labelled, and generated by `lib/wolfy/__tests__/export-review.ts`.
+
+Hosted migrations, deployment, real-account data validation and a live provider
+response are separate from these local tests.
+
+### Verification result for this expansion
+
+16 backend tests, TypeScript checking and the PostgreSQL projection/isolation tests
+passed. The final field simulator build passed and the synthetic Team KPIs report
+installed/launched. Visual review covered light mode and dark mode at the largest
+Dynamic Type size; selector labels were changed to wrap. Review images are in
+`art/wolfy/field-intelligence/`.
+
+A concurrently introduced campaign-map UUID/String comparison blocked the final
+build. Its guard now parses the map ID as a UUID before comparing session scope.
+No map workflow was otherwise changed by this coaching task.
+
+No hosted migration, API deployment, live provider request or physical-device
+installation was performed in this expansion.
