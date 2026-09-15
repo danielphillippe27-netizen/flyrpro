@@ -1,5 +1,5 @@
 import {test}from'node:test';import assert from'node:assert/strict';
-import{analyze,fieldContextSchema,selectEvidence,groundedReply}from'../intelligence';import{fixture,user,rep,campaign}from'./field-fixture';
+import{analyze,fieldContextSchema,selectEvidence,groundedReply,fallbackReply,recoverGroundedReply}from'../intelligence';import{fixture,user,rep,campaign}from'./field-fixture';
 const find=(id:string)=>analyze(fixture()).facts.find(f=>f.id===id)!;
 test('today, complete-day comparisons and rates have distinct periods',()=>{
  assert.equal(find('scope.today.doors').value,'42');assert.equal(find('scope.last7.doors').value,'100');assert.equal(find('scope.previous7.doors').value,'50');
@@ -29,8 +29,8 @@ test('team includes inactive reps, equal ranks, alerts and territory attribution
 });
 test('grounded replies replace evidence tokens and preserve meaning labels',()=>{
  const a=analyze(fixture()),e=selectEvidence(a,'How many doors today?','chat');const f=e.find(f=>f.id==='scope.today.doors')!;
- const reply=groundedReply(JSON.stringify({message:`[[${f.id}]] Keep going in your current territory.`}),e,'chat');
- assert.match(reply.message,/Doors visited: 42 \(Today/);assert.equal(reply.evidence[0].id,f.id);
+ const reply=groundedReply(JSON.stringify({message:`You visited [[${f.id}]] doors today. Keep going in your current territory.`}),e,'chat');
+ assert.match(reply.message,/You visited 42 doors today/);assert.equal(reply.evidence[0].id,f.id);
  for(const message of ['You have 999 leads.','You have three leads.','[[scope.today.fake]] Keep going.','I credited your XP. [[scope.today.doors]]','Use https://bad.test [[scope.today.doors]]'])assert.throws(()=>groundedReply(JSON.stringify({message}),e,'chat'));
 });
 test('null denominators, source failure, unknown metric values fail safely',()=>{
@@ -53,4 +53,37 @@ test('territory ranking requires a denominator and retrieves the leaders evidenc
  assert.equal(a.facts.find(f=>f.id===`campaign_${campaign}.ranking.conversation_rank`)?.value,'1');
  const evidence=selectEvidence(a,'Which territory performs best?','chat');
  assert(evidence.some(f=>f.id===`campaign_${campaign}.last7.conversation_rate`));
+});
+
+test('overview selects activity and gives grounded coaching when AI fails',()=>{
+ const a=analyze(fixture());
+ const selected=selectEvidence(a,'How am I doing?','chat').slice(0,5);
+ assert(selected.some(f=>f.id==='scope.today.doors'));
+ assert(!selected.some(f=>f.id==='scope.current.cold_leads'));
+ const reply=fallbackReply(a,'How am I doing?','chat');
+ assert.match(reply.message,/Doors visited: 42/);
+ assert.match(reply.message,/target|pace/);
+ assert.match(reply.message,/Review/);
+ assert(reply.evidence.every(f=>f.value!==null));
+});
+test('offline overview does not invent unavailable activity or goals',()=>{
+ const a=analyze(fixture());a.facts=[];a.alerts=[];
+ const reply=fallbackReply(a,'How am I doing?','chat');
+ assert.match(reply.message,/not have enough goal context/);
+ assert.equal(reply.evidence.length,0);
+ assert.doesNotMatch(reply.message,/reached|behind pace|: 0/);
+});
+
+test('keeps useful AI advice without accepting an invented count',()=>{
+ const e=selectEvidence(analyze(fixture()),'How am I doing?','chat');
+ const r=recoverGroundedReply(JSON.stringify({message:'You made 999 sales. Review your overdue follow-ups before starting another session.'}),e,'chat');
+ assert.doesNotMatch(r.message,/999/);assert.match(r.message,/Review your overdue/);assert(r.evidence.length);
+ assert.throws(()=>recoverGroundedReply(JSON.stringify({message:'You made 999 sales.'}),e,'chat'));
+});
+
+test('natural prose uses separately verified fact IDs',()=>{
+ const e=selectEvidence(analyze(fixture()),'How am I doing?','chat');
+ const r=groundedReply(JSON.stringify({message:'You visited 42 doors today. Review your follow-ups next.',evidence_ids:['scope.today.doors']}),e,'chat');
+ assert.match(r.message,/42 doors/);assert.equal(r.evidence[0].id,'scope.today.doors');
+ assert.throws(()=>groundedReply(JSON.stringify({message:'You visited 999 doors today.',evidence_ids:['scope.today.doors']}),e,'chat'));
 });

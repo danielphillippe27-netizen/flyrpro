@@ -30,8 +30,8 @@ export function fingerprint(c: CoachContext) {
   return createHash('sha256').update('wolfy-coach-v1:' + JSON.stringify(facts)).digest('hex');
 }
 export const outputSchema = {
-  type: 'object', additionalProperties: false, required: ['message'],
-  properties: { message: { type: 'string' } },
+  type: 'object', additionalProperties: false, required: ['message', 'evidence_ids'],
+  properties: { message: { type: 'string' }, evidence_ids: { type: 'array', items: { type: 'string' } } },
 } as const;
 export function validateReply(raw: string): string {
   const { message } = z.object({ message: z.string().trim().min(10).max(900) }).strict().parse(JSON.parse(raw));

@@ -165,3 +165,23 @@ No map workflow was otherwise changed by this coaching task.
 - AI-generated coaching triggered response validation fallback during live tests. Verified-data responses remain available; successful AI-written coaching was not verified. Sensitive keys exported by Vercel are redacted, so an exported-key test cannot establish whether the actual configured key is valid.
 - No physical-device installation or App Store release was performed in this deployment.
 
+
+## AI response repair — 2026-09-15
+
+Released to wolfgrid.app as deployment dpl_GMaSfKDfq6MHicfDetpgBUEMQTDD.
+The provider was reachable, but the inline citation and numeric-word restrictions
+discarded usable responses. Coaching now uses GPT-4.1 mini with natural prose and
+separate evidence_ids. The server verifies referenced IDs and numerical values,
+retains full evidence metadata, and supports a bounded format repair within the
+same quota reservation. Cache failures do not prevent generation. Overview
+retrieval prioritizes recorded activity and goals; offline summaries include a
+next step instead of the first alphabetically sorted metrics.
+
+Validation: 20 coaching tests passed; backend TypeScript check passed; hosted
+production build passed. The broader web release tree has unrelated existing
+local type errors and is not claimed type-clean. Authenticated candidate checks
+returned AI-generated performance, follow-up and brief responses. After promotion,
+a direct authenticated POST to https://wolfgrid.app/api/wolfy/coach returned HTTP
+200, source=ai and reason=generated, referring to the synthetic account's lead,
+completed session and overdue reminder. Temporary test account/data were removed.
+No iOS binary change or device installation was required for this server fix.

@@ -235,6 +235,12 @@ export function selectEvidence(a:Analysis,question:string,mode:string):Fact[]{
   score+=f.id.includes('.today.')?6:f.id.includes('.current.')?8:0;
   if(/better|improv|trend|histor|compar|week|month/.test(q)&&/last7|previous7|last30|previous30|change/.test(f.id))score+=20;
   for(const term of terms)if(`${f.label} ${f.id}`.toLowerCase().includes(term))score+=15;
+  if(/how am i doing|performance|on pace|my week|doing today/.test(q)&&f.group==='scope'){
+   if(/\.today\.(doors|conversations|leads|verified_sales)$/.test(f.id))score+=65;
+   if(/\.current\.(daily_goal|daily_remaining|weekly_goal)$/.test(f.id))score+=60;
+   if(/\.(last7|previous7)\.(doors|conversations|leads)$/.test(f.id))score+=45;
+   if(alertIDs.has(f.id))score+=50;
+  }
   if(names.includes(f.group))score+=100;
   if(manager&&f.group.startsWith('rep_'))score+=20;
   if(manager&&alertIDs.has(f.id))score+=80;
@@ -250,17 +256,76 @@ export function selectEvidence(a:Analysis,question:string,mode:string):Fact[]{
  }).sort((a,b)=>b.score-a.score||a.f.id.localeCompare(b.f.id)).slice(0,mode==='brief'?35:160).map(x=>x.f);
 }
 export function groundedReply(raw:string,evidence:Fact[],mode:string){
- const {message}=z.object({message:z.string().trim().min(10).max(mode==='brief'?500:2400)}).strict().parse(JSON.parse(raw));
- const byID=new Map(evidence.map(f=>[f.id,f]));const used:Fact[]=[];
- // The model may select facts; only the server inserts a numerical claim and its full label/period.
+ const {message,evidence_ids=[]}=z.object({message:z.string().trim().min(10).max(mode==='brief'?500:2400),evidence_ids:z.array(z.string()).max(5).optional()}).strict().parse(JSON.parse(raw));
+ const byID=new Map(evidence.map(f=>[f.id,f]));const used:Fact[]=evidence_ids.map(id=>{const f=byID.get(id);if(!f)throw Error('Unknown evidence reference');return f;});
+ // Only the server inserts numerical values; full labels and periods remain in evidence.
  const text=message.replace(/\[\[([^\]]+)\]\]/g,(_,id:string)=>{
   const fact=byID.get(id);if(!fact)throw Error('Unknown evidence reference');used.push(fact);return '';
  });
- if(/\d|https?:|www\.|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|percent)\b/i.test(text))throw Error('Unverified numerical claim');
+ if(/https?:|www\./i.test(text))throw Error('Unverified link');
+ const numbers=(s:string)=>(s.replace(/,(?=\d{3}(?:\D|$))/g,'').match(/-?\d+(?:\.\d+)?/g)??[]).map(n=>String(Number(n)));
+ const allowed=new Set(used.flatMap(f=>numbers([f.value,f.display,f.period].join(' '))));
+ const words:Record<string,string>={zero:'0',one:'1',two:'2',three:'3',four:'4',five:'5',six:'6',seven:'7',eight:'8',nine:'9',ten:'10',hundred:'100',thousand:'1000'};
+ const claimed=[...numbers(text),...(text.toLowerCase().match(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand)\b/g)??[]).map(w=>words[w])];
+ if(claimed.some(n=>!allowed.has(n)))throw Error('Unverified numerical claim');
  if(/\b(?:awarded|credited|purchased|equipped|deducted|updated your|changed your|saved your)\b/i.test(text))throw Error('Unsupported action claim');
  if(!used.length)throw Error('Missing evidence');
  const rendered=message.replace(/\[\[([^\]]+)\]\]/g,(_,id:string)=>{
-  const f=byID.get(id)!;return `${f.label}: ${f.display} (${f.period})`;
+  const f=byID.get(id)!;return f.display;
  });
  return {message:rendered,evidence:[...new Map(used.map(f=>[f.id,f])).values()]};
+}
+
+/** Offline summaries use verified facts and never claim a snapshot proves a trend. */
+export function fallbackReply(a:Analysis,question:string,mode:string) {
+ const evidence:Fact[]=[];
+ const get=(id:string)=>a.facts.find(f=>f.id===id&&f.value!==null);
+ const cite=(f:Fact)=>{evidence.push(f);return `${f.label}: ${f.display} (${f.period})`;};
+ const overview=/how am i doing|performance|on pace|my week|doing today/i.test(question);
+ const parts:string[]=[];
+ if(overview){
+  const period=/week/i.test(question)?'last7':'today';
+  const activity=['doors','conversations','leads'].map(k=>get('scope.'+period+'.'+k)).filter((f):f is Fact=>!!f);
+  if(activity.length)parts.push('Your recorded activity: '+activity.map(cite).join('; ')+'.');
+  const remaining=get('scope.current.daily_remaining');
+  if(remaining&&period==='today'){
+   parts.push(cite(remaining)+'. '+(Number(remaining.value)>0?'Your daily target is still open. Without your working schedule, I cannot judge whether you are behind pace.':'You have reached your daily door target.'));
+  }else parts.push('I do not have enough goal context to judge your pace.');
+ }
+ const priority=a.alerts.find(x=>x.group==='scope'&&x.severity>=30);
+ const fact=priority?.fact_ids.map(get).find((f):f is Fact=>!!f);
+ if((overview||/next|follow|overdue/i.test(question))&&fact){
+  parts.push(cite(fact)+'. '+(/qualification/i.test(priority!.reason)?'Review recent conversations and your qualifying questions before your next session.':'Review these records and choose the most urgent next step before starting another session.'));
+ }else if(overview){
+  const hot=get('scope.current.hot_leads');
+  if(hot&&Number(hot.value)>0)parts.push(cite(hot)+'. Review your hot leads and agree on a clear next step with each interested contact.');
+  else parts.push('Review your follow-ups, then choose a campaign and a door goal for your next session.');
+ }
+ if(!parts.length){
+  const selected=selectEvidence(a,question,mode).slice(0,mode==='brief'?1:2);
+  parts.push(selected.length?'Available context: '+selected.map(cite).join('; ')+'.':'There is not enough synced data to answer this yet.');
+  parts.push('AI coaching is temporarily unavailable, so I cannot give a tailored answer to this question. Please retry.');
+ }
+ return {message:parts.join('\n\n'),evidence:[...new Map(evidence.map(f=>[f.id,f])).values()]};
+}
+
+
+/** Keep complete, grounded advice when the model redundantly writes a count. */
+export function recoverGroundedReply(raw:string,evidence:Fact[],mode:string) {
+ const parsed=z.object({message:z.string().trim().min(10).max(2400),evidence_ids:z.array(z.string()).optional()}).strict().parse(JSON.parse(raw));
+ const tokens:string[]=[];
+ // Protect dots and digits inside verified references while splitting prose.
+ const protectedText=parsed.message.replace(/\[\[([^\]]+)\]\]/g,(token,id:string)=>{
+  if(!evidence.some(f=>f.id===id))throw Error('Unknown evidence reference');
+  tokens.push(token);return String.fromCharCode(0xE000+tokens.length-1);
+ });
+ const unsafe=/\d|https?:|www\.|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|percent|awarded|credited|purchased|equipped|deducted|updated your|changed your|saved your)\b/i;
+ const safe=protectedText.split(/(?<=[.!?])\s+|\n+/).filter(sentence=>!unsafe.test(sentence)).join(' ').trim();
+ if(safe.replace(/[\uE000-\uF8FF]/g,'').replace(/[^a-z]/gi,'').length<20)throw Error('No verified advice');
+ let message=safe.replace(/[\uE000-\uF8FF]/g,char=>tokens[char.charCodeAt(0)-0xE000]);
+ if(!message.includes('[[')){
+  if(!evidence.length)throw Error('Missing evidence');
+  message=`${evidence[0].label}: [[${evidence[0].id}]]. ${message}`;
+ }
+ return groundedReply(JSON.stringify({message}),evidence,mode);
 }
