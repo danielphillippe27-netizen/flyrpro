@@ -154,5 +154,14 @@ A concurrently introduced campaign-map UUID/String comparison blocked the final
 build. Its guard now parses the map ID as a UUID before comparing session scope.
 No map workflow was otherwise changed by this coaching task.
 
-No hosted migration, API deployment, live provider request or physical-device
-installation was performed in this expansion.
+## Production deployment — 2026-09-15
+
+- Field API: https://wolfgrid.app (Vercel project `flyrpro`).
+- Production deployment: `dpl_xNjKnPdeGku7thh1U7PstAY8s7jB`, release source `02ad4ed1c` on `codex/wolfy-field-intelligence-release`.
+- Database: field project `kfnsnwqylsdsbgnwgxva`; migration `20260916010000_wolfy_field_intelligence` applied and recorded. The separate Sales database was not changed.
+- Release was based on the previous live production commit, preserving unrelated website work.
+- Passed: 16 backend tests, scoped TypeScript check, PostgreSQL projection/isolation regression tests, and Vercel production build.
+- Authenticated production smoke test: four event-based doors, two conversations, one lead, 50% conversation rate, 50% lead-per-conversation rate. Session-reported doors remain separately labelled. Personal and manager reports returned HTTP 200; member team requests returned 403; anonymous requests returned 401.
+- AI-generated coaching triggered response validation fallback during live tests. Verified-data responses remain available; successful AI-written coaching was not verified. Sensitive keys exported by Vercel are redacted, so an exported-key test cannot establish whether the actual configured key is valid.
+- No physical-device installation or App Store release was performed in this deployment.
+
