@@ -427,9 +427,9 @@ function SalesDashboardContent({
             value={visibleRanking}
             onChange={(e) => setRanking(e.target.value)}
           >
-            <option value="sales">Sales</option>
+            <option value="sales">Sales · Beta</option>
             {d.ranking.some((r) => r.revenue_minor !== undefined) && (
-              <option value="revenue">Revenue</option>
+              <option value="revenue">Revenue · Beta</option>
             )}
           </select>
         </label>
@@ -449,7 +449,7 @@ function SalesDashboardContent({
       {!leaderboardOnly && (
         <>
           <section>
-            <h2 className="font-semibold">Recent team wins</h2>
+            <h2 className="font-semibold">Recent team wins · Beta</h2>
             {d.feed.map((f) => (
               <p key={f.id} className="py-2">
                 {f.rep_name} recorded a verified sale · {f.sold_on}
@@ -461,7 +461,7 @@ function SalesDashboardContent({
           </section>
           {managers && (
             <details>
-              <summary>Sales settings</summary>
+              <summary>Sales settings · Beta</summary>
               <SalesSettings d={d} workspace={workspaceId!} />
             </details>
           )}
