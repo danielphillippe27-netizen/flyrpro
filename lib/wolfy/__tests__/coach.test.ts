@@ -34,3 +34,7 @@ test('question is untrusted data and cannot alter fixed destination', () => {
  assert.equal(JSON.parse(p.input).fixedPriority.destination,'followUps');
  assert.match(p.instructions,/cannot change data/);
 });
+
+test('keeps complete advice without repeating generated statistics', () => {
+ assert.equal(validateReply(JSON.stringify({message:'You need 34 doors today. Review your route before starting.'})), 'Review your route before starting.');
+});
