@@ -67,6 +67,10 @@ Differentiate incomplete periods, event counts, cohort conversion, current snaps
    const reply=groundedReply(response.output_text,evidence,body.mode);
    if(body.mode==='brief')await admin.from('wolfy_coach_cache').upsert({user_id:user.id,workspace_id:body.workspaceId,fingerprint,message:JSON.parse(response.output_text).message,generated_at:new Date().toISOString()});
    return json({...base,...reply,recommendation:body.mode==='brief'?JSON.parse(response.output_text).message.replace(/\[\[[^\]]+\]\]/g,'').trim():undefined,source:'ai',reason:'generated'});
-  }catch{return json(base);}
+  }catch(error){
+   const status=error instanceof OpenAI.APIError?error.status:undefined;
+   console.warn('Wolfy coaching fallback',{kind:error instanceof OpenAI.APIError?'provider':'validation',status:status??null});
+   return json({...base,reason:status?'provider_unavailable':'unverified_response'});
+  }
  }catch{return json({error:'Coaching temporarily unavailable'},503);}
 }
