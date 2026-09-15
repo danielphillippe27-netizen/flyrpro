@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as turf from '@turf/turf';
+import RBush from 'rbush';
 import {
   prebuildCampaignMapBundle,
   readCurrentCampaignMapBundle,
@@ -10,8 +11,9 @@ import { CampaignLinkQualityService } from './CampaignLinkQualityService';
 import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
+import { buildingIdentifiers, isAccessoryBuilding, planParcelPinPlacements, mapWithConcurrency } from './ParcelPinPlacement';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v19-global-rooftop-convergence';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v20-global-parcel-first';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -476,7 +478,12 @@ export function createParcelIdentityResolver(
     }
   }).sort((left, right) => left.area - right.area || left.id.localeCompare(right.id));
 
+  const tree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; candidate: typeof indexed[number] }>();
+  tree.load(indexed.map(candidate => ({ minX: candidate.bbox[0], minY: candidate.bbox[1],
+    maxX: candidate.bbox[2], maxY: candidate.bbox[3], candidate })));
+  const cache = new WeakMap<BundleFeature, string | null>();
   return (feature: BundleFeature): string | null => {
+    if (cache.has(feature)) return cache.get(feature) ?? null;
     const explicit = parcelId(feature);
     if (explicit) return explicit;
     try {
@@ -484,13 +491,16 @@ export function createParcelIdentityResolver(
         ? feature as GeoJSON.Feature<GeoJSON.Point>
         : turf.pointOnFeature(feature as GeoJSON.Feature);
       const [longitude, latitude] = anchor.geometry.coordinates;
-      for (const candidate of indexed) {
+      const nearby = tree.search({ minX: longitude, maxX: longitude, minY: latitude, maxY: latitude })
+        .map(item => item.candidate).sort((a, b) => a.area - b.area || a.id.localeCompare(b.id));
+      for (const candidate of nearby) {
         const [minLongitude, minLatitude, maxLongitude, maxLatitude] = candidate.bbox;
         if (
           longitude < minLongitude || longitude > maxLongitude ||
           latitude < minLatitude || latitude > maxLatitude
         ) continue;
         if (turf.booleanPointInPolygon(anchor, candidate.parcel as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>)) {
+          cache.set(feature, candidate.id);
           return candidate.id;
         }
       }
@@ -498,6 +508,7 @@ export function createParcelIdentityResolver(
       // Invalid geometry remains parcel-less and therefore cannot gain parcel
       // authority from an unreliable spatial inference.
     }
+    cache.set(feature, null);
     return null;
   };
 }
@@ -824,6 +835,7 @@ export function buildingHasAuthoritativeMultiUnitMetadata(building: BundleFeatur
 }
 
 function isExplicitNonResidentialBuilding(building: BundleFeature): boolean {
+  if (isAccessoryBuilding(building)) return true;
   const properties = asRecord(building.properties);
   const type = normalizeText(
     properties.subtype ??
@@ -2104,7 +2116,7 @@ export class CampaignMapReconciliationService {
       ),
     });
     if (reverseGeocodingIssue) {
-      throw new Error(`Map reconciliation reverse geocoding is not configured: ${reverseGeocodingIssue}`);
+      console.warn(`[MapReconciliation] Parcel pass only: ${reverseGeocodingIssue}`);
     }
     const decisions = await this.globalReverseGeocodeDecisions({
       run: input.run,
@@ -2235,12 +2247,14 @@ export class CampaignMapReconciliationService {
         : 100;
     }
 
+    const needsConfigurationReview = Boolean(reverseGeocodingIssue && input.report.unresolved_buildings > 0);
+    const completionStatus = needsConfigurationReview || input.report.review_needed > 0 ? 'review_needed' : 'completed';
     const completedAt = new Date().toISOString();
     await this.supabase
       .from('map_reconciliation_runs')
       .update({
-        status: 'completed',
-        phase: 'completed',
+        status: completionStatus,
+        phase: completionStatus,
         after_metrics: {
           address_orphans: input.report.address_orphans_after,
           building_orphans: input.report.building_orphans_after,
@@ -2252,7 +2266,7 @@ export class CampaignMapReconciliationService {
           coverage_percent: input.report.coverage_before,
         },
         report: input.report,
-        error_message: null,
+        error_message: needsConfigurationReview ? reverseGeocodingIssue : null,
         lease_owner: null,
         lease_expires_at: null,
         completed_at: completedAt,
@@ -2422,12 +2436,11 @@ export class CampaignMapReconciliationService {
     protectedAddressIds: Set<string>;
     protectedBuildingIds: Set<string>;
   }): Promise<ReconciliationDecision[]> {
-    if (process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE !== 'true') return [];
-    const maxGeocodes = configuredMaxReverseGeocodes(
+    const reverseEnabled = process.env.MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE === 'true';
+    const maxGeocodes = reverseEnabled ? configuredMaxReverseGeocodes(
       process.env.MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN,
       1000
-    );
-    if (maxGeocodes === 0) return [];
+    ) : 0;
 
     const resolveParcelId = createParcelIdentityResolver(input.parcels);
     const addressesById = new Map<string, BundleFeature>();
@@ -2496,6 +2509,50 @@ export class CampaignMapReconciliationService {
       }
     }
 
+    const buildingsByAlias = new Map<string, BundleFeature>();
+    for (const building of input.buildings) {
+      for (const alias of buildingIdentifiers(building)) buildingsByAlias.set(alias, building);
+    }
+    const placementAddresses = input.addresses.map(address => {
+      const id = addressId(address)?.toLowerCase() ?? '';
+      const current = currentLinkByAddress.get(id);
+      return { ...address, properties: { ...address.properties,
+        ...(current ? { building_gers_id: current.building_id ?? current.buildingId } : {}),
+      } };
+    });
+    const parcelPlacements = planParcelPinPlacements({
+      addresses: placementAddresses, buildings: input.buildings, parcels: input.parcels,
+      protectedAddressIds: input.protectedAddressIds,
+    });
+    const parcelDecisions: ReconciliationDecision[] = parcelPlacements.flatMap(placement => {
+      if (!placement.buildingId || currentLinkByAddress.has(placement.addressId) ||
+          input.protectedBuildingIds.has(placement.buildingId)) return [];
+      const beforeState = { link: null, address_id: placement.addressId };
+      return [{
+        id: decisionId(input.run.id, 'link_address', placement.addressId, placement.buildingId),
+        run_id: input.run.id, campaign_id: input.run.campaign_id,
+        action: 'link_address', status: 'proposed', address_id: placement.addressId,
+        building_id: placement.buildingId, secondary_building_id: null,
+        unit_id: null, parent_building_id: null, unit_index: null, address_identity: null,
+        split_signature: null, evidence_codes: ['authoritative_parcel', 'unique_eligible_building', 'preserve_source_coordinates'],
+        score: 0.995, runner_up_margin: 1, precondition_hash: stableHash(beforeState), before_state: beforeState,
+        proposed_state: { building_id: placement.buildingId, move_source: false },
+      } satisfies ReconciliationDecision];
+    });
+    const establishedHomesByParcel = new Map<string, Set<string>>();
+    for (const [addressKey, link] of currentLinkByAddress) {
+      const linkedId = stringValue(link.building_id ?? link.buildingId)?.toLowerCase();
+      const building = linkedId ? buildingsByAlias.get(linkedId) : null;
+      if (!building || isAccessoryBuilding(building) || !addressesById.has(addressKey)) continue;
+      const parcel = resolveParcelId(building)?.toLowerCase();
+      if (!parcel) continue;
+      const group = establishedHomesByParcel.get(parcel) ?? new Set<string>();
+      buildingIdentifiers(building).forEach(id => group.add(id));
+      establishedHomesByParcel.set(parcel, group);
+    }
+    const parcelResolvedBuildings = new Set(parcelPlacements.flatMap(p => p.buildingId ? [p.buildingId] : []));
+    const parcelResolvedAddresses = new Set(parcelPlacements.map(p => p.addressId));
+
     const geocoded: Array<{
       building: BundleFeature;
       buildingId: string;
@@ -2508,7 +2565,11 @@ export class CampaignMapReconciliationService {
     const orderedBuildings = input.buildings
       .filter((building) => {
         const id = featureId(building)?.toLowerCase();
-        if (!id || isExplicitNonResidentialBuilding(building)) return false;
+        if (!id || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
+            input.protectedBuildingIds.has(id) || buildingIdentifiers(building).some(alias => parcelResolvedBuildings.has(alias))) return false;
+        const parcel = resolveParcelId(building)?.toLowerCase();
+        const establishedHomes = parcel ? establishedHomesByParcel.get(parcel) : null;
+        if (establishedHomes && !buildingIdentifiers(building).some(alias => establishedHomes.has(alias))) return false;
         return shouldReverseGeocodeBuilding(
           input.linkedBuildingIds.has(id),
           input.orphanBuildingIds.has(id),
@@ -2516,44 +2577,45 @@ export class CampaignMapReconciliationService {
         );
       })
       .sort((left, right) => (featureId(left) ?? '').localeCompare(featureId(right) ?? ''));
-    for (const building of orderedBuildings.slice(0, maxGeocodes)) {
-      const buildingIdValue = featureId(building);
-      if (!buildingIdValue) continue;
-      try {
-        const anchor = turf.pointOnFeature(building as GeoJSON.Feature).geometry.coordinates as Point;
-        const result = await this.reverseGeocode(anchor);
-        if (!result || !result.houseNumber || !result.streetName) continue;
-        const spatialDistance = pointToGeometryDistanceMeters(
-          [result.longitude, result.latitude],
-          building.geometry
-        );
-        if (!Number.isFinite(spatialDistance) || spatialDistance > 12) continue;
-        geocoded.push({
-          building,
-          buildingId: buildingIdValue,
-          anchor,
-          result,
-          spatialDistance,
-          strong: result.accuracy === 'rooftop' || result.accuracy === 'parcel',
-          // Existing canonical links are authoritative evidence too. Some row
-          // homes and multi-address footprints do not carry reliable unit
-          // metadata, so treating only metadata as capacity evidence allowed a
-          // reverse-geocode pass to collapse their sibling address links.
-          multipleAddressesAllowed: buildingAllowsMultipleCivicAddresses(
+    const reverseCandidates = orderedBuildings.slice(0, maxGeocodes);
+    for (let offset = 0; offset < reverseCandidates.length; offset += 24) {
+      const reverseResults = await mapWithConcurrency(reverseCandidates.slice(offset, offset + 24), 6, async (building) => {
+        const buildingIdValue = featureId(building);
+        if (!buildingIdValue) return null;
+        try {
+          const anchor = turf.pointOnFeature(building as GeoJSON.Feature).geometry.coordinates as Point;
+          const result = await this.reverseGeocode(anchor);
+          if (!result || !result.houseNumber || !result.streetName) return null;
+          const spatialDistance = pointToGeometryDistanceMeters(
+            [result.longitude, result.latitude],
+            building.geometry
+          );
+          if (!Number.isFinite(spatialDistance) || spatialDistance > 12) return null;
+          return {
             building,
-            currentAddressIdsByBuilding.get(buildingIdValue.toLowerCase())?.length ?? 0
-          ),
-        });
-        if (geocoded.length === 1 || geocoded.length % 10 === 0) {
-          await this.heartbeatRun(input.run.id, {
-            phase: 'geocoding',
-            building_index: geocoded.length,
-            building_count: orderedBuildings.length,
-          });
+            buildingId: buildingIdValue,
+            anchor,
+            result,
+            spatialDistance,
+            strong: result.accuracy === 'rooftop' || result.accuracy === 'parcel',
+            // Existing canonical links are authoritative evidence too. Some row
+            // homes and multi-address footprints do not carry reliable unit
+            // metadata, so treating only metadata as capacity evidence allowed a
+            // reverse-geocode pass to collapse their sibling address links.
+            multipleAddressesAllowed: buildingAllowsMultipleCivicAddresses(
+              building,
+              currentAddressIdsByBuilding.get(buildingIdValue.toLowerCase())?.length ?? 0
+            ),
+          };
+        } catch {
+          // Invalid geometry or a provider miss remains visible for review.
+          return null;
         }
-      } catch {
-        // Invalid geometry or a provider miss remains visible for review.
-      }
+      });
+      for (const result of reverseResults) if (result) geocoded.push(result);
+      await this.heartbeatRun(input.run.id, {
+        phase: 'geocoding', building_index: offset + reverseResults.length, building_count: reverseCandidates.length,
+      });
     }
 
     const reverseIdentityCounts = new Map<string, number>();
@@ -2681,7 +2743,16 @@ export class CampaignMapReconciliationService {
       for (const address of contextMatches) {
         const addressIdValue = addressId(address);
         if (!addressIdValue || input.protectedAddressIds.has(addressIdValue.toLowerCase())) continue;
+        if (parcelResolvedAddresses.has(addressIdValue.toLowerCase())) continue;
         const currentLink = currentLinkByAddress.get(addressIdValue.toLowerCase());
+        const existingBuildingId = stringValue(currentLink?.building_id ?? currentLink?.buildingId)?.toLowerCase();
+        const existingBuilding = existingBuildingId ? buildingsByAlias.get(existingBuildingId) : null;
+        if (existingBuilding && existingBuildingId !== buildingKey && !isAccessoryBuilding(existingBuilding)) {
+          const existingParcel = resolveParcelId(existingBuilding)?.toLowerCase();
+          // A garage with missing metadata must not steal an established home
+          // address merely because reverse geocoding returns the same civic ID.
+          if (existingParcel && existingParcel === buildingParcelId) continue;
+        }
         if (
           currentLink &&
           !canAutoReassignAddressFromReverseGeocode(
@@ -2856,6 +2927,7 @@ export class CampaignMapReconciliationService {
     });
 
     return [
+      ...parcelDecisions,
       ...assignmentDecisions,
       ...safeSyntheticDecisions,
       ...reviewDecisions,
@@ -3350,7 +3422,7 @@ export class CampaignMapReconciliationService {
     url.searchParams.set('limit', '1');
     url.searchParams.set('permanent', permanent ? 'true' : 'false');
     url.searchParams.set('access_token', token);
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`Mapbox reverse geocode failed: ${response.status}`);
     const payload = await response.json() as JsonRecord;
     const parsed = this.parseReverseResult(cacheKey, payload);
