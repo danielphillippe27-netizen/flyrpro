@@ -7,10 +7,11 @@ create function auth.uid() returns uuid language sql as $$select nullif(current_
 create table auth.users(id uuid primary key);create table workspaces(id uuid primary key);create table workspace_members(workspace_id uuid,user_id uuid);
 create table campaigns(id uuid primary key,workspace_id uuid,scans int default 0);
 create table campaign_addresses(id uuid primary key,campaign_id uuid,scans int default 0,status text default 'hot');
-create table contacts(id uuid primary key default gen_random_uuid(),user_id uuid,workspace_id uuid,full_name text,phone text,email text,status text,source text,notes text,created_at timestamptz default now());
+create table contacts(id uuid primary key default gen_random_uuid(),user_id uuid,workspace_id uuid,full_name text,address text not null,phone text,email text,status text,source text,notes text,created_at timestamptz default now());
 insert into auth.users values('${id(1)}'),('${id(2)}');insert into workspaces values('${id(10)}'),('${id(11)}');insert into workspace_members values('${id(10)}','${id(1)}'),('${id(11)}','${id(2)}');
 insert into campaigns values('${id(20)}','${id(10)}',0);insert into campaign_addresses(id,campaign_id) values('${id(30)}','${id(20)}'),('${id(31)}','${id(20)}');`);
 await db.exec(await readFile(new URL('../supabase/migrations/20260918140000_business_cards.sql',import.meta.url),'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20260918210000_business_card_referral_address.sql',import.meta.url),'utf8'));
 await db.exec(`insert into card_workspace_features values('${id(10)}',true);insert into card_profiles(id,workspace_id,rep_id,published) values('${id(40)}','${id(10)}','${id(1)}',true);
 insert into card_shares(id,token,profile_id,workspace_id,rep_id,campaign_id,address_id,building_id,idempotency_key) values('${id(50)}',repeat('a',48),'${id(40)}','${id(10)}','${id(1)}','${id(20)}','${id(30)}','building-a','${id(51)}');`);
 const event=async(visit,type='qualified_open',key='open',share=50)=>db.query('select card_record_event($1,$2,$3,$4)',[id(share),id(visit),key,type]);
