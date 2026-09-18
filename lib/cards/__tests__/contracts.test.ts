@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { cardContentSchema,isPreview,vcard,cardMessage } from '../contracts';
+const card=cardContentSchema.parse({name:'Daniel',phone:'+12896752788',socials:[{platform:'Instagram',url:'https://instagram.com/example'}]});
+assert(isPreview('facebookexternalhit/1.1'));
+assert(isPreview('Slackbot-LinkExpanding'));
+assert(!isPreview('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile Safari/604.1'));
+for(const url of ['javascript:alert(1)','http://example.com','https://user:password@example.com'])assert(!cardContentSchema.safeParse({...card,socials:[{platform:'Instagram',url}]}).success);
+assert(!cardContentSchema.safeParse({...card,socials:[...card.socials,...card.socials]}).success);
+assert.equal(vcard({...card,name:'A\nB;C,D'}).includes('FN:A\\nB\\;C\\,D'),true);
+assert(cardMessage('Sarah Smith',card.phone,'https://wolfgrid.app/c/token').startsWith('Hey Sarah,'));
+assert(!cardMessage('Sarah','', 'url').includes('got it'));
+assert(!cardMessage('Sarah','', 'url').includes('directly at'));
+console.log('Business card content, URL, preview, message, and vCard contracts passed');
