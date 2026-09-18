@@ -1,4 +1,6 @@
 "use client";
+import { ProSalesDashboard } from "./ProSalesDashboard";
+import { ProSalesLeaderboard } from "./ProSalesLeaderboard";
 import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -32,6 +34,8 @@ export function SalesDashboard({
           : "Sales is not enabled for this workspace."}
       </p>
     );
+  if (leaderboardOnly && scope.data.pro_sales_version) return <ProSalesLeaderboard/>;
+  if (scope.data.pro_sales_version && scope.data.currency && scope.data.timezone && !scope.data.needs_setup) return <ProSalesDashboard key={`${scope.workspaceId}:${scope.data.user_id}`} workspace={scope.workspaceId!} settings={scope.data.role === "owner" || scope.data.role === "admin" ? <SalesSettings d={scope.data} workspace={scope.workspaceId!} /> : undefined} />;
   return (
     <SalesDashboardContent
       key={`${scope.workspaceId}:${scope.data.user_id}`}
@@ -123,6 +127,7 @@ function SalesDashboardContent({
       <Link className="underline" href="/sales/opportunities">
         Pipeline & follow-ups · Beta →
       </Link>
+      {d.pro_sales_version ? <><Link className="ml-4 underline" href="/sales/reports">Performance reports →</Link><Link className="ml-4 underline" href="/sales/goals">Goals & pace →</Link></> : null}
       <header className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">
@@ -142,7 +147,7 @@ function SalesDashboardContent({
               setRecording(true);
             }}
           >
-            Record Sale · Beta
+            Convert appointment · Beta
           </button>
         )}
       </header>
@@ -367,6 +372,7 @@ function SalesDashboardContent({
                       version={s.version}
                     />
                   )}
+                  {d.pro_sales_version && (managers || s.contact_id) && <Link className="mt-2 inline-block text-sm underline" href={`/sales/${s.id}`}>Sale details & payments</Link>}
                   {s.cancellation_reason && (
                     <p>Reason: {s.cancellation_reason}</p>
                   )}
@@ -418,7 +424,7 @@ function SalesDashboardContent({
           </section>
         </>
       )}
-      <section className="rounded-xl border p-4 space-y-3">
+      {d.pro_sales_version ? <ProSalesLeaderboard embedded/> : <section className="rounded-xl border p-4 space-y-3">
         <h2 className="font-semibold">Team leaderboard · Beta</h2>
         <label>
           Category
@@ -445,7 +451,7 @@ function SalesDashboardContent({
             </strong>
           </div>
         ))}
-      </section>
+      </section>}
       {!leaderboardOnly && (
         <>
           <section>
@@ -670,7 +676,7 @@ function SaleEditor({
       <h2 className="font-semibold">
         {initial?.id && initial.status !== "replacement"
           ? "Edit pending sale"
-          : "Record Sale"}
+          : "Convert appointment"}
       </h2>
       <label>
         Existing lead
@@ -702,6 +708,7 @@ function SaleEditor({
       <label>
         Representative
         <select
+          required
           className={input}
           disabled={d.role === "member"}
           value={rep}
@@ -715,13 +722,13 @@ function SaleEditor({
         </select>
       </label>
       <label>
-        Linked appointment (optional)
+        Appointment (required)
         <select
           className={input}
           value={appointment}
           onChange={(e) => setAppointment(e.target.value)}
         >
-          <option value="">No linked appointment</option>
+          <option value="">Select appointment</option>
           {d.options.appointments
             .filter((a) => a.contact_id === contact)
             .map((a) => (
@@ -769,7 +776,7 @@ function SaleEditor({
           {error}
         </p>
       )}
-      <button className={button} disabled={busy}>
+      <button className={button} disabled={busy || !appointment}>
         Save sale
       </button>{" "}
       <button type="button" onClick={close} disabled={busy}>

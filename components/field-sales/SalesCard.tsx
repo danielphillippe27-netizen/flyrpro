@@ -1,9 +1,11 @@
 "use client";
 import Link from "next/link";
+import { ProSalesHome } from "./ProSalesHome";
 import { useFieldSales, money } from "@/lib/field-sales/client";
 export function SalesCard() {
   const scope = useFieldSales({}, true);
   if (!scope.data?.enabled) return null;
+  if (scope.data.pro_sales_version) return <ProSalesHome key={`${scope.workspaceId}:${scope.data.user_id}`} />;
   return (
     <SalesCardContent key={`${scope.workspaceId}:${scope.data.user_id}`} />
   );
@@ -66,14 +68,19 @@ function SalesCardContent() {
     </section>
   );
 }
-export function RecordSaleLink({ contactId }: { contactId: string }) {
+export function RecordSaleLink({ contactId, campaignId, appointmentId, propertyKey }: { contactId?: string; campaignId?: string; appointmentId?: string; propertyKey?: string }) {
+  const query = new URLSearchParams();
+  if (contactId) query.set("lead", contactId);
+  if (campaignId) query.set("campaign", campaignId);
+  if (appointmentId) query.set("appointment", appointmentId);
+  if (propertyKey) query.set("property", propertyKey);
   const { data } = useFieldSales({}, true);
-  return data?.enabled ? (
+  return data?.enabled && appointmentId ? (
     <Link
       className="inline-flex rounded-lg border px-4 py-2 text-sm font-medium"
-      href={`/sales?lead=${encodeURIComponent(contactId)}`}
+      href={`/sales?${query.toString()}`}
     >
-      Record Sale · Beta
+      Convert to sale
     </Link>
   ) : null;
 }

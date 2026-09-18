@@ -23,6 +23,7 @@ type Opportunity = {
   expected_close?: string;
   notes: string;
   version: number;
+  loss_reason?: string; loss_note?: string; stalled?: boolean;
 };
 type Task = {
   id: string;
@@ -41,6 +42,10 @@ type Workbench = {
   role: string;
   currency: string;
   timezone: string;
+  scope?: string; money_visible?: boolean;
+  task_leads?: {id:string;name:string}[];
+  losses?: {reason:string;count:number;percent:string}[];
+  open_pipeline?: {count:number;value_minor?:string;missing_values:number;stalled:number};
   stages: Stage[];
   opportunities: Opportunity[];
   tasks: Task[];
@@ -78,6 +83,7 @@ function WorkbenchContent() {
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const [taskFilter, setTaskFilter] = useState("pending");
+  const [pipelineFilter, setPipelineFilter] = useState("all");
   async function command(action: string, data: Record<string, unknown>) {
     if (!workspaceId) return;
     setFailure("");
@@ -119,9 +125,9 @@ function WorkbenchContent() {
         </p>
       </header>
       <section className="space-y-3">
-        <h2 className="font-semibold">Team pipeline · Beta</h2>
+        <h2 className="font-semibold">{d.scope === "self" ? "My pipeline" : "Workspace pipeline"}</h2>
         <div className="flex gap-3 overflow-x-auto">
-          {d.summary.map((s) => (
+          {d.summary.filter(s=>s.count>0).map((s) => (
             <div key={s.key} className="min-w-40 rounded-xl border p-3">
               <h3>{s.label}</h3>
               <strong>{s.count} opportunities</strong>
@@ -140,6 +146,9 @@ function WorkbenchContent() {
           ))}
         </div>
       </section>
+      {d.open_pipeline && <section className="rounded-xl border p-4"><h2 className="font-semibold">Open pipeline</h2><p>{d.open_pipeline.count} opportunities{d.open_pipeline.value_minor !== undefined ? ` · ${money(d.open_pipeline.value_minor,d.currency)} potential value` : ""}</p><p className="text-sm">{d.open_pipeline.stalled} unchanged for 72 hours · {d.open_pipeline.missing_values} missing values</p></section>}
+      {!!d.losses?.length && <section><h2 className="font-semibold">Current lost opportunities</h2><div className="flex flex-wrap gap-3">{d.losses.map(l=><button className={button} key={l.reason} onClick={()=>setPipelineFilter(`loss:${l.reason}`)}>{l.reason.replaceAll("_"," ")} · {l.count} ({l.percent}%)</button>)}</div></section>}
+      <label>Inspect opportunities<select className={input} value={pipelineFilter} onChange={e=>setPipelineFilter(e.target.value)}><option value="all">All opportunities</option><option value="stalled">Unchanged for 72 hours</option>{d.losses?.map(l=><option key={l.reason} value={`loss:${l.reason}`}>Lost: {l.reason.replaceAll("_"," ")}</option>)}</select></label>
       <div className="flex gap-3">
         <button
           className={button}
@@ -188,22 +197,24 @@ function WorkbenchContent() {
         />
       )}
       <section>
-        <h2 className="font-semibold mb-3">My opportunities · Beta</h2>
+        <h2 className="font-semibold mb-3">{d.scope === "self" ? "My opportunities" : "Workspace opportunities"}</h2>
         <div className="grid md:grid-cols-3 gap-4">
-          {d.stages.map((stage) => (
+          {d.stages.filter(stage=>d.opportunities.some(o=>o.stage_key===stage.key)).map((stage) => (
             <section
               className="rounded-xl border p-3 space-y-3"
               key={stage.key}
             >
               <h3 className="font-semibold">{stage.label}</h3>
               {d.opportunities
-                .filter((o) => o.stage_key === stage.key)
+                .filter((o) => o.stage_key === stage.key && (pipelineFilter === "all" || (pipelineFilter === "stalled" ? o.stalled : `loss:${o.loss_reason ?? "unspecified"}` === pipelineFilter && stage.kind === "lost")))
                 .map((o) => (
                   <article
                     className="rounded-lg bg-muted p-3 space-y-2"
                     key={o.contact_id}
                   >
                     <strong>{o.contact_name}</strong>
+                    {o.stalled && <p className="text-xs">Unchanged for 72 hours</p>}
+                    {o.loss_reason && <p className="text-sm">Lost: {o.loss_reason.replaceAll("_"," ")}{o.loss_note ? ` · ${o.loss_note}` : ""}</p>}
                     <p>
                       {o.expected_value_minor != null
                         ? money(o.expected_value_minor, d.currency)
@@ -221,14 +232,7 @@ function WorkbenchContent() {
                     >
                       Edit
                     </button>
-                    {stage.kind === "won" && (
-                      <Link
-                        className="block underline"
-                        href={`/sales?lead=${o.contact_id}`}
-                      >
-                        Record Sale · Beta
-                      </Link>
-                    )}
+                    {stage.kind !== "lost" && <p className="text-xs text-muted-foreground">Create or complete an appointment before recording a sale.</p>}
                   </article>
                 ))}
             </section>
@@ -344,6 +348,8 @@ function OpportunityForm({
   );
   const [date, setDate] = useState(initial?.expected_close ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [lossReason,setLossReason] = useState(initial?.loss_reason ?? "");
+  const [lossNote,setLossNote] = useState(initial?.loss_note ?? "");
   const [error, setError] = useState("");
   return (
     <form
@@ -363,6 +369,7 @@ function OpportunityForm({
             expected_close: date || null,
             notes,
             version: initial?.version,
+            loss_reason: lossReason || null, loss_note: lossNote,
           });
         } catch (e) {
           setError((e as Error).message);
@@ -392,14 +399,14 @@ function OpportunityForm({
           value={stage}
           onChange={(e) => setStage(e.target.value)}
         >
-          {d.stages.map((s) => (
+          {d.stages.filter(s=>s.kind !== "won" || s.key === initial?.stage_key).map((s) => (
             <option key={s.key} value={s.key}>
               {s.label}
             </option>
           ))}
         </select>
       </label>
-      <label>
+      {d.money_visible !== false && <label>
         Expected value ({d.currency}, optional)
         <input
           className={input}
@@ -407,7 +414,8 @@ function OpportunityForm({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
         />
-      </label>
+      </label>}
+      {d.stages.find(s=>s.key===stage)?.kind === "lost" && <><label>Loss reason<select className={input} required value={lossReason} onChange={e=>setLossReason(e.target.value)}><option value="" disabled>Select reason</option>{["price","competitor","no_decision","unable_to_contact","financing","timing","not_qualified","cancelled","other"].map(x=><option key={x} value={x}>{x.replaceAll("_"," ")}</option>)}</select></label><label>Loss note (optional)<textarea className={input} maxLength={4000} value={lossNote} onChange={e=>setLossNote(e.target.value)}/></label></>}
       <label>
         Expected close (optional)
         <input
@@ -448,7 +456,7 @@ function TaskForm({
   close: () => void;
 }) {
   const [id] = useState(() => crypto.randomUUID());
-  const [contact, setContact] = useState(d.leads[0]?.id ?? "");
+  const [contact, setContact] = useState((d.task_leads ?? d.leads)[0]?.id ?? "");
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("call");
   const [due, setDue] = useState("");
@@ -474,7 +482,7 @@ function TaskForm({
           value={contact}
           onChange={(e) => setContact(e.target.value)}
         >
-          {d.leads.map((l) => (
+          {(d.task_leads ?? d.leads).map((l) => (
             <option key={l.id} value={l.id}>
               {l.name}
             </option>

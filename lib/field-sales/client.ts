@@ -24,6 +24,9 @@ export type Sale = {
 };
 export type SalesData = {
   enabled: boolean;
+  pro_sales_version?: number;
+  capabilities?: Record<string, boolean>;
+  verification_required?: boolean;
   needs_setup?: boolean;
   role: string;
   user_id: string;
@@ -87,7 +90,9 @@ export const salesChanged = "wolfgrid:field-sales-changed";
 export function useFieldSales<T = SalesData>(
   filter: SalesFilter = {},
   bootstrap = false,
-  resource?: "field_sales_workbench",
+  resource?: "field_sales_workbench" | "field_sales_report" | "field_sales_drilldown" | "field_sales_leaderboard" | "field_sales_target_list" | "field_sales_home" | "field_sales_commission_home" | "field_sales_entry",
+  reportFilter?: Record<string, string | number>,
+  resourceSelector?: string,
 ) {
   const { currentWorkspaceId } = useWorkspace();
   const [snapshot, setSnapshot] = useState<{
@@ -107,6 +112,7 @@ export function useFieldSales<T = SalesData>(
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
+  const reportFilterJSON = JSON.stringify(reportFilter ?? {});
   const {
     period = "month",
     team = false,
@@ -139,7 +145,11 @@ export function useFieldSales<T = SalesData>(
         const { data: result, error: failure } = await client.rpc(
           resource ??
             (bootstrap ? "field_sales_bootstrap" : "field_sales_dashboard"),
-          bootstrap || resource
+          resource === "field_sales_entry" || resource === "field_sales_target_list" || resource === "field_sales_report" || resource === "field_sales_drilldown" || resource === "field_sales_leaderboard"
+            ? { p_workspace: currentWorkspaceId, ...(resource === "field_sales_entry" ? {p_context: JSON.parse(reportFilterJSON)} : {p_filter: JSON.parse(reportFilterJSON)}),
+                ...(resource === "field_sales_drilldown" ? {p_kind: resourceSelector} : {}),
+                ...(resource === "field_sales_leaderboard" ? {p_metric: resourceSelector ?? null} : {}) }
+            : bootstrap || resource
             ? { p_workspace: currentWorkspaceId }
             : {
                 p_workspace: currentWorkspaceId,
@@ -195,6 +205,8 @@ export function useFieldSales<T = SalesData>(
     status,
     bootstrap,
     resource,
+    reportFilterJSON,
+    resourceSelector,
     revision,
     setData,
   ]);
@@ -246,9 +258,10 @@ export function minorUnits(text: string, currency: string): string {
 export function money(minor: string | undefined, currency = "CAD") {
   if (minor === undefined) return "Private";
   const digits = currency === "JPY" ? 0 : 2;
-  const n = BigInt(minor);
+  const signed = BigInt(minor);
+  const n = signed < BigInt(0) ? -signed : signed;
   const base = BigInt(10) ** BigInt(digits);
-  return `${currency} ${(n / base).toLocaleString()}${digits ? "." + (n % base).toString().padStart(digits, "0") : ""}`;
+  return `${currency} ${signed < BigInt(0) ? "−" : ""}${(n / base).toLocaleString()}${digits ? "." + (n % base).toString().padStart(digits, "0") : ""}`;
 }
 
 export function decimalFromMinor(

@@ -7,11 +7,11 @@ type Event = {
   action: string;
   actor: string;
   created_at: string;
-  status: string;
-  value_minor: string;
-  currency: string;
-  sold_on: string;
-  version: number;
+  status?: string;
+  value_minor?: string;
+  currency?: string;
+  sold_on?: string;
+  version?: number;
   reason?: string;
 };
 export function SalesHistory({
@@ -66,8 +66,10 @@ export function SalesHistory({
                 {e.actor} · {e.action} ·{" "}
                 {new Date(e.created_at).toLocaleString()}
                 <br />
-                Version {e.version} · {e.status} ·{" "}
-                {money(e.value_minor, e.currency)} · Sale date {e.sold_on}
+                {e.version !== undefined && <>Version {e.version} · </>}
+                {e.status && <>{e.status} · </>}
+                {e.value_minor !== undefined && <>{money(e.value_minor, e.currency)} · </>}
+                {e.sold_on && <>Sale date {e.sold_on}</>}
                 {e.reason && (
                   <>
                     <br />
