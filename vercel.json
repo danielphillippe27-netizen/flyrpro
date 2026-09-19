@@ -26,6 +26,10 @@
     {
       "path": "/api/cron/card-notifications",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/address-enrichment",
+      "schedule": "* * * * *"
     }
   ]
 }

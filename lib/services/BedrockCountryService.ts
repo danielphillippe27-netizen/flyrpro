@@ -608,7 +608,10 @@ function snapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): Campai
 }
 
 export class BedrockCountryService {
-  constructor(private readonly config: BedrockCountryConfig) {}
+  constructor(
+    private readonly config: BedrockCountryConfig,
+    private readonly scanAddresses = fetchScopedPmtilesAddresses
+  ) {}
 
   async provisionCampaign(options: {
     campaignId: string;
@@ -629,7 +632,7 @@ export class BedrockCountryService {
     );
     const addressPmtilesKey = usaAddressPmtilesKey(this.config, options.regionCode);
     if (!addressPmtilesKey) {
-      throw new Error(`PMTiles address artifact unavailable for BEDROCK ${this.config.country}: missing regional address PMTiles key`);
+      return { addresses: [], snapshot, metrics: { addresses: emptyBedrockScanMetric(this.config) } };
     }
 
     console.log(`[BedrockCountryService] ${this.config.country} PMTiles address scan starting`, {
@@ -639,7 +642,7 @@ export class BedrockCountryService {
       pmtilesKey: addressPmtilesKey,
     });
 
-    const pmtilesResult = await fetchScopedPmtilesAddresses({
+    const pmtilesResult = await this.scanAddresses({
       campaignId: options.campaignId,
       snapshot: snapshotToCampaignSnapshotRow(snapshot),
       bbox,
@@ -661,6 +664,11 @@ export class BedrockCountryService {
           defaultSource: this.config.defaultSource,
           idPrefix: this.config.provisionSource,
         }),
+    }).catch((error) => {
+      console.warn(`[BedrockCountryService] Address layer unavailable; checking independent geometry`, {
+        country: this.config.country, reason: error instanceof Error ? error.message : String(error),
+      });
+      return { addresses: [], metric: emptyBedrockScanMetric(this.config) };
     });
     const metric = pmtilesResult.metric as BedrockScanResult;
 

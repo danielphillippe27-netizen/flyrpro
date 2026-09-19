@@ -14,6 +14,14 @@ const plan = (buildings: GeoJSON.Feature[], addresses: GeoJSON.Feature[] = [addr
   planParcelPinPlacements({ buildings, addresses, parcels });
 async function main() {
   assert(isAccessoryBuilding(garage));
+  const propertyStop = { ...address, properties: { ...address.properties,
+    geometry_target_kind: 'parcel', geometry_target_id: 'lot' } };
+  const propertyPlacement = plan([home, { ...garage, properties: { ...garage.properties, building: 'house' } }], [propertyStop]);
+  assert.equal(propertyPlacement.length, 1);
+  assert.equal(propertyPlacement[0].method, 'parcel_center');
+  assert.deepEqual(propertyPlacement[0].coordinate, interiorCentroid(parcel));
+  assert.equal(plan([home], [{...propertyStop, properties:{...propertyStop.properties,locked:true}}]).length,0);
+
   const lone = plan([home]);
   assert.equal(lone[0].buildingId, 'home');
   assert(turf.booleanPointInPolygon(lone[0].coordinate, home));

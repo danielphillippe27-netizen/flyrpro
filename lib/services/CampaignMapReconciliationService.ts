@@ -2041,7 +2041,7 @@ export class CampaignMapReconciliationService {
     const [addressesResult, linksResult, touchesResult] = await Promise.all([
       this.supabase
         .from('campaign_addresses')
-        .select('id, visited, match_source')
+        .select('id, visited, match_source, geometry_target_kind, geometry_target_id')
         .eq('campaign_id', campaignId),
       this.supabase
         .from('building_address_links')
@@ -2056,6 +2056,12 @@ export class CampaignMapReconciliationService {
     const buildingIds = new Set<string>();
     for (const row of addressesResult.data ?? []) {
       const source = normalizeText(row.match_source);
+      // These stops have their own in-place civic enrichment. The global matcher
+      // must not replace them with synthetic addresses or move their geometry.
+      if (row.geometry_target_kind) addressIds.add(String(row.id).toLowerCase());
+      if (row.geometry_target_kind === 'building' && row.geometry_target_id) {
+        buildingIds.add(String(row.geometry_target_id).toLowerCase());
+      }
       if (row.visited === true || source.includes('manual') || source === 'field_manual_pin') {
         addressIds.add(String(row.id).toLowerCase());
       }
@@ -2550,6 +2556,13 @@ export class CampaignMapReconciliationService {
       buildingIdentifiers(building).forEach(id => group.add(id));
       establishedHomesByParcel.set(parcel, group);
     }
+    // Parcel-only stops may later acquire a footprint. Keep enriching their
+    // existing identity instead of creating an additional synthetic address.
+    const geometryTargetParcels = new Set(input.addresses.flatMap(address => {
+      const p = asRecord(address.properties);
+      return p.geometry_target_kind === 'parcel' && typeof p.geometry_target_id === 'string'
+        ? [p.geometry_target_id.toLowerCase()] : [];
+    }));
     const parcelResolvedBuildings = new Set(parcelPlacements.flatMap(p => p.buildingId ? [p.buildingId] : []));
     const parcelResolvedAddresses = new Set(parcelPlacements.map(p => p.addressId));
 
@@ -2568,6 +2581,7 @@ export class CampaignMapReconciliationService {
         if (!id || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
             input.protectedBuildingIds.has(id) || buildingIdentifiers(building).some(alias => parcelResolvedBuildings.has(alias))) return false;
         const parcel = resolveParcelId(building)?.toLowerCase();
+        if (parcel && geometryTargetParcels.has(parcel)) return false;
         const establishedHomes = parcel ? establishedHomesByParcel.get(parcel) : null;
         if (establishedHomes && !buildingIdentifiers(building).some(alias => establishedHomes.has(alias))) return false;
         return shouldReverseGeocodeBuilding(
