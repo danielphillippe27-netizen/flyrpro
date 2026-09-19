@@ -45,7 +45,7 @@ for (const [campaign, workspace, user] of [[a,w,owner],[b,w,rep],[c,foreign,outs
 }
 await db.query("INSERT INTO campaign_addresses(id,campaign_id,source_id,formatted) VALUES($1,$2,'source:existing','8 Oak St Unit 1')",[id(99),a]);
 await db.query("INSERT INTO address_statuses(campaign_address_id,campaign_id,status,last_action_by,last_visited_at,updated_at) VALUES($1,$2,'delivered',$3,now(),now())",[id(99),a,owner]);
-await db.exec(await readFile(new URL('../supabase/migrations/20260919010000_workspace_home_coverage.sql', import.meta.url), 'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20260919043000_workspace_home_coverage.sql', import.meta.url), 'utf8'));
 let checks=0;
 function check(actual, expected, message) { assert.deepEqual(actual, expected, message); console.log(`ok ${++checks} - ${message}`); }
 async function rejects(fn,pattern,message) { await assert.rejects(fn,pattern); console.log(`ok ${++checks} - ${message}`); }
