@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as turf from '@turf/turf';
+import RBush from 'rbush';
 import {
   prebuildCampaignMapBundle,
   readCurrentCampaignMapBundle,
@@ -10,8 +11,9 @@ import { CampaignLinkQualityService } from './CampaignLinkQualityService';
 import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
+import { buildingIdentifiers, isAccessoryBuilding, planParcelPinPlacements, mapWithConcurrency } from './ParcelPinPlacement';
 
-export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v19-global-rooftop-convergence';
+export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v20-global-parcel-first';
 const AUTO_LINK_SCORE = 0.92;
 const AUTO_LINK_MARGIN = 0.15;
 const REVIEW_SCORE = 0.70;
@@ -2029,7 +2031,7 @@ export class CampaignMapReconciliationService {
     const [addressesResult, linksResult, touchesResult] = await Promise.all([
       this.supabase
         .from('campaign_addresses')
-        .select('id, visited, match_source')
+        .select('id, visited, match_source, geometry_target_kind, geometry_target_id')
         .eq('campaign_id', campaignId),
       this.supabase
         .from('building_address_links')
@@ -2044,6 +2046,12 @@ export class CampaignMapReconciliationService {
     const buildingIds = new Set<string>();
     for (const row of addressesResult.data ?? []) {
       const source = normalizeText(row.match_source);
+      // These stops have their own in-place civic enrichment. The global matcher
+      // must not replace them with synthetic addresses or move their geometry.
+      if (row.geometry_target_kind) addressIds.add(String(row.id).toLowerCase());
+      if (row.geometry_target_kind === 'building' && row.geometry_target_id) {
+        buildingIds.add(String(row.geometry_target_id).toLowerCase());
+      }
       if (row.visited === true || source.includes('manual') || source === 'field_manual_pin') {
         addressIds.add(String(row.id).toLowerCase());
       }
@@ -2496,6 +2504,56 @@ export class CampaignMapReconciliationService {
       }
     }
 
+    const buildingsByAlias = new Map<string, BundleFeature>();
+    for (const building of input.buildings) {
+      for (const alias of buildingIdentifiers(building)) buildingsByAlias.set(alias, building);
+    }
+    const placementAddresses = input.addresses.map(address => {
+      const id = addressId(address)?.toLowerCase() ?? '';
+      const current = currentLinkByAddress.get(id);
+      return { ...address, properties: { ...address.properties,
+        ...(current ? { building_gers_id: current.building_id ?? current.buildingId } : {}),
+      } };
+    });
+    const parcelPlacements = planParcelPinPlacements({
+      addresses: placementAddresses, buildings: input.buildings, parcels: input.parcels,
+      protectedAddressIds: input.protectedAddressIds,
+    });
+    const parcelDecisions: ReconciliationDecision[] = parcelPlacements.flatMap(placement => {
+      if (!placement.buildingId || currentLinkByAddress.has(placement.addressId) ||
+          input.protectedBuildingIds.has(placement.buildingId)) return [];
+      const beforeState = { link: null, address_id: placement.addressId };
+      return [{
+        id: decisionId(input.run.id, 'link_address', placement.addressId, placement.buildingId),
+        run_id: input.run.id, campaign_id: input.run.campaign_id,
+        action: 'link_address', status: 'proposed', address_id: placement.addressId,
+        building_id: placement.buildingId, secondary_building_id: null,
+        unit_id: null, parent_building_id: null, unit_index: null, address_identity: null,
+        split_signature: null, evidence_codes: ['authoritative_parcel', 'unique_eligible_building', 'preserve_source_coordinates'],
+        score: 0.995, runner_up_margin: 1, precondition_hash: stableHash(beforeState), before_state: beforeState,
+        proposed_state: { building_id: placement.buildingId, move_source: false },
+      } satisfies ReconciliationDecision];
+    });
+    const establishedHomesByParcel = new Map<string, Set<string>>();
+    for (const [addressKey, link] of currentLinkByAddress) {
+      const linkedId = stringValue(link.building_id ?? link.buildingId)?.toLowerCase();
+      const building = linkedId ? buildingsByAlias.get(linkedId) : null;
+      if (!building || isAccessoryBuilding(building) || !addressesById.has(addressKey)) continue;
+      const parcel = resolveParcelId(building)?.toLowerCase();
+      if (!parcel) continue;
+      const group = establishedHomesByParcel.get(parcel) ?? new Set<string>();
+      buildingIdentifiers(building).forEach(id => group.add(id));
+      establishedHomesByParcel.set(parcel, group);
+    }
+    // Parcel-only stops may later acquire a footprint. Keep enriching their
+    // existing identity instead of creating an additional synthetic address.
+    const geometryTargetParcels = new Set(input.addresses.flatMap(address => {
+      const p = asRecord(address.properties);
+      return p.geometry_target_kind === 'parcel' && typeof p.geometry_target_id === 'string'
+        ? [p.geometry_target_id.toLowerCase()] : [];
+    }));
+    const parcelResolvedBuildings = new Set(parcelPlacements.flatMap(p => p.buildingId ? [p.buildingId] : []));
+    const parcelResolvedAddresses = new Set(parcelPlacements.map(p => p.addressId));
     const geocoded: Array<{
       building: BundleFeature;
       buildingId: string;
@@ -2508,7 +2566,12 @@ export class CampaignMapReconciliationService {
     const orderedBuildings = input.buildings
       .filter((building) => {
         const id = featureId(building)?.toLowerCase();
-        if (!id || isExplicitNonResidentialBuilding(building)) return false;
+        if (!id || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
+            input.protectedBuildingIds.has(id) || buildingIdentifiers(building).some(alias => parcelResolvedBuildings.has(alias))) return false;
+        const parcel = resolveParcelId(building)?.toLowerCase();
+        if (parcel && geometryTargetParcels.has(parcel)) return false;
+        const establishedHomes = parcel ? establishedHomesByParcel.get(parcel) : null;
+        if (establishedHomes && !buildingIdentifiers(building).some(alias => establishedHomes.has(alias))) return false;
         return shouldReverseGeocodeBuilding(
           input.linkedBuildingIds.has(id),
           input.orphanBuildingIds.has(id),

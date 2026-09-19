@@ -1,3 +1,5 @@
+import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import { fetchGeometryTargetStates, mergeGeometryTargetProgress } from './GeometryTargetProgress';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -16,8 +18,9 @@ import {
   type CampaignParcelResponse,
 } from '@/app/api/campaigns/_utils/scoped-pmtiles-parcels';
 import type { CampaignSnapshotRow } from '@/lib/diamond/geometry';
-import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import * as turf from '@turf/turf';
+import RBush from 'rbush';
+import { planParcelPinPlacements, applyParcelPinPlacements } from './ParcelPinPlacement';
 
 type FeatureCollection = GeoJSON.FeatureCollection;
 type JsonRecord = Record<string, unknown>;
@@ -76,7 +79,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-09-08-occupied-parcels-v1';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-09-19-parcel-targets-v2';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -1013,6 +1016,7 @@ async function fetchBundleReconciliation(
     .from('map_reconciliation_runs')
     .select('id, status, mode, algorithm_version, queued_at, started_at, completed_at, applied_bundle_signature, report')
     .eq('campaign_id', campaignId)
+    .neq('status', 'superseded')
     .order('queued_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -2043,10 +2047,11 @@ export async function prebuildCampaignMapBundle(
     { data: snapshot },
     { data: campaignRow },
     currentBundle,
-    reconciliation,
+    baseReconciliation,
     addressAdjustments,
     buildingResolutions,
     buildingUnits,
+    geometryTargetStates,
   ] = await Promise.all([
     measure('snapshot', recordTiming, async () =>
       await supabase
@@ -2077,6 +2082,7 @@ export async function prebuildCampaignMapBundle(
     measure('building_units', recordTiming, () =>
       fetchActiveBuildingUnits(supabase, campaignId)
     ),
+    measure('geometry_targets', recordTiming, () => fetchGeometryTargetStates(supabase, campaignId)),
   ]);
 
   const { data, error } = await measure('addresses', recordTiming, async () =>
@@ -2090,7 +2096,9 @@ export async function prebuildCampaignMapBundle(
   const sourceVersion = await measure('signature', recordTiming, () =>
     getSourceVersion(supabase, campaignId, bundle)
   );
+  const reconciliation = mergeGeometryTargetProgress(baseReconciliation, geometryTargetStates);
   const reconciliationRevision = stableHash({
+    geometry_targets: geometryTargetStates,
     reconciliation: {
       ...reconciliation,
       // This value points at the signature being computed below, so it must
@@ -2123,7 +2131,19 @@ export async function prebuildCampaignMapBundle(
     return responseFromCampaignMapBundleRow(currentBundle, recordTiming);
   }
 
-  const rawAddresses = normalizeAddressLabels(asFeatureCollection(bundle.addresses));
+  const statesById = new Map(geometryTargetStates.map(row => [row.id.toLowerCase(), row]));
+  const sourceAddresses = asFeatureCollection(bundle.addresses);
+  const rawAddresses = normalizeAddressLabels({ ...sourceAddresses, features: sourceAddresses.features.map(feature => {
+    const state = statesById.get(String(feature.properties?.address_id ?? feature.properties?.id ?? feature.id).toLowerCase());
+    if (!state) return feature;
+    return { ...feature, properties: { ...feature.properties,
+      formatted: state.formatted, address: state.formatted, address_text: state.formatted,
+      house_number: state.house_number, street_name: state.street_name,
+      geometry_target_kind: state.geometry_target_kind, geometry_target_id: state.geometry_target_id,
+      address_resolution_status: state.address_resolution_status,
+      provisional: state.address_resolution_status !== 'confirmed',
+    } };
+  }) });
   const baseBuildings = asFeatureCollection(bundle.buildings);
   const baseParcels = asFeatureCollection(bundle.parcels);
   const useRawScopedParcels = options?.parcelDisplayMode === 'raw';
@@ -2226,6 +2246,8 @@ export async function prebuildCampaignMapBundle(
 	  const counts: JsonRecord = {
 	    ...(bundle.counts && typeof bundle.counts === 'object' ? bundle.counts as JsonRecord : {}),
 	    addresses: featureCollectionCount(addresses),
+      pending_addresses: geometryTargetStates.filter(row => row.address_resolution_status === 'pending').length,
+      unresolved_addresses: geometryTargetStates.filter(row => row.address_resolution_status === 'unresolved').length,
 	    buildings: featureCollectionCount(buildings),
 	    parcels: featureCollectionCount(ownedParcels),
 	    roads: featureCollectionCount(roads),

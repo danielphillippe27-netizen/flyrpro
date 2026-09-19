@@ -1,3 +1,4 @@
+import { fetchGeometryTargetStates, mergeGeometryTargetProgress } from '@/lib/services/GeometryTargetProgress';
 import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -36,7 +37,7 @@ export async function GET(
     return NextResponse.json({ error: 'Failed to read reconciliation status' }, { status: 500 });
   }
 
-  const body = !data || data.mode === 'shadow'
+  const baseBody = !data || data.mode === 'shadow'
     ? { status: 'not_started', report: {} }
     : {
         status: data.status,
@@ -50,6 +51,24 @@ export async function GET(
         report: data.report ?? {},
         error: data.status === 'failed' ? data.error_message : null,
       };
+  let body: Record<string, unknown> = baseBody;
+  try {
+    const targets = await fetchGeometryTargetStates(admin, campaignId);
+    body = mergeGeometryTargetProgress(baseBody, targets);
+    if (targets.length && ['completed', 'review_needed'].includes(String(body.status))) {
+      const { data: bundle, error: bundleError } = await admin.from('campaign_map_bundles')
+        .select('asset_signature,reconciliation').eq('campaign_id', campaignId).eq('is_current', true).maybeSingle();
+      if (bundleError) throw new Error(bundleError.message);
+      // Do not announce completion before clients can download that revision.
+      if (bundle && bundle.reconciliation?.run_id === body.run_id && bundle?.reconciliation?.status === body.status) {
+        body.applied_bundle_signature = bundle.asset_signature;
+      } else {
+        body = { ...body, status: 'applying', phase: 'applying', applied_bundle_signature: null };
+      }
+    }
+  } catch {
+    return NextResponse.json({ error: 'Unable to read address enrichment progress' }, { status: 500 });
+  }
   const responseEtag = etag(body);
   if (request.headers.get('if-none-match') === responseEtag) {
     return new Response(null, {

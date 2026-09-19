@@ -313,6 +313,24 @@ function getCentroid(polygon: unknown, bbox: unknown): Point | null {
   return null;
 }
 
+/** State/province abbreviations are not globally unique. Use the territory,
+ * never service ordering, to disambiguate them before selecting a dataset. */
+export function resolveAmbiguousRegionCountry(regionCode: string, polygon: unknown): 'US' | 'AU' | 'CA' | 'ZA' | null {
+  const code = regionCode.trim().toUpperCase();
+  if (!['WA', 'NT', 'NC'].includes(code)) return null;
+  const point = getCentroid(polygon, null);
+  const candidates = [
+    ['US', US_REGION_BOUNDS], ['AU', AUSTRALIA_REGION_BOUNDS],
+    ['CA', CANADA_REGION_BOUNDS], ['ZA', NON_US_CANADA_REGION_BOUNDS],
+  ] as const;
+  for (const [country, bounds] of candidates) {
+    const box = bounds[code];
+    if (point && box && point.lng >= box[0] && point.lng <= box[2] &&
+        point.lat >= box[1] && point.lat <= box[3]) return country;
+  }
+  throw new Error(`Cannot choose a country for ambiguous region ${code} without a matching territory boundary.`);
+}
+
 export async function resolveCampaignRegion(
   input: ResolveCampaignRegionInput
 ): Promise<ResolveCampaignRegionResult> {

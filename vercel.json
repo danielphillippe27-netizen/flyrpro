@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/territory-iq",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/address-enrichment",
+      "schedule": "* * * * *"
     }
   ]
 }

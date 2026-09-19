@@ -667,7 +667,7 @@ export class BedrockAustraliaService {
         polygon: options.polygon,
         addressLimit: options.addressLimit,
       });
-      if (pmtilesResult.metric.hits > 0 || pmtilesResult.metric.scanned > 0) {
+      {
         let parcelTiles: ResolvedParcelTiles | null = null;
         try {
           parcelTiles = await resolveParcelTiles({
@@ -719,11 +719,15 @@ export class BedrockAustraliaService {
           }),
         };
       }
-      throw new Error('PMTiles layer produced no usable features: addresses');
     } catch (pmtilesError) {
-      throw new Error(`PMTiles address artifact unavailable for BEDROCK Australia: ${
-        pmtilesError instanceof Error ? pmtilesError.message : String(pmtilesError)
-      }`);
+      console.warn('[BedrockAustraliaService] Address layer unavailable; checking independent geometry',
+        pmtilesError instanceof Error ? pmtilesError.message : String(pmtilesError));
+      const metric: BedrockScanResult = { hits: 0, scanned: 0, bboxCandidates: 0, seconds: 0,
+        queryEngine: 'bedrock_au_pmtiles', touchedTiles: 0 };
+      const parcelTiles = await resolveParcelTiles({ regionCode: options.regionCode, addresses: [] }).catch(() => null);
+      return { addresses: [], metrics: { addresses: metric }, snapshot: this.snapshotForCampaign({
+        campaignId: options.campaignId, addressCount: 0, scanMetric: metric, parcelTiles, regionCode: options.regionCode,
+      }) };
     }
   }
 
