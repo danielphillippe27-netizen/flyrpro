@@ -25,7 +25,12 @@ export async function middleware(req: NextRequest) {
 
   // Public auth pages must not repeatedly refresh an already-invalid token.
   // The login page creates a fresh session, and the callback persists it.
-  if (req.nextUrl.pathname === '/login' || req.nextUrl.pathname.startsWith('/password/')) {
+  if (
+    req.nextUrl.pathname === '/login' ||
+    req.nextUrl.pathname === '/auth/callback' ||
+    req.nextUrl.pathname === '/reset-password' ||
+    req.nextUrl.pathname.startsWith('/password/')
+  ) {
     return NextResponse.next();
   }
 

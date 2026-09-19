@@ -16,7 +16,7 @@ export type ResolvedMapStyle = {
 };
 
 const WHITE_OUT_DEFAULT_STYLE = 'mapbox://styles/mapbox/light-v11';
-const WHITE_OUT_BACKGROUND = '#f8fafc';
+const WHITE_OUT_BACKGROUND = '#ffffff';
 const WHITE_OUT_WATER = '#eaf2f8';
 const WHITE_OUT_ROAD_CASING = '#cbd5e1';
 const WHITE_OUT_ROAD_PATH = '#d8dee8';
@@ -365,6 +365,18 @@ function applyWhiteOutVisualTweaks(
       if (isWater && layer.type === 'fill') {
         map.setPaintProperty(layer.id, 'fill-color', WHITE_OUT_WATER);
         map.setPaintProperty(layer.id, 'fill-outline-color', WHITE_OUT_WATER);
+        continue;
+      }
+
+      // Land-use polygons sit above the background and otherwise retain the
+      // hosted style's cream tint, even with a pure-white background.
+      if (layer.type === 'fill' && !isBaseBuildingLayer(layer)
+        && ['land', 'park', 'aeroway', 'road', 'pedestrian'].some(
+          (token) => lowerLayerId.includes(token) || sourceLayer.includes(token),
+        )) {
+        map.setPaintProperty(layer.id, 'fill-color', WHITE_OUT_BACKGROUND);
+        map.setPaintProperty(layer.id, 'fill-outline-color', WHITE_OUT_BACKGROUND);
+        map.setPaintProperty(layer.id, 'fill-pattern', null);
         continue;
       }
 

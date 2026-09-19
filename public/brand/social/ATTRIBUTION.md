@@ -1,0 +1,1 @@
+Brand marks sourced from @iconify-json/logos 1.2.14 (SVG Logos collection, https://github.com/gilbarbara/logos). Logos remain trademarks of their respective owners. Used to identify links to those platforms.

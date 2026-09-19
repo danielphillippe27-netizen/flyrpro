@@ -259,7 +259,7 @@ await test('pending member invite consumes a paid seat', () => {
 // ─── Tests: source checks ─────────────────────────────────────────────────────
 
 await test('map/route.ts contains presenceWithActiveSession filter', async () => {
-  const src = await read('app/api/team/map/route.ts');
+  const src = await read('lib/team-live-map.ts');
   assert.ok(
     src.includes('presenceWithActiveSession'),
     'Session-gating variable must exist in map route'
@@ -271,7 +271,7 @@ await test('map/route.ts contains presenceWithActiveSession filter', async () =>
 });
 
 await test('map/route.ts sessions query filters end_time IS NULL', async () => {
-  const src = await read('app/api/team/map/route.ts');
+  const src = await read('lib/team-live-map.ts');
   assert.ok(
     src.includes("is('end_time', null)"),
     'Sessions query must only fetch active (non-ended) sessions'
@@ -288,7 +288,7 @@ await test("manage.ts FREE_SEAT_ROLES includes 'owner'", async () => {
 });
 
 await test('map/route.ts livePresence uses presenceWithActiveSession not validPresence', async () => {
-  const src = await read('app/api/team/map/route.ts');
+  const src = await read('lib/team-live-map.ts');
   // The old code mapped over validPresence directly; after the fix it maps presenceWithActiveSession
   const mapCall = src.match(/livePresence:\s*(\w+)\.map/);
   assert.ok(mapCall, 'livePresence must be assigned from a .map() call');

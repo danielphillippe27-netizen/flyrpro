@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { WorkspaceCoverageSettings } from '@/components/settings/WorkspaceCoverageSettings';
 import { Goal, Pencil } from 'lucide-react';
 import { useWorkspace } from '@/lib/workspace-context';
 import type { TeamControlsRange } from '@/components/home/team/TeamControlsBar';
@@ -150,6 +151,7 @@ export function TeamSettingsTab({ range, onMemberClick }: TeamSettingsTabProps) 
 
   return (
     <div className="space-y-4">
+      <WorkspaceCoverageSettings />
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { browserAuthCookies } from './browser-cookies';
 import { browserSharedCookieOptions } from '@/lib/supabase/shared-cookie';
 
 /**
@@ -10,7 +11,10 @@ export function createClient(): SupabaseClient {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookieOptions: browserSharedCookieOptions() }
+    {
+      cookieOptions: browserSharedCookieOptions(),
+      ...(typeof document !== 'undefined' ? { cookies: browserAuthCookies } : {}),
+    }
   );
 }
 

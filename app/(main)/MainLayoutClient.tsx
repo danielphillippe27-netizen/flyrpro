@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useFieldSales } from '@/lib/field-sales/client';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
@@ -122,6 +123,7 @@ function MainNavItems({
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const createCampaignLabel = copy.actions.createCampaign;
   const showCreate = accessLevel !== 'salesperson';
+  const hasSalesTab = tabs.some(tab => tab.href === '/sales');
 
   return (
     <>
@@ -153,7 +155,7 @@ function MainNavItems({
         const Icon = tab.icon;
         const label = copy.navLabels[tab.href] ?? tab.label;
         const isSettings = tab.href === '/settings';
-        const pinMemberSettingsToBottom = accessLevel === 'member' && isSettings;
+        const pinMemberSettingsToBottom = accessLevel === 'member' && (hasSalesTab ? tab.href === '/sales' : isSettings);
         const isActive = tabIsActive(tab, pathname);
 
         return (
@@ -358,19 +360,24 @@ function MainLayoutContent({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
+  const { data: fieldSales } = useFieldSales({}, true);
   const isSelfServeDemoFlow = searchParams.get('source') === 'self-serve-demo';
   const isSelfServeCampaignCreate =
     pathname === '/campaigns/create' && isSelfServeDemoFlow;
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
-      if (!isAmbassador) return items;
-      if (items.some((tab) => tab.href === ambassadorPortalTab.href)) return items;
+      if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
+        const index = items.findIndex(tab => tab.href === '/settings');
+        items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];
+      }
+      if (!fieldSales?.enabled || accessLevel === 'salesperson') return items;
+      const salesTab = { href: '/sales', icon: BriefcaseBusiness, label: 'Sales - Beta' };
       const settingsIndex = items.findIndex((tab) => tab.href === '/settings');
-      if (settingsIndex === -1) return [...items, ambassadorPortalTab];
+      if (settingsIndex === -1) return [...items, salesTab];
       return [
         ...items.slice(0, settingsIndex),
-        ambassadorPortalTab,
+        salesTab,
         ...items.slice(settingsIndex),
       ];
     };

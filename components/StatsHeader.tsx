@@ -1,12 +1,16 @@
+import type { CardActivityTotals } from '@/lib/cards/campaign-engagement';
 import type { CampaignStats } from '@/lib/services/CampaignsService';
 
 interface StatsHeaderProps {
   stats: CampaignStats;
+  engagement: CardActivityTotals & { scans: number };
+  engagementState?: 'loading' | 'error' | 'ready';
 }
 
-export function StatsHeader({ stats }: StatsHeaderProps) {
-  const { addresses, contacts, visited, scan_rate } = stats;
+export function StatsHeader({ stats, engagement, engagementState = 'ready' }: StatsHeaderProps) {
+  const { addresses, contacts, visited } = stats;
 
+  const totalEngagement = engagement.scans + engagement.opens + engagement.clicks + engagement.downloads;
   const visitPct = addresses > 0 ? Math.round((visited / addresses) * 100) : 0;
 
   return (
@@ -34,11 +38,16 @@ export function StatsHeader({ stats }: StatsHeaderProps) {
         </div>
       </div>
 
-      {/* Card 4: Scan Rate */}
+      {/* Card 4: Clicks &amp; Scans */}
       <div className="bg-card text-card-foreground p-6 rounded-2xl border border-border">
-        <div className="text-sm text-muted-foreground mb-1">Scan Rate</div>
-        <div className="text-3xl font-bold text-green-600 dark:text-green-500">{scan_rate}%</div>
-        <div className="text-xs text-muted-foreground mt-1">{stats.scanned} scanned</div>
+        <div className="text-sm text-muted-foreground mb-1" title="QR scans, open-only card visits, button clicks, and downloads. A card visit with a button action is counted under clicks or downloads, not again as an open.">Clicks &amp; Scans</div>
+        <div className="text-3xl font-bold text-green-600 dark:text-green-500">{engagementState === 'ready' ? totalEngagement.toLocaleString() : '—'}</div>
+        <div className="text-xs text-muted-foreground mt-1">{engagementState === 'loading' ? 'Loading engagement…' : engagementState === 'error' ? 'Engagement unavailable' : <span className="flex flex-wrap gap-x-2 gap-y-1">
+          <span>{engagement.scans.toLocaleString()} QR scans</span>
+          <span title="Card visits without a button action">{engagement.opens.toLocaleString()} Card opens</span>
+          <span>{engagement.clicks.toLocaleString()} Button clicks</span>
+          <span>{engagement.downloads.toLocaleString()} Downloads</span>
+        </span>}</div>
       </div>
     </div>
   );

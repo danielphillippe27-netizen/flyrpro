@@ -11,8 +11,8 @@ const BASE_STYLES: Record<DemoMapVariant, string> = {
   dark: 'mapbox://styles/mapbox/dark-v11',
 };
 const WHITE_OUT_STYLE = 'mapbox://styles/mapbox/light-v11';
-const WHITE_OUT_BACKGROUND = '#e4e0d5';
-const WHITE_OUT_WATER = '#dedacf';
+const WHITE_OUT_BACKGROUND = '#ffffff';
+const WHITE_OUT_WATER = '#eaf2f8';
 
 const styleCache = new Map<DemoMapVariant, StyleSpecification>();
 let whiteOutStyleCache: StyleSpecification | null = null;
@@ -128,6 +128,17 @@ function applyWhiteOutOverrides(style: StyleSpecification) {
       return nextLayer;
     }
 
+    if (nextLayer.type === 'fill' && !id.includes('building') && !sourceLayer.includes('building')) {
+      paint['fill-color'] = WHITE_OUT_BACKGROUND;
+      paint['fill-outline-color'] = WHITE_OUT_BACKGROUND;
+      delete paint['fill-pattern'];
+      return nextLayer;
+    }
+
+    if (nextLayer.type === 'line' && (id.includes('road') || sourceLayer.includes('road'))) {
+      paint['line-color'] = '#e5e5e5';
+    }
+
     if (isWater && nextLayer.type === 'line') {
       paint['line-color'] = WHITE_OUT_WATER;
       paint['line-opacity'] = 0.9;
@@ -151,40 +162,34 @@ function applyLightOverrides(layer: AnyLayer) {
   const paint = ((layer.paint ??= {}) as MutablePaint);
 
   if (layer.type === 'background') {
-    paint['background-color'] = '#d9d5cb';
+    paint['background-color'] = '#ffffff';
     paint['background-opacity'] = 1;
     return;
   }
 
   if (layer.type === 'fill') {
     if (id.includes('water') || sourceLayer.includes('water')) {
-      paint['fill-color'] = '#cfcabe';
-      paint['fill-outline-color'] = '#cfcabe';
+      paint['fill-color'] = WHITE_OUT_WATER;
+      paint['fill-outline-color'] = WHITE_OUT_WATER;
       paint['fill-opacity'] = 1;
       return;
     }
 
     if (id.includes('building') || sourceLayer.includes('building')) {
-      paint['fill-color'] = '#cfcabe';
-      paint['fill-outline-color'] = '#c8c2b3';
+      paint['fill-color'] = '#d1d5db';
+      paint['fill-outline-color'] = '#bfc4cc';
       paint['fill-opacity'] = 0.46;
       return;
     }
 
-    if (
-      id.includes('land')
-      || id.includes('landuse')
-      || id.includes('park')
-      || id.includes('national-park')
-    ) {
-      paint['fill-color'] = '#d9d5cb';
-      paint['fill-opacity'] = 1;
-    }
+    paint['fill-color'] = WHITE_OUT_BACKGROUND;
+    paint['fill-outline-color'] = WHITE_OUT_BACKGROUND;
+    delete paint['fill-pattern'];
     return;
   }
 
   if (layer.type === 'fill-extrusion' && (id.includes('building') || sourceLayer.includes('building'))) {
-    paint['fill-extrusion-color'] = '#cfcabe';
+    paint['fill-extrusion-color'] = '#d1d5db';
     paint['fill-extrusion-opacity'] = 0.36;
     return;
   }

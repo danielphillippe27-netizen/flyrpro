@@ -1,0 +1,331 @@
+{
+  "researched_at": "2026-09-15",
+  "scope": "Public iOS and web; excludes internal WolfGridSales",
+  "method": "Official public product and help documentation. No paid-account hands-on testing. Documented capabilities are vendor statements, not independent effectiveness evidence.",
+  "sources": [
+    {
+      "id": "sr-matrix",
+      "title": "SalesRabbit plan feature matrix",
+      "url": "https://salesrabbit.com/features/"
+    },
+    {
+      "id": "sr-plus",
+      "title": "SalesRabbit+ versus Core",
+      "url": "https://help.srplus.salesrabbit.com/hc/en-us/articles/30101303597335-SalesRabbit-Vs-SalesRabbit-Core"
+    },
+    {
+      "id": "sr-scheduler",
+      "title": "SalesRabbit appointment management",
+      "url": "https://salesrabbit.com/lead-management/appointment-management/"
+    },
+    {
+      "id": "sr-contracts",
+      "title": "SalesRabbit digital contracts",
+      "url": "https://salesrabbit.com/digital-contracts/"
+    },
+    {
+      "id": "sr-data",
+      "title": "SalesRabbit DataGrid AI",
+      "url": "https://salesrabbit.com/datagrid/"
+    },
+    {
+      "id": "sr-amplify",
+      "title": "SalesRabbit Amplify",
+      "url": "https://salesrabbit.com/amplify-gamification/"
+    },
+    {
+      "id": "sr-weather",
+      "title": "SalesRabbit Weather",
+      "url": "https://salesrabbit.com/weather/"
+    },
+    {
+      "id": "sr-movers",
+      "title": "SalesRabbit Movers",
+      "url": "https://salesrabbit.com/mover-leads/"
+    },
+    {
+      "id": "sr-integrations",
+      "title": "SalesRabbit integration help",
+      "url": "https://help.salesrabbit.com/hc/en-us/categories/200230848-Integrations"
+    },
+    {
+      "id": "sr-api",
+      "title": "SalesRabbit+ API",
+      "url": "https://help.srplus.salesrabbit.com/hc/en-us/articles/35833568090007-Public-API"
+    },
+    {
+      "id": "sp-index",
+      "title": "SPOTIO feature documentation index",
+      "url": "https://support.spotio.com/knowledge-base"
+    },
+    {
+      "id": "sp-objects",
+      "title": "SPOTIO Flexible Objects",
+      "url": "https://support.spotio.com/hc/en-us/articles/11712242070807-configuring-data-objects"
+    },
+    {
+      "id": "sp-route",
+      "title": "SPOTIO route workflows",
+      "url": "https://support.spotio.com/hc/en-us/articles/360061370754-routing-how-to-build-and-manage-routes"
+    },
+    {
+      "id": "sp-offline",
+      "title": "SPOTIO Download My Day",
+      "url": "https://support.spotio.com/hc/en-us/articles/18083974962839-download-my-day"
+    },
+    {
+      "id": "sp-contracts",
+      "title": "SPOTIO electronic contracts",
+      "url": "https://support.spotio.com/hc/en-us/articles/19202657383831-sending-e-contracts"
+    },
+    {
+      "id": "sp-ranks",
+      "title": "SPOTIO custom leaderboards",
+      "url": "https://support.spotio.com/hc/en-us/articles/25115077928983-leaderboards"
+    },
+    {
+      "id": "sp-leads",
+      "title": "SPOTIO Lead Machine",
+      "url": "https://support.spotio.com/hc/en-us/articles/18679302494231-homeowner-data-lead-machine"
+    },
+    {
+      "id": "sp-autoplay",
+      "title": "SPOTIO Autoplays",
+      "url": "https://support.spotio.com/hc/en-us/articles/1500002902722-autoplays-creating-and-managing-autoplays"
+    },
+    {
+      "id": "sp-setter",
+      "title": "SPOTIO setter/closer reporting",
+      "url": "https://support.spotio.com/hc/en-us/articles/13000973155223-my-reports-how-to-create-a-setter-closer-report"
+    },
+    {
+      "id": "sp-ai",
+      "title": "SPOTIO DASH, updated September 11, 2026",
+      "url": "https://support.spotio.com/hc/en-us/articles/39393147551383-dash-your-ai-co-pilot-for-field-sales"
+    },
+    {
+      "id": "sp-calls",
+      "title": "SPOTIO calling",
+      "url": "https://support.spotio.com/hc/en-us/articles/360049406994-making-and-receiving-calls-with-spotio"
+    },
+    {
+      "id": "sp-sms",
+      "title": "SPOTIO texting",
+      "url": "https://support.spotio.com/hc/en-us/articles/360050173333-mcc-how-to-text-with-spotio"
+    },
+    {
+      "id": "sp-hooks",
+      "title": "SPOTIO webhooks",
+      "url": "https://support.spotio.com/hc/en-us/articles/360057063834-webhooks"
+    },
+    {
+      "id": "sp-permissions",
+      "title": "SPOTIO permissions",
+      "url": "https://support.spotio.com/hc/en-us/articles/360057242554-user-permissions-overview"
+    },
+    {
+      "id": "sp-sync",
+      "title": "SPOTIO Salesforce sync",
+      "url": "https://support.spotio.com/hc/en-us/articles/26574110005271-native-salesforce-integration"
+    },
+    {
+      "id": "sp-integrations",
+      "title": "SPOTIO integrations",
+      "url": "https://spotio.com/integrations/"
+    }
+  ],
+  "requirements": [
+    {
+      "area": "Canvassing",
+      "salesrabbit": "Mapped leads, status filters, notes, reminders, appointments.",
+      "spotio": "Map/list records, visit activities, configurable visit outcomes.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Public campaigns, CRM, sessions; full comparable-flow testing pending.",
+      "sources": "sr-matrix,sp-index"
+    },
+    {
+      "area": "Territories",
+      "salesrabbit": "Area assignment and rep location paths.",
+      "spotio": "Territory hierarchy, assignment, GPS trails, team location.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Routes and live sessions exist; hierarchical access and historical GPS audit need comparison.",
+      "sources": "sr-plus,sp-index"
+    },
+    {
+      "area": "Routes",
+      "salesrabbit": "Mobile route planning.",
+      "spotio": "Assign, reorder, optimize, lasso stops, start/end points, saved and scheduled routes.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "app/api/routes and campaign route optimization; recurring and scheduled-route parity unverified.",
+      "sources": "sr-plus,sp-route"
+    },
+    {
+      "area": "Offline",
+      "salesrabbit": "Mobile support; exact offline guarantees not established by these sources.",
+      "spotio": "Area downloads valid 24 hours, queued activities and new records, retry/history and later geocoding.",
+      "wolfgrid_status": "Gap / unverified",
+      "evidence_or_gap": "Sales currently requires connectivity; existing map caching is not an offline sale outbox.",
+      "sources": "sr-plus,sp-offline"
+    },
+    {
+      "area": "Lead data model",
+      "salesrabbit": "Custom fields, attachments, forms, locked leads.",
+      "spotio": "Multiple parent/child objects, typed fields and configurable stages; fields can be required by stage.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Public customer stages, private opportunities, weighted estimates and follow-up tasks are implemented. Flexible object relationships and arbitrary fields remain gaps.",
+      "sources": "sr-plus,sp-objects"
+    },
+    {
+      "area": "Verified customer sales",
+      "salesrabbit": "Feature matrix does not establish WolfGrid-style financial review rules.",
+      "spotio": "Reporting on stage and deal activity; exact owner self-verification policy not established.",
+      "wolfgrid_status": "Implemented; release validation",
+      "evidence_or_gap": "Lead-linked pending/verified/cancelled records, retry safety, immutable verified attribution and cancellation history.",
+      "sources": "sr-matrix,sp-ranks"
+    },
+    {
+      "area": "Reporting",
+      "salesrabbit": "Dashboards, reports, TV views and social feed.",
+      "spotio": "Custom MyReports and report-derived leaderboards with private/team/territory/role visibility.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Verified Sales/Revenue ranks, historical periods, auditable reviews and CSV of displayed records. No general report builder or scheduled delivery.",
+      "sources": "sr-matrix,sp-ranks"
+    },
+    {
+      "area": "Setter / closer",
+      "salesrabbit": "Shared appointment scheduling for field sales.",
+      "spotio": "Dedicated setter/closer report configuration.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "One attributed rep and optional appointment; separate setter/closer attribution remains to implement.",
+      "sources": "sr-scheduler,sp-setter"
+    },
+    {
+      "area": "Calendar",
+      "salesrabbit": "Appointment scheduling and calendar integration.",
+      "spotio": "Calendar activities and routes built from scheduled activities.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Calendar and appointment screens exist; live two-way calendar sync and setter availability need verification.",
+      "sources": "sr-scheduler,sp-route"
+    },
+    {
+      "area": "Follow-up sequences",
+      "salesrabbit": "Do not infer SPOTIO-style automation from the reviewed Core matrix.",
+      "spotio": "Manual email/text/call/custom steps plus automatic email and text; intervals, business hours, timezone, throttles, templates, pause/clone/archive and analytics.",
+      "wolfgrid_status": "Gap",
+      "evidence_or_gap": "Existing reminders are not a versioned enrollment and delivery engine. Provider delivery, suppression and retries must be validated.",
+      "sources": "sr-matrix,sp-autoplay"
+    },
+    {
+      "area": "Calling",
+      "salesrabbit": "Platform integrations vary; native equivalent not established here.",
+      "spotio": "In-app inbound/outbound calling.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Public contact outbound and telecom routes exist; do not count internal WolfGridSales dialler as public parity.",
+      "sources": "sr-integrations,sp-calls"
+    },
+    {
+      "area": "SMS / email",
+      "salesrabbit": "Integration-dependent capabilities.",
+      "spotio": "Integrated texting and communication templates.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Public contact communications routes require authenticated provider acceptance; no sales sequence engine yet.",
+      "sources": "sr-integrations,sp-sms"
+    },
+    {
+      "area": "Electronic contracts",
+      "salesrabbit": "Form builder, mobile signatures and electronic processing; Core add-on.",
+      "spotio": "Templates, in-person or email signatures, one/two signers, completed-file storage; Dropbox Sign delivery.",
+      "wolfgrid_status": "Provider dependency",
+      "evidence_or_gap": "No verified public contract lifecycle. Requires provider credentials, approved templates and signature audit/completion handling.",
+      "sources": "sr-contracts,sp-contracts"
+    },
+    {
+      "area": "Prospecting intelligence",
+      "salesrabbit": "DataGrid AI buyer scoring and homeowner/business data.",
+      "spotio": "Provider-backed household/property filters, saved criteria, monthly refresh, map-to-lead creation.",
+      "wolfgrid_status": "Licensed-data dependency",
+      "evidence_or_gap": "Territory IQ exists but is not equivalent to licensed person/household datasets or trained buyer propensity.",
+      "sources": "sr-data,sp-leads"
+    },
+    {
+      "area": "Movers",
+      "salesrabbit": "New-homeowner lead offering.",
+      "spotio": "Lead Machine includes recent-buyer and purchase-date criteria.",
+      "wolfgrid_status": "Licensed-data dependency",
+      "evidence_or_gap": "No verified mover feed entitlement or recurring refresh contract.",
+      "sources": "sr-movers,sp-leads"
+    },
+    {
+      "area": "Weather",
+      "salesrabbit": "Storm overlays and weather reports.",
+      "spotio": "Relevant integrations appear in product ecosystem; direct equivalent not established here.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "StormMaps providers/tiles exist; licensed coverage and historical report equivalence require validation.",
+      "sources": "sr-weather,sp-integrations"
+    },
+    {
+      "area": "Gamification",
+      "salesrabbit": "Competitions, rewards store, battles, achievements, experience/levels and scorecards.",
+      "spotio": "Custom ranking metrics and shared leaderboards; do not assume native reward-store parity.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Existing challenges/Wolfy work; cancellation-safe verified-sales rewards and contests need separate acceptance.",
+      "sources": "sr-amplify,sp-ranks"
+    },
+    {
+      "area": "AI assistance",
+      "salesrabbit": "DataGrid intelligence focuses on targeting.",
+      "spotio": "DASH IQ: company knowledge, record search and summaries. Actions: confirmed record/activity changes, multi-step work, photo extraction and message drafts. Go and Connect are additional pillars.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Deterministic Sales coaching exists. Concurrent Wolfy work must be assessed separately; no claim of full DASH equivalence.",
+      "sources": "sr-data,sp-ai"
+    },
+    {
+      "area": "Integrations",
+      "salesrabbit": "Marketplace, API/webhooks and third-party connectors; availability differs in Core/+ builds.",
+      "spotio": "Salesforce native two-way sync, HubSpot/Zapier connectors and webhooks.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Several public CRM providers exist; sale synchronization, field mapping, conflict recovery and deletion semantics are unverified.",
+      "sources": "sr-integrations,sr-api,sp-sync,sp-hooks,sp-integrations"
+    },
+    {
+      "area": "Permissions",
+      "salesrabbit": "Role controls and enterprise options.",
+      "spotio": "Configurable user permissions and report visibility.",
+      "wolfgrid_status": "Partial",
+      "evidence_or_gap": "Workspace membership plus user-private customer data enforced for new Sales operations. Enterprise SSO/SSO enforcement not validated.",
+      "sources": "sr-matrix,sp-permissions"
+    },
+    {
+      "area": "Maps and materials",
+      "salesrabbit": "Map overlays, sketching, sales materials and attachments.",
+      "spotio": "Custom map colours, KML layers, record photos and links.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Campaign map, attachments and content surfaces exist; imported KML and custom field colour rules need verification.",
+      "sources": "sr-matrix,sp-index"
+    },
+    {
+      "area": "Team communication",
+      "salesrabbit": "Team chat and notifications.",
+      "spotio": "Chat and notifications.",
+      "wolfgrid_status": "Existing foundations",
+      "evidence_or_gap": "Live-session chat/presence exists; broad persistent team messaging equivalence unverified.",
+      "sources": "sr-plus,sp-index"
+    },
+    {
+      "area": "Operations and support",
+      "salesrabbit": "Training, onboarding, account management, enterprise service options vary by plan.",
+      "spotio": "Knowledge base and integration administration documented; contractual service levels need vendor terms.",
+      "wolfgrid_status": "Operational dependency",
+      "evidence_or_gap": "Support staffing, migration services, response SLAs and compliance attestations cannot be delivered by a feature toggle.",
+      "sources": "sr-matrix,sp-index"
+    },
+    {
+      "area": "Product-version boundary",
+      "salesrabbit": "Core and SalesRabbit+ differ; contracts/weather/movers/SSO are not marked at parity in the April 2026 comparison.",
+      "spotio": "Capabilities and add-ons depend on account entitlements.",
+      "wolfgrid_status": "Research constraint",
+      "evidence_or_gap": "Target the documented union deliberately; a single demo does not prove every edition/plan behaviour.",
+      "sources": "sr-plus,sp-objects"
+    }
+  ]
+}
