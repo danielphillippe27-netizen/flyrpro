@@ -1,5 +1,7 @@
 'use client';
 
+import { useCampaignCardActivity } from '@/lib/cards/useCampaignCardActivity';
+import { campaignEngagement } from '@/lib/cards/campaign-engagement';
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -561,6 +563,8 @@ export default function CampaignDetailPage() {
   const campaignId = params.campaignId as string;
   const { currentWorkspaceId, membershipsByWorkspaceId, isFounder } = useWorkspace();
   const { setTheme } = useTheme();
+  const cardActivity = useCampaignCardActivity(currentWorkspaceId, campaignId);
+  const cardActivityState = cardActivity.status;
   const currentWorkspaceRole = currentWorkspaceId ? membershipsByWorkspaceId[currentWorkspaceId] ?? null : null;
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const requestedTab = searchParams.get('tab');
@@ -1295,6 +1299,7 @@ export default function CampaignDetailPage() {
     }
   }
   const dedupedAddresses = Array.from(seen.values());
+  const engagement = campaignEngagement(addresses, cardActivity?.engagement ?? [], addressKey);
   const addressIdToLogicalKey = new Map(addresses.map((addr) => [addr.id, addressKey(addr)]));
   const logicalKeysBySearchText = new Map<string, Set<string>>();
 
@@ -1363,6 +1368,7 @@ export default function CampaignDetailPage() {
       status: statusKey,
       statusLabel: label,
       canMarkVisited: !isVisitedCampaignAddress(addr),
+      cardEngagement: engagement.byAddress.get(addressKey(addr)),
       qr_png_url: null,
       qr_code_base64: addr.qr_code_base64 || null,
       sent_at: null,
@@ -1413,7 +1419,9 @@ export default function CampaignDetailPage() {
             </p>
           </div>
         ) : null}
-        <StatsHeader stats={campaignStats} />
+        <StatsHeader stats={campaignStats}
+          engagement={{ scans: totalQrScans, opens: cardActivity.totals?.opens ?? 0, clicks: cardActivity.totals?.clicks ?? 0, downloads: cardActivity.totals?.downloads ?? 0 }}
+          engagementState={cardActivityState === 'error' || scanEventsError || addressesError ? 'error' : cardActivityState === 'loading' || scanEventsLoading || addressesLoading ? 'loading' : 'ready'} />
         {isSelfServeDemo ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm dark:border-border dark:bg-card">
             <div className="flex flex-col">
@@ -1626,7 +1634,7 @@ export default function CampaignDetailPage() {
                   onRetry={() => void loadSecondaryData()}
                 />
               ) : (
-                <RecipientsTable recipients={formattedRecipients} campaignId={campaignId} onRefresh={loadData} />
+                <RecipientsTable cardActivityState={cardActivityState} recipients={formattedRecipients} campaignId={campaignId} onRefresh={loadData} />
               )}
             </div>
           </TabsContent>

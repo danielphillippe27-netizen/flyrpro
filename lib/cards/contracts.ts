@@ -19,9 +19,17 @@ export function cardHasDetails(card: CardContent): boolean {
 export const actionTypes=['call_clicked','text_clicked','email_clicked','contact_downloaded','social_clicked','website_clicked','review_clicked','referral_started'] as const;
 export function isPreview(userAgent:string) { return /bot|crawler|spider|preview|scanner|facebookexternalhit|slack|whatsapp|telegram|headless/i.test(userAgent); }
 export function cardMessage(name:string,phone:string,url:string) { return `Hey ${name.trim().split(/\s+/)[0] || 'there'}, it was nice chatting with you 👋 Below is my business card link so we can keep in touch!${phone ? ` You can always text me directly at ${phone}.` : ''}\n${url}`; }
-export function vcard(card:CardContent) {
- const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
- return ['BEGIN:VCARD','VERSION:3.0',`FN:${escape(card.name)}`,`ORG:${escape(card.company)}`,`TITLE:${escape(card.title)}`,`TEL:${escape(card.phone)}`,`EMAIL:${escape(card.email)}`,...card.socials.map(s=>`URL:${escape(s.url)}`),'END:VCARD'].join('\r\n');
+export function vcard(card:CardContent, jpegBase64?:string) {
+ const escape=(s:string)=>s.replace(/\\/g,'\\\\').replace(/\r\n|\r|\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
+ const [firstName='',...family]=card.name.trim().split(/\s+/);
+ const lines=['BEGIN:VCARD','VERSION:3.0',`N:${escape(family.join(' '))};${escape(firstName)};;;`,
+  `FN:${escape(card.name)}`,`ORG:${escape(card.company)}`,`TITLE:${escape(card.title)}`,
+  `TEL;TYPE=CELL:${escape(card.phone)}`,`EMAIL;TYPE=INTERNET:${escape(card.email)}`,
+  ...(jpegBase64?[`PHOTO;ENCODING=b;TYPE=JPEG:${jpegBase64}`]:card.photo?[`PHOTO;VALUE=URI:${card.photo}`]:[]),
+  ...card.socials.map(s=>`URL:${escape(s.url)}`),'END:VCARD'];
+ // Fold at 75 UTF-8 bytes, including the continuation space, without splitting characters.
+ const encoder=new TextEncoder();
+ return lines.map(line=>{let result='',bytes=0;for(const char of line){const size=encoder.encode(char).length;if(bytes+size>75){result+='\r\n ';bytes=1;}result+=char;bytes+=size;}return result;}).join('\r\n')+'\r\n';
 }
 
 export function canReceiveCard(phone: string | null | undefined, email: string | null | undefined): boolean {

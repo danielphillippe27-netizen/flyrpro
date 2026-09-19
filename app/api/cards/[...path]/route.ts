@@ -1,13 +1,15 @@
 import { NextRequest,NextResponse,after } from 'next/server';
+import { contactDownload } from '@/lib/cards/contact';
 import { dispatchCardPush } from '@/lib/cards/push';
 import { randomBytes,createHash } from 'node:crypto';
 import { z } from 'zod';
 import { prepareCardImage,CARD_IMAGE_LIMIT } from '@/lib/cards/images';
 import { cardScope,publicCard,CardError } from '@/lib/cards/server';
-import { cardContentSchema,cardHasDetails,canReceiveCard,actionTypes,isPreview,cardMessage,vcard } from '@/lib/cards/contracts';
+import { cardContentSchema,cardHasDetails,canReceiveCard,actionTypes,isPreview,cardMessage } from '@/lib/cards/contracts';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-const uuid=z.uuid();
+// Swift UUID.uuidString is uppercase; PostgreSQL returns lowercase UUIDs.
+const uuid=z.uuid().transform(value=>value.toLowerCase());
 const json=(value:unknown,status=200)=>NextResponse.json(value,{status,headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
 async function handle(req:NextRequest,{params}:{params:Promise<{path:string[]}>}) {
  try {
@@ -29,7 +31,7 @@ async function handle(req:NextRequest,{params}:{params:Promise<{path:string[]}>}
  const raw=req.method==='GET'?'{}':await req.text(); if(raw.length>16384) throw new CardError('Request too large',413); let body; try {body=JSON.parse(raw);} catch {throw new CardError('Invalid JSON');} if(!body||typeof body!=='object'||Array.isArray(body)) throw new CardError('Invalid request');
  if(path[0]==='public') {
   const token=path[1]; const {client,share,content}=await publicCard(token);
-  if(req.method==='GET'&&path[2]==='contact') return new NextResponse(vcard(content),{headers:{'Content-Type':'text/vcard;charset=utf-8','Content-Disposition':'attachment; filename="contact.vcf"','Cache-Control':'no-store'}});
+  if(req.method==='GET'&&path[2]==='contact') return new NextResponse(await contactDownload(content),{headers:{'Content-Type':'text/vcard;charset=utf-8','Content-Disposition':'attachment; filename="contact.vcf"','Cache-Control':'no-store'}});
   if(req.method!=='POST') throw new CardError('Not found',404);
   const ip=req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const bucket=createHash('sha256').update(`${token}:${ip}:${path[2]}`).digest('hex');

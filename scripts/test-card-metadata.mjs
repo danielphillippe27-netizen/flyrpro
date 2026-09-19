@@ -1,0 +1,17 @@
+import { build } from 'esbuild';
+import assert from 'node:assert/strict';
+const result=await build({entryPoints:['lib/cards/metadata.ts'],bundle:true,platform:'node',format:'esm',write:false});
+const {cardMetadata}=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+const base={name:'Daniel Phillippe',title:'Sales Representative',company:'Revel Realty Inc',bio:'About me',photo:'https://example.com/daniel.jpg',companyLogo:'https://example.com/logo.png'};
+const metadata=cardMetadata(base);
+assert.equal(metadata.title.absolute,'Daniel Phillippe · Business Card');
+assert.equal(metadata.openGraph.description,'Sales Representative · Revel Realty Inc');
+assert.equal(metadata.openGraph.images[0].url,base.photo);
+assert.deepEqual(metadata.twitter.images,metadata.openGraph.images);
+assert.equal(cardMetadata({...base,photo:''}).openGraph.images[0].url,base.companyLogo);
+assert.deepEqual(cardMetadata({...base,photo:'',companyLogo:''}).openGraph.images,[]);
+assert.equal(cardMetadata({...base,name:'Ava',photo:'https://example.com/ava.jpg'}).openGraph.title,'Ava · Business Card');
+assert.deepEqual(cardMetadata().openGraph.images,[]);
+assert.equal(cardMetadata().title.absolute,'Card unavailable');
+assert.equal(metadata.robots.index,false);
+console.log('Card metadata passed: personalized name, business details, photo, logo fallback, no-photo, unavailable cards, and no indexing');

@@ -4,7 +4,7 @@ Implemented across Wolfgrid-WEB, WolfGrid-IOS, and WolfGrid-ANDROID. Existing un
 
 ## Experience
 
-More → My Business Card edits/publishes a workspace-specific rep card. Existing profile data prefills the editor; blank socials are hidden and their order is editable. The public `/c/{token}` card includes prominent social links, call/text/email, vCard download, external reviews, and two referral flows. The visual editor supports device photo-library uploads for the company logo and profile photo, with URL fields as an alternative. The company logo appears in the header; the circular profile photo overlaps the header edge. Editing is also available from Settings.
+More → My Business Card automatically saves and publishes a workspace-specific rep card when any personal or business detail is present. There is no separate iOS publish switch. Blank cards (including appearance-only changes) remain unpublished. Sending an existing populated card upgrades its old unpublished flag before creating the share. Existing profile data prefills the editor; blank socials are hidden and their order is editable. The public `/c/{token}` card includes prominent social links, call/text/email, vCard download, external reviews, and two referral flows. The visual editor supports device photo-library uploads for the company logo and profile photo, with URL fields as an alternative. The company logo appears in the header; the circular profile photo overlaps the header edge. Editing is also available from Settings.
 
 Send Business Card in the map Lead form or saved lead detail saves the lead before creating an opaque 192-bit URL and opening the native text composer. iOS records available composer results; Android records handoff only. Neither platform claims carrier delivery. A failed link request retains the lead and request idempotency key. Locally queued Android leads must finish syncing and be sent from the lead list.
 
@@ -68,7 +68,7 @@ Production upload release verified September 18, 2026: `dpl_6dLa9cpEfogDNsFTwWHd
 
 Business cards are now enabled in production for all 232 existing workspaces, with zero missing or disabled gates after the rollout. Applied and registered `20260919010000_business_cards_available_to_all.sql` to public project `kfnsnwqylsdsbgnwgxva`; mirrored the migration in iOS. This supersedes the pending workspace activation notes above.
 
-New workspaces receive an enabled feature row automatically through an insert trigger. New feature rows default to enabled. Card profiles still default to unpublished; membership, ownership, RLS, upload limits, and explicit publishing remain unchanged. An explicit workspace disable remains available for operational rollback. No app or API deployment is required.
+New workspaces receive an enabled feature row automatically through an insert trigger. New feature rows default to enabled. Card profiles still default to unpublished; membership, ownership, RLS, and upload limits remain unchanged. The subsequent API/iOS automatic-publishing change derives publication from saved details. An explicit workspace disable remains available for operational rollback. No app or API deployment is required.
 
 PGlite regression checks passed for existing disabled/missing gates, new workspace activation by a non-admin database role, unpublished defaults, cascading cleanup, and existing engagement/referral/access isolation. Production verification confirmed all existing workspace gates and the installed trigger. Physical iOS retry remains device acceptance work.
 
