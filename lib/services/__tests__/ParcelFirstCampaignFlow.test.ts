@@ -56,7 +56,7 @@ test('a multi-building parcel stays one centered stop after address enrichment a
  assert.equal(rendered.features[0].properties?.house_number,'25');
 });
 
-test('partial source coverage gets usable parcel stops but no paid enrichment eligibility', async () => {
+test('partial source coverage pays only for the uncovered parcel gap', async () => {
  const boundary=turf.bboxPolygon([-124.4,47.94,-124.38,47.96]).geometry;
  const parcel=turf.bboxPolygon([-124.398,47.948,-124.394,47.952],{properties:{parcel_id:'missing-lot',land_use:'residential'}});
  const existing=[{id:'source-address',gers_id:'source:known',coordinate:{lon:-124.381,lat:47.941}}];
@@ -65,6 +65,20 @@ test('partial source coverage gets usable parcel stops but no paid enrichment el
  upsert:async(rows:Record<string,unknown>[])=>{saved=rows;return {error:null};}})} as unknown as SupabaseClient;
  const service=new CampaignAddressEnrichmentService(db);
  await service.ensureTargets({campaignId:'partial',region:'WA',source:'bedrock_us',boundary,buildings:[],parcels:[parcel]});
- assert.equal(saved.length,1);assert.equal(saved[0].address_resolution_permanent_allowed,false);
+ assert.equal(saved.length,1);assert.equal(saved[0].address_resolution_permanent_allowed,true);
+ assert.equal(saved[0].address_resolution_status,'pending');
+});
+
+test('partial source coverage does not pay for parcel-less building fallback', async () => {
+ const boundary=turf.bboxPolygon([-124.4,47.94,-124.38,47.96]).geometry;
+ const existing=[{id:'source-address',gers_id:'source:known',coordinate:{lon:-124.381,lat:47.941}}];
+ const building=turf.bboxPolygon([-124.398,47.948,-124.397,47.949],{properties:{building_id:'orphan-roof'}});
+ let saved:Record<string,unknown>[]=[];
+ const db={from:()=>({select:()=>({eq:()=>({range:async()=>({data:existing,error:null})})}),
+ upsert:async(rows:Record<string,unknown>[])=>{saved=rows;return {error:null};}})} as unknown as SupabaseClient;
+ const service=new CampaignAddressEnrichmentService(db);
+ await service.ensureTargets({campaignId:'partial',region:'WA',source:'bedrock_us',boundary,buildings:[building],parcels:[]});
+ assert.equal(saved.length,1);assert.equal(saved[0].geometry_target_kind,'building');
+ assert.equal(saved[0].address_resolution_permanent_allowed,false);
  assert.equal(saved[0].address_resolution_status,'unresolved');
 });
