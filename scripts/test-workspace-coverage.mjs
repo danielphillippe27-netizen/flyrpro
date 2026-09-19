@@ -14,7 +14,7 @@ CREATE TABLE workspaces(id uuid PRIMARY KEY, owner_id uuid);
 CREATE TABLE workspace_members(workspace_id uuid, user_id uuid, role text);
 CREATE TABLE campaigns(id uuid PRIMARY KEY, workspace_id uuid, owner_id uuid, name text, title text, status text DEFAULT 'active', created_at timestamptz DEFAULT now());
 CREATE TABLE campaign_addresses(id uuid PRIMARY KEY, campaign_id uuid, source_id text, gers_id text, formatted text, address text, match_source text, created_by uuid, updated_by uuid, visited boolean DEFAULT false, deleted_at timestamptz);
-CREATE TABLE user_profiles(user_id uuid PRIMARY KEY, full_name text);
+CREATE TABLE user_profiles(user_id uuid PRIMARY KEY, first_name text, last_name text);
 CREATE TABLE address_statuses(campaign_address_id uuid PRIMARY KEY, campaign_id uuid, status text, notes text, last_visited_at timestamptz, visit_count integer, last_action_by uuid, last_session_id uuid, last_home_event_id uuid, revision bigint, source_occurred_at timestamptz, last_client_mutation_id text, created_at timestamptz, updated_at timestamptz);
 CREATE TABLE campaign_home_events(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id uuid, campaign_address_id uuid, user_id uuid, session_id uuid, action_type text, note text, created_at timestamptz, occurred_at timestamptz, client_mutation_id text, request_hash text, origin_platform text, client_version text, client_build integer, base_revision bigint, result_revision bigint, applied_to_current boolean, override_reason text, result_state jsonb);
 CREATE TABLE receipts(actor uuid, mutation text, hash text, result jsonb, PRIMARY KEY(actor,mutation));
@@ -46,6 +46,7 @@ for (const [campaign, workspace, user] of [[a,w,owner],[b,w,rep],[c,foreign,outs
 await db.query("INSERT INTO campaign_addresses(id,campaign_id,source_id,formatted) VALUES($1,$2,'source:existing','8 Oak St Unit 1')",[id(99),a]);
 await db.query("INSERT INTO address_statuses(campaign_address_id,campaign_id,status,last_action_by,last_visited_at,updated_at) VALUES($1,$2,'delivered',$3,now(),now())",[id(99),a,owner]);
 await db.exec(await readFile(new URL('../supabase/migrations/20260919043000_workspace_home_coverage.sql', import.meta.url), 'utf8'));
+await db.exec(await readFile(new URL('../supabase/migrations/20260919044000_workspace_coverage_profile_names.sql', import.meta.url), 'utf8'));
 let checks=0;
 function check(actual, expected, message) { assert.deepEqual(actual, expected, message); console.log(`ok ${++checks} - ${message}`); }
 async function rejects(fn,pattern,message) { await assert.rejects(fn,pattern); console.log(`ok ${++checks} - ${message}`); }
