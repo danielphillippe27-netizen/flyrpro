@@ -33,14 +33,17 @@ export class CampaignAddressEnrichmentService {
     const existing = await fetchAllInPages<ExistingTargetAddress & { address_resolution_permanent_allowed?: boolean }>(async (from, to) => await this.supabase
       .from('campaign_addresses').select('id,coordinate,gers_id,building_gers_id,address_resolution_permanent_allowed')
       .eq('campaign_id', input.campaignId).range(from, to));
-    // Eligibility is established before fallback stops exist. Retries retain it.
-    const permanentAllowed = existing.length === 0 || existing.every(row =>
+    // Preserve the broader building fallback only for territories that began
+    // without source coverage. Parcel targets are independently eligible below
+    // because the planner emits them only for uncovered eligible properties.
+    const zeroSourceCoverage = existing.length === 0 || existing.every(row =>
       row.gers_id?.startsWith('synthetic:geometry-target:') && row.address_resolution_permanent_allowed === true);
     const candidates = planGeometryTargets({ ...input, existing, limit: MAX_CAMPAIGN_HOMES + 1 });
     const targets = candidates.slice(0, Math.max(0, MAX_CAMPAIGN_HOMES - existing.length));
     for (let offset = 0; offset < targets.length; offset += 250) {
       const rows = targets.slice(offset, offset + 250).map(t => {
         const confirmed = Boolean(t.houseNumber && t.streetName);
+        const permanentAllowed = !confirmed && (t.kind === 'parcel' || zeroSourceCoverage);
         const formatted = confirmed ? `${t.houseNumber} ${t.streetName}` : 'Address pending';
         return {
           campaign_id: input.campaignId, gers_id: t.key, source_id: t.key, source: input.source,
@@ -53,7 +56,9 @@ export class CampaignAddressEnrichmentService {
           geometry_target_kind: t.kind, geometry_target_id: t.geometryId, geometry_target_geom: t.geometry,
           address_resolution_permanent_allowed: permanentAllowed,
           address_resolution_status: confirmed ? 'confirmed' : permanentAllowed ? 'pending' : 'unresolved',
-          address_resolution_error: !confirmed && !permanentAllowed ? 'Paid enrichment is limited to campaigns with zero initial addresses' : null,
+          address_resolution_error: !confirmed && !permanentAllowed
+            ? 'Paid enrichment requires an uncovered parcel or a campaign with zero source coverage'
+            : null,
         };
       });
       const { error } = await this.supabase.from('campaign_addresses')

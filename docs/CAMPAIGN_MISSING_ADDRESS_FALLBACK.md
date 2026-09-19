@@ -24,7 +24,7 @@ Existing authoritative addresses, units, legacy geometry stops, and field histor
 Automatic provider enrichment uses the existing configuration:
 
 - `MAP_RECONCILIATION_ENABLE_REVERSE_GEOCODE=true`
-- `MAPBOX_GEOCODING_STORAGE_MODE=permanent`
+- `MAP_GEOMETRY_ENRICHMENT_STORAGE_MODE=permanent`
 - `MAPBOX_TOKEN` (or the existing public-token fallback)
 - `MAP_RECONCILIATION_MAX_GEOCODES_PER_RUN` must not be zero
 - `CRON_SECRET` authenticates the scheduled worker.
@@ -80,6 +80,8 @@ The real worker ran with an isolated queue adapter. Replaying its final results 
 
 Permanent requests are enabled only for this geometry enrichment worker using `MAP_GEOMETRY_ENRICHMENT_STORAGE_MODE=permanent`. The legacy `MAPBOX_GEOCODING_STORAGE_MODE` remains temporary. There is no temporary-persistence override in the release.
 
-Eligibility is recorded per target before geometry fallback inserts: the campaign must have zero saved addresses after the normal source import. Retries retain eligibility when all existing rows are eligible geometry targets. Existing native addresses, even partial coverage, prevent paid fallback for new targets. The database claim function filters eligibility and the worker checks it again. Ineligible provisional stops remain usable and unresolved, and the retry endpoint cannot queue them for paid enrichment.
+Eligibility is recorded per target after normal source addresses are imported. Every eligible parcel that remains uncovered receives one permanent reverse-geocoding request, including parcel gaps in a partially covered campaign. A source address inside the parcel, or a nearby road-offset source point that clearly reserves one of its roofs, prevents a second stop and paid request. Parcel-less building fallback remains eligible only when the campaign began with zero source coverage. Source-numbered parcels are confirmed without a provider request.
 
-Apply migrations `20260919180000` and `20260919210000` before deployment.
+The database claim function filters eligibility and the worker checks it again. Retries retain the same target eligibility and stop after three attempts. Returned provider points must have rooftop or parcel accuracy, match the region/country, lie inside the same parcel, and pass the transactional campaign-level civic-address duplicate check. Rejected results remain `Address pending` for review; owner/admin retry can queue only eligible unresolved targets.
+
+Apply migrations `20260919180000` and `20260919210000` before deployment. The second migration introduced the per-target authorization flag; the application now grants that authorization to each uncovered eligible parcel instead of gating the whole campaign.
