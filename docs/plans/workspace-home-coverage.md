@@ -35,7 +35,7 @@ activated. Source/build tests do not prove deployed or installed-device behavior
 
 ## Delivery state
 
-Implemented locally on 2026-09-19:
+Implemented and published to the production web/backend on 2026-09-19:
 
 - Web Settings and Team Settings, iOS Settings, Android Settings have the owner/
   manager control. Members have no toggle; the database enforces the permission.
@@ -60,8 +60,19 @@ Verification:
   TypeScript checking remains blocked by errors in unrelated existing files
   (integrations, session start, demo100 and other existing modules); no coverage
   file errors were reported.
+- Production field Supabase migrations applied to `kfnsnwqylsdsbgnwgxva`.
+  All 232 workspaces explicitly disabled; enabled column default verified false.
+  A rollback-only live check passed owner access, enabled/disabled coverage
+  reads and anonymous toggle rejection. No workspace was left enabled.
+- Live validation corrected the profile-name query to first_name/last_name and
+  refreshed expression-index statistics after an initial enabled-read timeout.
+- Web production build passed. Application code is deployed from `d91a13b4d`;
+  subsequent commits contain database follow-ups, tests and this release record.
+- iOS source pushed as `262699d8d`; Android source verified on its upstream at
+  `4c92ccdc94b32a861615ccb5e647a5deaf80bc13`. No new App Store or Play Store binary
+  was uploaded in this release.
 - Real-device visuals, authenticated browser flows, live multi-rep sync and
-  deployment remain unverified. No production changes, release or activation.
+  two-connection concurrency remain unverified. No workspace activation.
 
 Run the database checks from Wolfgrid-WEB:
 
@@ -70,9 +81,8 @@ npm install --prefix /tmp/wolfgrid-coverage-test --no-audit --no-fund @electric-
 PGLITE_MODULE=/tmp/wolfgrid-coverage-test/node_modules/@electric-sql/pglite/dist/index.js node scripts/test-workspace-coverage.mjs
 ```
 
-Before activation, apply the canonical web-repo migration to the field Supabase
-project through the normal release process, verify its real schema and test
-simultaneous writes with two authenticated reps. Ship compatible clients before
-turning the setting on. Keep the default off. The production migration uses an immutable expression index rather than rewriting
+Before activation, test simultaneous writes with two authenticated reps and
+ship compatible mobile clients. Keep the default off. The production migration
+uses an immutable expression index rather than rewriting
 address rows or firing their update triggers. Existing workspaces are explicitly
 seeded with enabled=false; workspaces without a settings row also resolve to off.
