@@ -290,9 +290,21 @@ function StageProgress({ stage }: { stage: Demo100Stage }) {
   );
 }
 
-function MetricTile({ label, value, icon: Icon, accent = 'text-white' }: { label: string; value: string; icon: typeof DoorOpen; accent?: string }) {
+function MetricTile({
+  label,
+  value,
+  icon: Icon,
+  accent = 'text-white',
+  tone = 'border-white/10 bg-white/[0.06]',
+}: {
+  label: string;
+  value: string;
+  icon: typeof DoorOpen;
+  accent?: string;
+  tone?: string;
+}) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-3.5">
+    <div className={`rounded-2xl border p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${tone}`}>
       <Icon className={`size-4 ${accent}`} />
       <p className="mt-3 text-2xl font-black tracking-tight text-white">{value}</p>
       <p className="mt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-500">{label}</p>
@@ -343,10 +355,10 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const outcomes = useMemo(() => getDemo100Outcomes(buildings.length), [buildings.length]);
   const finalMetrics = useMemo(() => getDemo100Metrics(buildings.length), [buildings.length]);
   const performanceRatios = useMemo(() => [
-    ['Conversation rate', `${Math.round(finalMetrics.conversationRate * 100)}%`],
-    ['Conversation → lead', `${finalMetrics.conversations > 0 ? Math.round((finalMetrics.leads / finalMetrics.conversations) * 100) : 0}%`],
-    ['Doors / conversation', finalMetrics.conversations > 0 ? (finalMetrics.doors / finalMetrics.conversations).toFixed(1) : '0'],
-    ['Lead → appointment', `${finalMetrics.leads > 0 ? Math.round((finalMetrics.appointments / finalMetrics.leads) * 100) : 0}%`],
+    ['Conversation rate', `${Math.round(finalMetrics.conversationRate * 100)}%`, 'border-emerald-400/35 bg-emerald-500/[0.07]'],
+    ['Conversation → lead', `${finalMetrics.conversations > 0 ? Math.round((finalMetrics.leads / finalMetrics.conversations) * 100) : 0}%`, 'border-blue-400/35 bg-blue-500/[0.07]'],
+    ['Doors / conversation', finalMetrics.conversations > 0 ? (finalMetrics.doors / finalMetrics.conversations).toFixed(1) : '0', 'border-red-400/35 bg-red-500/[0.07]'],
+    ['Lead → appointment', `${finalMetrics.leads > 0 ? Math.round((finalMetrics.appointments / finalMetrics.leads) * 100) : 0}%`, 'border-amber-300/35 bg-amber-400/[0.07]'],
   ] as const, [finalMetrics]);
   const visibleMetrics = useMemo(
     () => metricsFromOutcomes(outcomes.slice(0, resultRevealCount)),
@@ -1358,10 +1370,10 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Campaign results · Live preview</p>
             <h2 className="mt-2 text-3xl font-black tracking-[-0.04em]">Every door tells a story.</h2>
             <div className="mt-5 grid grid-cols-2 gap-2.5">
-              <MetricTile label="Doors" value={compactNumber(visibleMetrics.doors)} icon={DoorOpen} accent="text-red-400" />
-              <MetricTile label="Conversations" value={compactNumber(visibleMetrics.conversations)} icon={MessageSquare} accent="text-emerald-400" />
-              <MetricTile label="Leads" value={compactNumber(visibleMetrics.leads)} icon={UserRoundPlus} accent="text-blue-400" />
-              <MetricTile label="Appointments" value={compactNumber(visibleMetrics.appointments)} icon={CalendarDays} accent="text-yellow-300" />
+              <MetricTile label="Doors" value={compactNumber(visibleMetrics.doors)} icon={DoorOpen} accent="text-red-400" tone="border-red-400/35 bg-red-500/[0.07]" />
+              <MetricTile label="Conversations" value={compactNumber(visibleMetrics.conversations)} icon={MessageSquare} accent="text-emerald-400" tone="border-emerald-400/35 bg-emerald-500/[0.07]" />
+              <MetricTile label="Leads" value={compactNumber(visibleMetrics.leads)} icon={UserRoundPlus} accent="text-blue-400" tone="border-blue-400/35 bg-blue-500/[0.07]" />
+              <MetricTile label="Appointments" value={compactNumber(visibleMetrics.appointments)} icon={CalendarDays} accent="text-yellow-300" tone="border-amber-300/35 bg-amber-400/[0.07]" />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {(Object.keys(OUTCOME_LABELS) as SelfServeDoorOutcome[]).map((outcome) => (
@@ -1492,14 +1504,19 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Team performance</p>
             <div className="mt-2 flex items-end justify-between gap-4"><h2 className="text-3xl font-black tracking-[-0.04em]">Results, rep by rep.</h2><span className="text-sm font-black text-emerald-300">{Math.round(finalMetrics.conversationRate * 100)}% talked</span></div>
             <div className="mt-5 grid grid-cols-4 gap-2 text-center">
-              {[['Doors', finalMetrics.doors], ['Convos', finalMetrics.conversations], ['Leads', finalMetrics.leads], ['Appts', finalMetrics.appointments]].map(([label, value]) => (
-                <div key={String(label)} className="rounded-xl bg-white/[0.05] px-2 py-3"><p className="text-xl font-black">{value}</p><p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-zinc-500">{label}</p></div>
+              {[
+                ['Doors', finalMetrics.doors, 'border-red-400/40 bg-red-500/[0.07]'],
+                ['Convos', finalMetrics.conversations, 'border-emerald-400/40 bg-emerald-500/[0.07]'],
+                ['Leads', finalMetrics.leads, 'border-blue-400/40 bg-blue-500/[0.07]'],
+                ['Appts', finalMetrics.appointments, 'border-amber-300/40 bg-amber-400/[0.07]'],
+              ].map(([label, value, tone]) => (
+                <div key={String(label)} className={`rounded-xl border px-2 py-3 ${tone}`}><p className="text-xl font-black">{value}</p><p className="mt-1 text-[9px] font-bold uppercase tracking-wide text-zinc-400">{label}</p></div>
               ))}
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2" aria-label="Team performance ratios">
-              {performanceRatios.map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-white/8 bg-white/[0.035] px-3 py-3">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-zinc-500">{label}</p>
+              {performanceRatios.map(([label, value, tone]) => (
+                <div key={label} className={`rounded-xl border px-3 py-3 ${tone}`}>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-zinc-400">{label}</p>
                   <p className="mt-1 text-xl font-black text-white">{value}</p>
                 </div>
               ))}

@@ -1,4 +1,5 @@
 'use client';
+import { useCardEngagement } from '@/lib/cards/useCardEngagement';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
@@ -94,7 +95,7 @@ function buildAddressStatusColorExpression(statusFilters: StatusFilters, isDarkM
   const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], ['get', 'scans'], 0], 0];
   const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
   const getTeammateOwned = () => ['coalesce', ['feature-state', 'teammate_owned'], ['get', 'teammate_owned'], false];
-  const isQrScanned = ['any', ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
+  const isQrScanned = ['any', ['==', ['coalesce', ['feature-state', 'card_engaged'], false], true], ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
   const isHotLead = ['in', getAddressStatus(), ['literal', HOT_LEAD_ADDRESS_STATUSES]];
   const isLead = ['in', getAddressStatus(), ['literal', LEAD_ADDRESS_STATUSES]];
   const isConversation = ['in', getAddressStatus(), ['literal', CONVERSATION_ADDRESS_STATUSES]];
@@ -432,6 +433,7 @@ export function CampaignAddressPmtilesLayer({
   onAddressClick,
 }: CampaignAddressPmtilesLayerProps) {
   const [manifestSource, setManifestSource] = useState<ManifestAddressSource | null | undefined>(undefined);
+  useCardEngagement(map,campaignId,SOURCE_ID,'address',manifestSource?.sourceLayer);
   const [apiFallbackAddresses, setApiFallbackAddresses] = useState<CampaignAddress[]>([]);
   const onAddressClickRef = useRef(onAddressClick);
   const renderAddresses = addresses.length > 0 ? addresses : apiFallbackAddresses;

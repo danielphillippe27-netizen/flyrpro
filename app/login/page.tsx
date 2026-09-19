@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [createAccount, setCreateAccount] = useState<boolean | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [hasChecked, setHasChecked] = useState(false);
   const [inviteInfo, setInviteInfo] = useState<{
@@ -75,8 +77,15 @@ export default function LoginPage() {
     const message = rawMessage.trim();
     const status = typeof asRecord?.status === 'number' ? asRecord.status : null;
 
+    const code = typeof asRecord?.code === 'string' ? asRecord.code : '';
+    if (code === 'over_email_send_rate_limit' || /email.*rate limit/i.test(message)) {
+      return 'Email sending is temporarily limited. Wait before requesting another email. If you already have an account, sign in instead.';
+    }
     if (status === 429 || /rate limit|too many requests/i.test(message)) {
-      return 'Too many sign-in attempts. Please wait 60 seconds, then try once more.';
+      return 'Too many authentication requests. Please wait before trying again. The service has not provided an exact retry time.';
+    }
+    if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) {
+      return 'Invalid email or password. Try again or use Forgot password. If you registered with Google or Apple, use that sign-in option.';
     }
 
     const isUpstreamFailure =
@@ -121,7 +130,7 @@ export default function LoginPage() {
   };
   const gatePath = buildGatePath();
   const isListingOnboardingCreateAccountFlow = isListingOnboardingResume(normalizedNext);
-  const isCreateAccountFlow = inviteMode || isListingOnboardingCreateAccountFlow;
+  const isCreateAccountFlow = createAccount ?? (inviteMode || isListingOnboardingCreateAccountFlow);
   const emailSubmitLabel = isCreateAccountFlow
     ? 'Create account with Email'
     : 'Continue with Email';
@@ -137,7 +146,7 @@ export default function LoginPage() {
       ? 'Enter your email and we will send a secure password reset link'
       : isCreateAccountFlow
         ? 'Create an account to access your dashboard and finish onboarding'
-        : 'Sign in or create an account to access your dashboard or onboarding';
+        : 'Sign in to access your dashboard or onboarding';
   const buildAuthCallbackURL = () => {
     const callbackURL = new URL('/auth/callback', resolvePublicAppOrigin(window.location.origin));
     callbackURL.searchParams.set('next', normalizedNext);
@@ -255,7 +264,8 @@ export default function LoginPage() {
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (submitting.current) return;
+    submitting.current = true;
     setLoading(true);
     setMessage(null);
 
@@ -311,27 +321,17 @@ export default function LoginPage() {
         return;
       }
 
-      // Try sign-in first (existing user)
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (!signInError && signInData?.session) {
-        window.location.assign(gatePath);
-        return;
-      }
-
-      // If "Invalid login credentials", user may not exist — try sign-up
-      const isInvalidCredentials =
-        signInError?.message?.toLowerCase().includes('invalid login credentials') ||
-        signInError?.message?.toLowerCase().includes('invalid_credentials');
-
-      if (!isInvalidCredentials) {
-        setMessage({
-          type: 'error',
-          text: formatAuthError(signInError),
+      // A password failure must never trigger account creation or a confirmation email.
+      if (!isCreateAccountFlow) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
         });
+        if (!error && data?.session) {
+          window.location.assign(gatePath);
+          return;
+        }
+        setMessage({ type: 'error', text: formatAuthError(error) });
         return;
       }
 
@@ -382,6 +382,7 @@ export default function LoginPage() {
         text: formatAuthError(error, 'Something went wrong. Please try again.'),
       });
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -510,6 +511,22 @@ export default function LoginPage() {
                 : emailSubmitLabel}
           </Button>
         </form>
+
+        {authMode === 'sign-in' && (
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                setCreateAccount(!isCreateAccountFlow);
+                setMessage(null);
+              }}
+              className="text-sm font-semibold text-[#6f7480] transition hover:text-[#17181c] disabled:opacity-50"
+            >
+              {isCreateAccountFlow ? 'Already have an account? Sign in' : 'New to WolfGrid? Create an account'}
+            </button>
+          </div>
+        )}
 
         {message && (
           <div

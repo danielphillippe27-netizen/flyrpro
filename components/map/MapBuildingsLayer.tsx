@@ -1,4 +1,5 @@
 'use client';
+import { useCardEngagement } from '@/lib/cards/useCardEngagement';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type {
@@ -827,6 +828,7 @@ export function MapBuildingsLayer({
   const [isFetching, setIsFetching] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(15);
   const sourceId = 'map-buildings-source';
+  useCardEngagement(map,campaignId,sourceId,'building');
   const surfaceLayerId = 'map-buildings-surface';
   const layerId = 'map-buildings-extrusion';
   const shadowLayerId = 'map-buildings-shadow';
@@ -1087,7 +1089,7 @@ export function MapBuildingsLayer({
     const getAddressStatus = () => ['downcase', ['to-string', ['coalesce', ['feature-state', 'address_status'], ['get', 'address_status'], 'none']]];
     const getScansTotal = () => ['to-number', ['coalesce', ['feature-state', 'scans_total'], ['get', 'scans_total'], 0], 0];
     const getQrScanned = () => ['coalesce', ['feature-state', 'qr_scanned'], ['get', 'qr_scanned'], false];
-    const isQrScanned = ['any', ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
+    const isQrScanned = ['any', ['==', ['coalesce', ['feature-state', 'card_engaged'], false], true], ['==', getQrScanned(), true], ['==', getQrScanned(), 'true'], ['>', getScansTotal(), 0]];
     const isHotLead = [
       'any',
       ['==', getStatusValue(), 'hot_lead'],

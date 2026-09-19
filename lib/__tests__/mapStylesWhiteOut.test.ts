@@ -16,6 +16,8 @@ assert.equal(classifyWhiteOutRoadLayer({ id: 'waterway-label', type: 'symbol', '
 const layers = [
   { id: 'background', type: 'background' },
   { id: 'water', type: 'fill', 'source-layer': 'water' },
+  { id: 'landuse', type: 'fill', 'source-layer': 'landuse' },
+  { id: 'campaign-land-fill', type: 'fill', 'source-layer': 'landuse' },
   { id: 'road-simple', type: 'line', 'source-layer': 'road' },
   { id: 'bridge-case-simple', type: 'line', 'source-layer': 'road' },
   { id: 'road-label-simple', type: 'symbol', 'source-layer': 'road' },
@@ -43,8 +45,11 @@ applyPresetVisualTweaks(fakeMap, whiteOutStyle, {
   preserveLayerPrefixes: ['campaign-'],
 });
 
-assert.equal(paintChanges.get('background:background-color'), '#f8fafc');
+assert.equal(paintChanges.get('background:background-color'), '#ffffff');
 assert.equal(paintChanges.get('water:fill-color'), '#eaf2f8');
+assert.equal(paintChanges.get('landuse:fill-color'), '#ffffff');
+assert.equal(paintChanges.get('landuse:fill-pattern'), null);
+assert.equal(paintChanges.has('campaign-land-fill:fill-color'), false);
 assert.deepEqual(paintChanges.get('road-simple:line-color'), [
   'match',
   ['get', 'class'],

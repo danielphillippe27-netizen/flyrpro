@@ -3,7 +3,9 @@
   "devCommand": "npm run dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "regions": ["iad1"],
+  "regions": [
+    "iad1"
+  ],
   "crons": [
     {
       "path": "/api/cron/team-reports",
@@ -20,6 +22,10 @@
     {
       "path": "/api/cron/territory-iq",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/card-notifications",
+      "schedule": "* * * * *"
     }
   ]
 }
