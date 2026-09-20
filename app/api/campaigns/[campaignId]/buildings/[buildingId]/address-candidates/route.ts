@@ -6,6 +6,7 @@ import {
   buildingIdentifierCandidates,
   isUuid as isBuildingUuid,
   normalizeBuildingRouteId,
+  resolveSnapshotBuilding,
 } from "@/app/api/campaigns/_utils/resolve-campaign-building";
 
 export const runtime = "nodejs";
@@ -282,6 +283,17 @@ async function resolveBuilding(supabase: SupabaseClient, campaignId: string, bui
         streetName: goldRow.primary_street_name ?? null,
       };
     }
+  }
+
+  const { data: bundle, error: bundleError } = await supabase
+    .from("campaign_map_bundles")
+    .select("buildings_geojson")
+    .eq("campaign_id", campaignId)
+    .eq("is_current", true)
+    .maybeSingle();
+  if (!bundleError && bundle) {
+    const snapshotBuilding = resolveSnapshotBuilding(bundle.buildings_geojson, buildingIdParam);
+    if (snapshotBuilding) return snapshotBuilding;
   }
 
   return null;

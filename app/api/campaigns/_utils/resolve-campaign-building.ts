@@ -7,6 +7,16 @@ export type ResolvedCampaignBuilding = {
   publicId: string;
 };
 
+type SnapshotBuildingGeometry = {
+  type: 'Polygon' | 'MultiPolygon';
+  coordinates: number[][][] | number[][][][];
+};
+
+export type ResolvedSnapshotBuilding = ResolvedCampaignBuilding & {
+  geometry: SnapshotBuildingGeometry;
+  streetName: string | null;
+};
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -75,6 +85,69 @@ export function isSnapshotBuildingIdentifier(value: string): boolean {
   if (!trimmed) return false;
   if (trimmed.includes(':')) return true;
   return isUuid(trimmed);
+}
+
+function snapshotRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function snapshotString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** Resolve geometry and display metadata embedded in a canonical map bundle. */
+export function resolveSnapshotBuilding(
+  buildingsGeoJSON: unknown,
+  buildingIdParam: string | string[]
+): ResolvedSnapshotBuilding | null {
+  const requested = new Set(
+    buildingIdentifierCandidates(normalizeBuildingRouteId(buildingIdParam)).map(value => value.toLowerCase())
+  );
+  if (requested.size === 0) return null;
+
+  const collection = snapshotRecord(buildingsGeoJSON);
+  const features = Array.isArray(collection?.features) ? collection.features : [];
+  for (const rawFeature of features) {
+    const feature = snapshotRecord(rawFeature);
+    const properties = snapshotRecord(feature?.properties) ?? {};
+    const propertyCandidates = Array.isArray(properties.building_identifier_candidates)
+      ? properties.building_identifier_candidates
+      : [];
+    const identifiers = [
+      feature?.id,
+      properties.id,
+      properties.gers_id,
+      properties.building_id,
+      properties.public_building_id,
+      properties.canonical_building_id,
+      ...propertyCandidates,
+    ].flatMap(value => {
+      const identifier = snapshotString(value);
+      return identifier ? buildingIdentifierCandidates(identifier) : [];
+    });
+    if (!identifiers.some(identifier => requested.has(identifier.toLowerCase()))) continue;
+
+    const geometry = snapshotRecord(feature?.geometry);
+    if (
+      (geometry?.type !== 'Polygon' && geometry?.type !== 'MultiPolygon') ||
+      !Array.isArray(geometry.coordinates)
+    ) continue;
+
+    const publicId = identifiers[0];
+    if (!publicId) continue;
+    return {
+      rowId: null,
+      publicId,
+      geometry: geometry as SnapshotBuildingGeometry,
+      streetName: snapshotString(properties.street_name)
+        ?? snapshotString(properties.addr_street)
+        ?? snapshotString(properties.primary_street_name),
+    };
+  }
+
+  return null;
 }
 
 export async function resolveCampaignBuilding(
