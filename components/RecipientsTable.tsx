@@ -1,5 +1,6 @@
 'use client';
 
+import type { AddressCardEngagement } from '@/lib/cards/campaign-engagement';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 
 interface Recipient {
   id: string;
+  cardEngagement?: AddressCardEngagement;
   address_line: string;
   city: string;
   region: string;
@@ -43,10 +45,11 @@ interface Recipient {
 interface RecipientsTableProps {
   recipients: Recipient[];
   campaignId: string;
+  cardActivityState?: 'loading' | 'error' | 'ready';
   onRefresh?: () => Promise<void> | void;
 }
 
-export function RecipientsTable({ recipients, campaignId, onRefresh }: RecipientsTableProps) {
+export function RecipientsTable({ recipients, campaignId, onRefresh, cardActivityState = 'ready' }: RecipientsTableProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const router = useRouter();
@@ -178,6 +181,7 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
               <TableHead>Address</TableHead>
               {showContactsColumn && <TableHead>Contacts</TableHead>}
               <TableHead>QR Code</TableHead>
+              <TableHead>Business Card</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
@@ -186,7 +190,7 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
             {filteredRecipients.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={showContactsColumn ? 5 : 4}
+                  colSpan={showContactsColumn ? 6 : 5}
                   className="py-8 text-center text-sm text-muted-foreground"
                 >
                   No addresses match your search.
@@ -223,6 +227,18 @@ export function RecipientsTable({ recipients, campaignId, onRefresh }: Recipient
                       ) : (
                         <span className="text-gray-400 text-xs italic">Not generated</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
+                        {cardActivityState !== 'ready' ? (cardActivityState === 'loading' ? 'Loading…' : 'Unavailable') : recipient.cardEngagement ? (
+                          <>
+                            {recipient.cardEngagement.opens > 0 && <Badge variant="secondary">Opened · {recipient.cardEngagement.opens}</Badge>}
+                            {recipient.cardEngagement.clicks > 0 && <Badge variant="secondary">Clicked · {recipient.cardEngagement.clicks}</Badge>}
+                            {recipient.cardEngagement.downloads > 0 && <Badge variant="secondary">Downloaded · {recipient.cardEngagement.downloads}</Badge>}
+                            {recipient.cardEngagement.opens + recipient.cardEngagement.clicks + recipient.cardEngagement.downloads === 0 && 'Link created · no activity yet'}
+                          </>
+                        ) : 'No card activity'}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge className={cn('font-normal', getStatusBadgeClass(recipient.status))} variant="secondary">

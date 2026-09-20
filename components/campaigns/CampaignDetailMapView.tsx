@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceCoverageSummary, type WorkspaceCoverageSnapshot } from '@/components/campaigns/WorkspaceCoverageSummary';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
@@ -881,6 +882,7 @@ export function CampaignDetailMapView({
   const [selectedAddressIdForCard, setSelectedAddressIdForCard] = useState<string | null>(null);
   const [selectedParcelId, setSelectedParcelId] = useState<string | null>(null);
   const [multiSelectedTargets, setMultiSelectedTargets] = useState<SelectedMapTarget[]>([]);
+  const [workspaceCoverage, setWorkspaceCoverage] = useState<WorkspaceCoverageSnapshot | null>(null);
   const [locationCardOpen, setLocationCardOpen] = useState(false);
   const [deletingTarget, setDeletingTarget] = useState<'selection' | null>(null);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -3535,6 +3537,7 @@ export function CampaignDetailMapView({
       ) : (
         <div className="h-full w-full bg-background" />
       )}
+      <WorkspaceCoverageSummary campaignId={campaignId} onSnapshot={setWorkspaceCoverage} />
       {reconciliationProcessing ? (
         <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2">
           <div className="rounded-full border border-border bg-background/92 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm backdrop-blur-sm">
@@ -3935,6 +3938,7 @@ export function CampaignDetailMapView({
           {locationCardOpen && selectedBuildingId && (
             <div className="absolute bottom-6 left-4 z-20">
               <LocationCard
+                workspaceCoverage={workspaceCoverage?.campaignId === campaignId ? workspaceCoverage : null}
                 gersId={selectedBuildingId}
                 campaignId={campaignId}
                 preferredAddressId={selectedAddressIdForCard}
@@ -3973,6 +3977,7 @@ export function CampaignDetailMapView({
       {useGoogle2D && mapLoaded && locationCardOpen && selectedBuildingId ? (
         <div className="absolute bottom-6 left-4 z-20">
           <LocationCard
+                workspaceCoverage={workspaceCoverage?.campaignId === campaignId ? workspaceCoverage : null}
             gersId={selectedBuildingId}
             campaignId={campaignId}
             preferredAddressId={selectedAddressIdForCard}

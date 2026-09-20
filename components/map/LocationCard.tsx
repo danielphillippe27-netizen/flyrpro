@@ -1,5 +1,6 @@
 'use client';
 
+import type { WorkspaceCoverageSnapshot } from '@/components/campaigns/WorkspaceCoverageSummary';
 import { useState, type ReactNode } from 'react';
 import { useBuildingData } from '@/lib/hooks/useBuildingData';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,6 +21,7 @@ import {
 import type { Contact } from '@/types/contacts';
 
 interface LocationCardProps {
+  workspaceCoverage?: WorkspaceCoverageSnapshot | null;
   gersId: string;
   campaignId: string;
   preferredAddressId?: string | null; // For unit slices - show specific address
@@ -36,6 +38,7 @@ interface LocationCardProps {
  * Displays address info, residents, and QR status using the gers_id -> address_id bridge.
  */
 export function LocationCard({
+  workspaceCoverage,
   gersId,
   campaignId,
   preferredAddressId,
@@ -82,6 +85,8 @@ export function LocationCard({
   };
 
   const statusBadge = getStatusBadge();
+  const coverageHome = workspaceCoverage?.enabled && !isListMode
+    ? workspaceCoverage.homes.find(home => home.address_id === (preferredAddressId ?? address?.id)) : undefined;
 
   return (
     <div
@@ -102,6 +107,13 @@ export function LocationCard({
         <X className="w-4 h-4 text-gray-600 dark:text-gray-300" />
       </button>
 
+      {coverageHome && <div role="status" className="border-b bg-muted/50 px-5 pb-3 pt-12 text-sm text-foreground">
+        {coverageHome.state === 'visited_elsewhere'
+          ? `Already visited by ${coverageHome.rep_name ?? 'a teammate'} in ${coverageHome.campaign_name ?? 'another campaign'}${coverageHome.visited_at ? ` on ${coverageHome.visited_at.slice(0, 10)}` : ''}. Ask your manager before visiting again.`
+          : coverageHome.state === 'overlap'
+            ? `Also in ${coverageHome.campaign_name ?? 'another active campaign'}. Coordinate with your manager before visiting.`
+            : 'This home could not be matched to the shared team list.'}
+      </div>}
       {/* Loading State */}
       {isLoading && (
         <div className="p-5 space-y-4">

@@ -11,6 +11,7 @@ import {
   ratePercent,
 } from '@/lib/stats/formatters';
 import { StatCard } from './StatCard';
+import { BusinessCardOpenedStat } from './BusinessCardOpenedStat';
 import { SuccessMetricBar } from './SuccessMetricBar';
 import { Button } from '@/components/ui/button';
 
@@ -377,6 +378,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
         <StatCard label="Leads Created" value={effectiveLeadsCreated} />
         <StatCard label="Appointments Set" value={effectiveAppointmentCount} />
         <StatCard label="QR Codes Scanned" value={displayStats.qr_codes_scanned} />
+        <BusinessCardOpenedStat workspaceId={currentWorkspaceId} userId={userId} scope={canViewTeamMetrics ? scope : 'self'} />
         <StatCard label="Distance Walked" value={`${formatDistanceWalked(displayStats.distance_walked)} km`} />
         <StatCard label="Time Tracked" value={formatTimeTracked(displayStats.time_tracked)} />
       </div>

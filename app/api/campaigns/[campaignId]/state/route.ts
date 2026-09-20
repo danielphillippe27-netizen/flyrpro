@@ -1,3 +1,4 @@
+import { requestSupabase } from '@/app/api/_utils/request-supabase';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -281,7 +282,7 @@ export async function POST(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const supabase = createAdminClient();
+  const supabase = await requestSupabase(request);
   const allowed = await ensureCampaignAccess(supabase, campaignId, requestUser.id);
   if (!allowed) {
     return NextResponse.json({ error: 'Campaign not found or access denied' }, { status: 404 });
@@ -334,20 +335,15 @@ export async function POST(
     if (typeof body.longitude === 'number') rpcParams.p_lon = body.longitude;
 
     const outcomeResult = await supabase.rpc('record_campaign_address_outcome', rpcParams);
-    if (outcomeResult.error) {
-      const fallbackResult = await supabase.rpc('upsert_address_status', {
-        p_address_id: addressId,
-        p_campaign_id: campaignId,
-        p_status: status,
-        p_notes: notes,
-        p_last_visited_at: occurredAt,
-      });
-      if (fallbackResult.error) {
-        return NextResponse.json(
-          { error: 'Failed to update address status', details: fallbackResult.error.message },
-          { status: 500 }
-        );
-      }
+    if (outcomeResult.error || outcomeResult.data?.applied === false) {
+      const code = outcomeResult.data?.error_code;
+      return NextResponse.json({
+        error: code === 'WORKSPACE_HOME_ALREADY_VISITED'
+          ? 'This home was already visited in another team campaign. Ask your manager to override it.'
+          : 'Address status was not saved',
+        error_code: code ?? outcomeResult.error?.code,
+        changed,
+      }, { status: outcomeResult.data?.applied === false ? 409 : 500 });
     }
 
     changed.push({
