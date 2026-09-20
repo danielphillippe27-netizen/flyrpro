@@ -795,7 +795,23 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
     .replace(/\s+/g, ' ')
     .trim();
 
-  return addresses.features.flatMap((address) => {
+  const parcelTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; candidate: typeof parcelCandidates[number] }>();
+  const exactIndex = new Map<string, typeof parcelCandidates>();
+  const prefixIndex = new Map<string, typeof parcelCandidates>();
+  for (const candidate of parcelCandidates) {
+    const [minX, minY, maxX, maxY] = candidate.bbox;
+    parcelTree.insert({ minX, minY, maxX, maxY, candidate });
+    const identity = normalizedCivic(candidate.normalizedAddressText);
+    if (!identity) continue;
+    exactIndex.set(identity, [...(exactIndex.get(identity) ?? []), candidate]);
+    const words = identity.split(' ');
+    for (let length = 1; length < words.length; length++) {
+      const prefix = words.slice(0, length).join(' ');
+      prefixIndex.set(prefix, [...(prefixIndex.get(prefix) ?? []), candidate]);
+    }
+  }
+
+  return addresses.features.flatMap<AddressParcelOwnership>((address) => {
     const addressId = addressFeatureIdentifier(address);
     const coordinate = pointCoordinate(address);
     if (!addressId || !coordinate) return [];
@@ -811,14 +827,11 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
       [civic, locality, region].filter(Boolean).join(' '),
       [civic, locality, region, postal].filter(Boolean).join(' '),
     ].filter(Boolean));
-    const exact = civic
-      ? parcelCandidates.filter((candidate) => {
-          const candidateAddress = normalizedCivic(candidate.normalizedAddressText);
-          return exactAddressTexts.has(candidateAddress) ||
-            Boolean(locality && candidateAddress.startsWith(`${civic} ${locality} `)) ||
-            Boolean(region && candidateAddress.startsWith(`${civic} ${region} `));
-        })
-      : [];
+    const exact = civic ? [...new Set([
+      ...[...exactAddressTexts].flatMap(identity => exactIndex.get(identity) ?? []),
+      ...(locality ? prefixIndex.get(`${civic} ${locality}`) ?? [] : []),
+      ...(region ? prefixIndex.get(`${civic} ${region}`) ?? [] : []),
+    ])] : [];
     if (exact.length === 1) {
       const winner = exact[0];
       return [{
@@ -836,9 +849,9 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
     // of being attached to a large overlapping master parcel.
     if (addressBearingParcelRatio >= 0.5) return [];
 
-    const containing = parcelCandidates.filter((candidate) =>
-      pointInBbox(coordinate, candidate.bbox) && parcelContainsPoint(candidate.feature, coordinate)
-    );
+    const containing = parcelTree.search({ minX: coordinate[0], maxX: coordinate[0], minY: coordinate[1], maxY: coordinate[1] })
+      .map(item => item.candidate)
+      .filter(candidate => parcelContainsPoint(candidate.feature, coordinate));
     if (containing.length === 0) return [];
 
     const hasValid = containing.some((candidate) => candidate.valid);
@@ -1098,7 +1111,7 @@ async function fetchActiveBuildingUnits(
   return (data ?? []) as JsonRecord[];
 }
 
-function applyAddressAdjustments(
+export function applyAddressAdjustments(
   collection: FeatureCollection,
   adjustments: AddressAdjustmentRow[]
 ): FeatureCollection {
@@ -1117,8 +1130,10 @@ function applyAddressAdjustments(
           origin: source ?? null,
           provisional: source === 'derived_reverse_geocode',
           ...(adjustment ? {
-            label_anchor_lon: adjustment.label_anchor_lon,
-            label_anchor_lat: adjustment.label_anchor_lat,
+            ...(properties.pin_placement && adjustment.source === 'reconciliation' ? {} : {
+              label_anchor_lon: adjustment.label_anchor_lon,
+              label_anchor_lat: adjustment.label_anchor_lat,
+            }),
             access_lon: adjustment.access_lon,
             access_lat: adjustment.access_lat,
           } : {}),
@@ -2220,7 +2235,15 @@ export async function prebuildCampaignMapBundle(
     parcels,
     ownership: parcelOwnership,
   });
-  const addresses = applyAddressAdjustments(ownershipApplied.addresses, addressAdjustments);
+  const placements = planParcelPinPlacements({
+    addresses: ownershipApplied.addresses.features,
+    buildings: manualPinsApplied.buildings.features,
+    parcels: ownershipApplied.parcels.features,
+    protectedAddressIds: new Set(addressAdjustments.filter(row => row.source !== 'reconciliation').map(row => row.address_id.toLowerCase())),
+  });
+  const addresses = applyAddressAdjustments(
+    applyParcelPinPlacements(ownershipApplied.addresses, placements), addressAdjustments
+  );
   const buildings = manualPinsApplied.buildings;
   const ownedParcels = await measure('parcel_occupancy_filter', recordTiming, async () => {
     const filtered = filterParcelsWithoutBuildingsOrAddresses({

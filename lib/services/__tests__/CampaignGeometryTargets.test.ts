@@ -66,6 +66,12 @@ test('country routing distinguishes all shared abbreviations using actual geogra
  assert.equal(resolveAmbiguousRegionCountry('ON',boundary),null);
  assert.throws(()=>resolveAmbiguousRegionCountry('WA',null),/ambiguous/);
 });
+test('the failed Forks campaign polygon routes WA to the United States', () => {
+ const forksPolygon:GeoJSON.Polygon={type:'Polygon',coordinates:[[[-124.37437559332972,47.95595644470535],
+  [-124.3801360363316,47.95591833057347],[-124.38032620362894,47.958088828982966],
+  [-124.37425475063012,47.958088828982966],[-124.37437559332972,47.95595644470535]]]};
+ assert.equal(resolveAmbiguousRegionCountry('WA',forksPolygon),'US');
+});
 test('enrichment requires a strong result inside this property in the correct region', () => {
  const target:EnrichmentTarget={address_resolution_permanent_allowed:true,id:'stop',campaign_id:'campaign',region:'WA',address_resolution_lease:'lease',geometry_target_geom:building('a',-124.395).geometry};
  const result={accuracy:'rooftop',region:'WA',longitude:-124.3949,latitude:47.9501} as ReverseResult;

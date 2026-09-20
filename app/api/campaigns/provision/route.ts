@@ -626,6 +626,7 @@ async function resolveDiamondThenBedrock(options: {
 }> {
   const { campaignId, polygon, regionCode } = options;
   const country = resolveAmbiguousRegionCountry(regionCode, polygon);
+  console.log('[Provision] Resolved source country.', { campaignId, regionCode, country });
 
   if (DiamondMunicipalService.isSupportedRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Diamond municipal S3...', {
