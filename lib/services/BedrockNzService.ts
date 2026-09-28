@@ -449,9 +449,8 @@ export class BedrockNzService {
     });
     const snapshotRow = snapshotToCampaignSnapshotRow(seedSnapshot);
     const parcelTiles = parcelTilesFromSnapshot(snapshotRow);
-    if (!parcelTiles) {
-      throw new Error('PMTiles parcel artifact unavailable for BEDROCK New Zealand');
-    }
+    const emptyParcels = { parcels: [], cacheStatus: 'miss' as const,
+      timings: { cacheMs: 0, artifactMs: 0, headerMs: 0, tileMs: 0, filterMs: 0, totalMs: 0, tileCount: 0, featureCount: 0 } };
 
     const [addressScan, buildingCollection, parcelScan] = await Promise.all([
       fetchScopedPmtilesAddresses({
@@ -476,28 +475,24 @@ export class BedrockNzService {
             defaultSource: 'LINZ NZ Addresses',
             idPrefix: 'linz',
           }),
+      }).catch((error) => {
+        console.warn('[BedrockNzService] Address layer unavailable; continuing with geometry', error instanceof Error ? error.message : String(error));
+        return { addresses: [], metric: pmtilesMetric({ hits: 0, seconds: 0 }) };
       }),
-      fetchScopedPmtilesBuildingFeatures(snapshotRow, bbox, new Set(), options.polygon),
-      fetchScopedPmtilesParcels(
+      fetchScopedPmtilesBuildingFeatures(snapshotRow, bbox, new Set(), options.polygon).catch(() => null),
+      parcelTiles ? fetchScopedPmtilesParcels(
         options.campaignId,
         snapshotRow,
         parcelTiles,
         bbox,
         options.polygon,
         { residentialOnly: true }
-      ),
+      ).catch(() => emptyParcels) : Promise.resolve(emptyParcels),
     ]);
-
-    if (!buildingCollection?.features.length) {
-      throw new Error('PMTiles layer produced no usable features: buildings');
-    }
-    if (!parcelScan.parcels.length) {
-      throw new Error('PMTiles layer produced no usable features: parcels');
-    }
 
     const addresses = addressScan.addresses;
     const addressMetrics = scanMetricOnly(addressScan.metric);
-    const buildingFeatures = buildingCollection.features
+    const buildingFeatures = (buildingCollection?.features ?? [])
       .map(scopedBuildingFeature)
       .filter((feature): feature is BedrockScopedBuildingFeature => Boolean(feature));
     const parcelFeatures = parcelScan.parcels

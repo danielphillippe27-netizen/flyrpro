@@ -5,6 +5,7 @@ import Pbf from 'pbf';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
+import { resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -732,7 +733,10 @@ export class DiamondMunicipalService {
   } | null> {
     const startedAt = Date.now();
     const normalizedRegion = options.regionCode.trim().toUpperCase();
-    const country = normalizeCountry(normalizedRegion);
+    const ambiguousCountry = resolveAmbiguousRegionCountry(normalizedRegion, options.polygon);
+    const country = ambiguousCountry
+      ? ({ US: 'usa', CA: 'canada', AU: 'australia', ZA: 'south-africa' } as const)[ambiguousCountry]
+      : normalizeCountry(normalizedRegion);
     if (!country) return null;
 
     const bbox = turf.bbox(options.polygon) as Bounds;

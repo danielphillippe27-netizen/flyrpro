@@ -11,7 +11,10 @@ import { CampaignLinkQualityService } from './CampaignLinkQualityService';
 import { CampaignMapModeService } from './CampaignMapModeService';
 import { TownhouseSplitterService, type BuildingFeature as TownhouseBuildingFeature } from './TownhouseSplitterService';
 import { uuidV5 } from './TownhouseUnitIdentity';
-import { buildingIdentifiers, isAccessoryBuilding, planParcelPinPlacements, mapWithConcurrency } from './ParcelPinPlacement';
+import { buildingIdentifiers, isAccessoryBuilding, planParcelPinPlacements } from './ParcelPinPlacement';
+
+import { dispatchReconciliationRun } from './ReconciliationDispatch';
+import { reconciliationLookupPool } from './ReconciliationLookupPool';
 
 export const MAP_RECONCILIATION_ALGORITHM_VERSION = 'map-reconciliation-v20-global-parcel-first';
 const AUTO_LINK_SCORE = 0.92;
@@ -1101,6 +1104,7 @@ export function shouldQueueMapReconciliationConvergencePass(input: {
 }
 
 export class CampaignMapReconciliationService {
+  private processingDeadline = Number.POSITIVE_INFINITY;
   private readonly temporaryReverseResults = new Map<string, ReverseResult | null>();
 
   constructor(private readonly supabase: SupabaseClient) {}
@@ -1469,14 +1473,44 @@ export class CampaignMapReconciliationService {
       .select('*')
       .maybeSingle();
     if (error) throw new Error(`Failed to queue map reconciliation: ${error.message}`);
-    if (data) return data as ReconciliationRunRow;
+    if (data) {
+      await this.dispatchQueuedRun(data as ReconciliationRunRow);
+      return data as ReconciliationRunRow;
+    }
     const existing = await this.supabase
       .from('map_reconciliation_runs')
       .select('*')
       .eq('idempotency_key', idempotencyKey)
       .maybeSingle();
     if (existing.error) throw new Error(`Failed to read queued reconciliation: ${existing.error.message}`);
+    if (existing.data) await this.dispatchQueuedRun(existing.data as ReconciliationRunRow);
     return existing.data as ReconciliationRunRow | null;
+  }
+
+  private async dispatchQueuedRun(run: ReconciliationRunRow): Promise<void> {
+    if (run.status !== 'queued' || Number(run.attempt_count) !== 0) return;
+    if (!await dispatchReconciliationRun(run.id)) {
+      console.warn('[MapReconciliation] Immediate dispatch unavailable; persisted run remains queued:', run.id);
+    }
+  }
+
+  /** Claim only an untouched queued run. Concurrent POSTs and cron cannot both win. */
+  async claimQueuedRunAndProcess(runId: string, workerId: string): Promise<ReconciliationRunRow | null> {
+    const timestamp = new Date().toISOString();
+    const { data, error } = await this.supabase.from('map_reconciliation_runs')
+      .update({
+        status: 'matching', phase: 'matching', attempt_count: 1,
+        lease_owner: workerId, lease_expires_at: new Date(Date.now() + 240_000).toISOString(),
+        started_at: timestamp, updated_at: timestamp,
+      })
+      .eq('id', runId).eq('status', 'queued').eq('attempt_count', 0)
+      .is('lease_owner', null).is('lease_expires_at', null)
+      .select('*').maybeSingle();
+    if (error) throw new Error(`Failed to claim immediate reconciliation: ${error.message}`);
+    if (!data) return null;
+    const run = data as ReconciliationRunRow;
+    await this.processRun(run);
+    return run;
   }
 
   private async rolloutMode(campaignId: string): Promise<MapReconciliationMode> {
@@ -1533,6 +1567,7 @@ export class CampaignMapReconciliationService {
     // Temporary results are session-scoped testing evidence. Never carry them
     // into a later reconciliation run or persist them in Supabase.
     this.temporaryReverseResults.clear();
+    this.processingDeadline = Date.now() + 240_000;
     try {
       const currentRow = await readCurrentCampaignMapBundle(this.supabase, run.campaign_id);
       if (!currentRow) throw new Error('No current canonical map bundle');
@@ -2041,7 +2076,7 @@ export class CampaignMapReconciliationService {
     const [addressesResult, linksResult, touchesResult] = await Promise.all([
       this.supabase
         .from('campaign_addresses')
-        .select('id, visited, match_source')
+        .select('id, visited, match_source, geometry_target_kind, geometry_target_id')
         .eq('campaign_id', campaignId),
       this.supabase
         .from('building_address_links')
@@ -2056,6 +2091,12 @@ export class CampaignMapReconciliationService {
     const buildingIds = new Set<string>();
     for (const row of addressesResult.data ?? []) {
       const source = normalizeText(row.match_source);
+      // These stops have their own in-place civic enrichment. The global matcher
+      // must not replace them with synthetic addresses or move their geometry.
+      if (row.geometry_target_kind) addressIds.add(String(row.id).toLowerCase());
+      if (row.geometry_target_kind === 'building' && row.geometry_target_id) {
+        buildingIds.add(String(row.geometry_target_id).toLowerCase());
+      }
       if (row.visited === true || source.includes('manual') || source === 'field_manual_pin') {
         addressIds.add(String(row.id).toLowerCase());
       }
@@ -2550,6 +2591,13 @@ export class CampaignMapReconciliationService {
       buildingIdentifiers(building).forEach(id => group.add(id));
       establishedHomesByParcel.set(parcel, group);
     }
+    // Parcel-only stops may later acquire a footprint. Keep enriching their
+    // existing identity instead of creating an additional synthetic address.
+    const geometryTargetParcels = new Set(input.addresses.flatMap(address => {
+      const p = asRecord(address.properties);
+      return p.geometry_target_kind === 'parcel' && typeof p.geometry_target_id === 'string'
+        ? [p.geometry_target_id.toLowerCase()] : [];
+    }));
     const parcelResolvedBuildings = new Set(parcelPlacements.flatMap(p => p.buildingId ? [p.buildingId] : []));
     const parcelResolvedAddresses = new Set(parcelPlacements.map(p => p.addressId));
 
@@ -2568,6 +2616,7 @@ export class CampaignMapReconciliationService {
         if (!id || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
             input.protectedBuildingIds.has(id) || buildingIdentifiers(building).some(alias => parcelResolvedBuildings.has(alias))) return false;
         const parcel = resolveParcelId(building)?.toLowerCase();
+        if (parcel && geometryTargetParcels.has(parcel)) return false;
         const establishedHomes = parcel ? establishedHomesByParcel.get(parcel) : null;
         if (establishedHomes && !buildingIdentifiers(building).some(alias => establishedHomes.has(alias))) return false;
         return shouldReverseGeocodeBuilding(
@@ -2578,8 +2627,7 @@ export class CampaignMapReconciliationService {
       })
       .sort((left, right) => (featureId(left) ?? '').localeCompare(featureId(right) ?? ''));
     const reverseCandidates = orderedBuildings.slice(0, maxGeocodes);
-    for (let offset = 0; offset < reverseCandidates.length; offset += 24) {
-      const reverseResults = await mapWithConcurrency(reverseCandidates.slice(offset, offset + 24), 6, async (building) => {
+    const reverseResults = await reconciliationLookupPool(reverseCandidates, async (building) => {
         const buildingIdValue = featureId(building);
         if (!buildingIdValue) return null;
         try {
@@ -2611,12 +2659,10 @@ export class CampaignMapReconciliationService {
           // Invalid geometry or a provider miss remains visible for review.
           return null;
         }
-      });
-      for (const result of reverseResults) if (result) geocoded.push(result);
-      await this.heartbeatRun(input.run.id, {
-        phase: 'geocoding', building_index: offset + reverseResults.length, building_count: reverseCandidates.length,
-      });
-    }
+      }, completed => this.heartbeatRun(input.run.id, {
+        phase: 'geocoding', building_index: completed, building_count: reverseCandidates.length,
+      }), { deadline: this.processingDeadline - 45_000 });
+    for (const result of reverseResults) if (result) geocoded.push(result);
 
     const reverseIdentityCounts = new Map<string, number>();
     for (const item of geocoded) {

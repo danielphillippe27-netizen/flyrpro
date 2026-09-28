@@ -1,5 +1,4 @@
 import { after, NextRequest, NextResponse } from 'next/server';
-import * as turf from '@turf/turf';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import { RoutingService } from '@/lib/services/RoutingService';
@@ -18,7 +17,8 @@ import { BedrockSouthAfricaService } from '@/lib/services/BedrockSouthAfricaServ
 import { BedrockUkService } from '@/lib/services/BedrockUkService';
 import { BedrockUsService } from '@/lib/services/BedrockUsService';
 import { DiamondMunicipalService } from '@/lib/services/DiamondMunicipalService';
-import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
+import { CampaignAddressEnrichmentService } from '@/lib/services/CampaignAddressEnrichmentService';
+import { resolveCampaignRegion, resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { fetchScopedPmtilesBuildingFeatures } from '@/app/api/campaigns/_utils/scoped-pmtiles-buildings';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
@@ -49,7 +49,6 @@ import {
   isConnectionError,
   isUniqueConstraintError,
   provisionFailureReason,
-  shouldFailZeroAddressProvision,
   snapshotHasStaticPmtilesGeometry,
 } from '@/lib/services/provisionHelpers';
 import {
@@ -378,7 +377,17 @@ async function bulkInsertAddresses(
   }
 
   const existingSignatures = await fetchCampaignAddressSignatures(supabase, campaignId);
-  const addressesToWrite = filterAddressesAgainstExisting(uniqueAddresses, existingSignatures);
+  let unmatchedAddresses = uniqueAddresses;
+  if ([...existingSignatures].some(signature => signature.includes('|external|synthetic:geometry-target:'))) {
+    const { data, error } = await supabase.rpc('adopt_campaign_geometry_addresses', {
+      p_campaign_id: campaignId, p_addresses: uniqueAddresses,
+    });
+    if (error) throw new Error(`Failed to reconcile source addresses with existing stops: ${error.message}`);
+    unmatchedAddresses = data as StandardCampaignAddress[];
+  }
+  const existingCount = await countCampaignAddresses(supabase, campaignId);
+  const addressesToWrite = filterAddressesAgainstExisting(unmatchedAddresses, existingSignatures)
+    .slice(0, Math.max(0, MAX_CAMPAIGN_HOMES - existingCount));
 
   if (addressesToWrite.length === 0) {
     return countCampaignAddresses(supabase, campaignId);
@@ -573,80 +582,10 @@ function addressesForInitialHydration(
   return cappedAddresses.length <= staticGeometryAddressHydrationLimit() ? cappedAddresses : [];
 }
 
-function stringFeatureValue(properties: Record<string, unknown>, ...keys: string[]) {
-  for (const key of keys) {
-    const value = properties[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  }
-  return null;
-}
-
-function featureCenter(feature: GeoJSON.Feature): [number, number] | null {
-  try {
-    const center = turf.centerOfMass(feature as GeoJSON.Feature<GeoJSON.Geometry>);
-    const coordinates = center.geometry.coordinates;
-    const lon = Number(coordinates[0]);
-    const lat = Number(coordinates[1]);
-    if (Number.isFinite(lon) && Number.isFinite(lat)) {
-      return [lon, lat];
-    }
-  } catch {
-    // Fall through to bbox center for malformed clipped building fragments.
-  }
-
-  try {
-    const bbox = turf.bbox(feature) as [number, number, number, number];
-    const lon = (bbox[0] + bbox[2]) / 2;
-    const lat = (bbox[1] + bbox[3]) / 2;
-    return Number.isFinite(lon) && Number.isFinite(lat) ? [lon, lat] : null;
-  } catch {
-    return null;
-  }
-}
-
-function buildProxyAddressesFromBuildings(options: {
-  campaignId: string;
-  buildings: GeoJSON.FeatureCollection | null | undefined;
-  source: ProvisionSource;
-  regionCode: string;
-}): StandardCampaignAddress[] {
-  const features = Array.isArray(options.buildings?.features) ? options.buildings.features : [];
-  return features.flatMap((feature, index): StandardCampaignAddress[] => {
-    const center = featureCenter(feature);
-    if (!center) return [];
-
-    const properties = (feature.properties ?? {}) as Record<string, unknown>;
-    const buildingId =
-      stringFeatureValue(properties, 'building_id', 'gers_id', 'id') ??
-      (typeof feature.id === 'string' || typeof feature.id === 'number' ? String(feature.id) : null) ??
-      `building-${index + 1}`;
-    const formatted =
-      stringFeatureValue(properties, 'address_text', 'formatted', 'full_address', 'label', 'name') ??
-      `Door target ${index + 1}`;
-    const [lon, lat] = center;
-
-    return [{
-      campaign_id: options.campaignId,
-      formatted,
-      house_number: stringFeatureValue(properties, 'house_number', 'number', 'street_number') ?? undefined,
-      street_name: stringFeatureValue(properties, 'street_name', 'street', 'road_name') ?? undefined,
-      locality: stringFeatureValue(properties, 'locality', 'city', 'municipality') ?? undefined,
-      region: options.regionCode.toUpperCase(),
-      postal_code: stringFeatureValue(properties, 'postal_code', 'postcode') ?? undefined,
-      coordinate: { lat, lon },
-      lat,
-      lon,
-      geom: JSON.stringify({ type: 'Point', coordinates: [lon, lat] }),
-      source: options.source,
-      gers_id: `${options.source}:building-proxy:${buildingId}`,
-    }];
-  });
-}
-
-function snapshotWithProxyAddressCount(
+function snapshotWithGeometryTargetCount(
   snapshot: LambdaSnapshotResponse,
-  addressCount: number
+  addressCount: number,
+  targetCount: number
 ): LambdaSnapshotResponse {
   const tileMetrics = snapshot.metadata?.tile_metrics &&
     typeof snapshot.metadata.tile_metrics === 'object'
@@ -666,9 +605,9 @@ function snapshotWithProxyAddressCount(
       tile_metrics: {
         ...tileMetrics,
         campaign_addresses_count: addressCount,
-        building_proxy_addresses_count: addressCount,
-        address_proxy_reason: 'address_pmtiles_zero_hits',
-        address_proxy_source: 'scoped_pmtiles_buildings',
+        geometry_target_count: targetCount,
+        address_proxy_reason: 'incomplete_address_coverage',
+        address_proxy_source: 'scoped_property_geometry',
       } as unknown as NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics'],
     } as LambdaSnapshotResponse['metadata'],
   };
@@ -686,6 +625,7 @@ async function resolveDiamondThenBedrock(options: {
   bedrockLinkGeometry: BedrockNzLinkGeometry | null;
 }> {
   const { campaignId, polygon, regionCode } = options;
+  const country = resolveAmbiguousRegionCountry(regionCode, polygon);
 
   if (DiamondMunicipalService.isSupportedRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Diamond municipal S3...', {
@@ -761,7 +701,7 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
-  if (BedrockAustraliaService.isAustraliaRegion(regionCode)) {
+  if ((!country || country === 'AU') && BedrockAustraliaService.isAustraliaRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Bedrock Australia S3...', {
       campaignId,
       regionCode,
@@ -790,7 +730,7 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
-  if (BedrockCanadaService.isCanadaRegion(regionCode)) {
+  if ((!country || country === 'CA') && BedrockCanadaService.isCanadaRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Bedrock Canada S3...', {
       campaignId,
       regionCode,
@@ -819,7 +759,7 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
-  if (BedrockSouthAfricaService.isSouthAfricaRegion(regionCode)) {
+  if ((!country || country === 'ZA') && BedrockSouthAfricaService.isSouthAfricaRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Bedrock South Africa S3...', {
       campaignId,
       regionCode,
@@ -877,7 +817,7 @@ async function resolveDiamondThenBedrock(options: {
     };
   }
 
-  if (BedrockUsService.isUsRegion(regionCode)) {
+  if ((!country || country === 'US') && BedrockUsService.isUsRegion(regionCode)) {
     console.log('[Provision] Source probe: checking Bedrock US S3...', {
       campaignId,
       regionCode,
@@ -1511,7 +1451,7 @@ export async function POST(request: NextRequest) {
           } = resolvedProvision;
           let snapshot = rawSnapshot;
           let addressesToInsert = resolvedAddresses;
-          const homeCapNotice = resolvedHomeCount > MAX_CAMPAIGN_HOMES
+          let homeCapNotice = resolvedHomeCount > MAX_CAMPAIGN_HOMES
             ? campaignHomeCapNotice(resolvedHomeCount)
             : null;
 
@@ -1532,14 +1472,6 @@ export async function POST(request: NextRequest) {
           const hasResolvedAddresses = addressesToInsert.length > 0;
           if (hasResolvedAddresses) {
             finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, addressesToInsert);
-          }
-
-          const hasStaticGeometry = snapshotHasStaticPmtilesGeometry(snapshot);
-          if (shouldFailZeroAddressProvision({ hasResolvedAddresses, hasStaticGeometry })) {
-            throw new ProvisionError(
-              'Provisioning did not find any addresses in this territory. Try a larger polygon or a nearby area.',
-              422
-            );
           }
 
           if (finalAddressCount > 0) {
@@ -1570,30 +1502,30 @@ export async function POST(request: NextRequest) {
           const hasResidentialParcels = scopedParcelCount > 0;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
 
-          if (finalAddressCount === 0 && (scopedGeometry.buildings?.features.length ?? 0) > 0) {
-            const proxyAddresses = buildProxyAddressesFromBuildings({
-              campaignId: campaignId!,
-              buildings: scopedGeometry.buildings,
-              source: addressSource,
-              regionCode,
-            });
-            const cappedProxyAddresses = proxyAddresses.slice(0, MAX_CAMPAIGN_HOMES);
-            if (cappedProxyAddresses.length > 0) {
-              console.warn('[Provision] PMTiles address scope produced zero addresses; using scoped building proxy door targets.', {
-                campaignId,
-                buildings: scopedGeometry.buildings?.features.length ?? 0,
-                proxyAddresses: cappedProxyAddresses.length,
-                source: addressSource,
-              });
-              finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, cappedProxyAddresses);
-              snapshot = snapshotWithProxyAddressCount(snapshot, finalAddressCount);
-              await updateCampaignProvision(supabase, campaignId!, {
-                provision_phase: 'addresses_ready',
-                addresses_ready_at: new Date().toISOString(),
-                data_quality_reason: homeCapNotice,
-              });
-            }
+          const targets = await new CampaignAddressEnrichmentService(supabase).ensureTargets({
+            campaignId: campaignId!, region: regionCode, source: addressSource,
+            boundary: campaignPolygon,
+            buildings: scopedGeometry.buildings?.features ?? [],
+            parcels: scopedGeometry.parcels?.features ?? [],
+          });
+          finalAddressCount = await countCampaignAddresses(supabase, campaignId!);
+          if (finalAddressCount === 0) {
+            throw new ProvisionError(
+              'No usable addresses, residential buildings, or eligible parcels were found in this territory. Try another area.',
+              422
+            );
           }
+          if (targets.geometryTargets > 0) {
+            snapshot = snapshotWithGeometryTargetCount(snapshot, finalAddressCount, targets.geometryTargets);
+          }
+          const discoveredHomeCount = Math.max(resolvedHomeCount, targets.discovered);
+          if (discoveredHomeCount > MAX_CAMPAIGN_HOMES) homeCapNotice = campaignHomeCapNotice(discoveredHomeCount);
+          await updateCampaignProvision(supabase, campaignId!, {
+            provision_phase: 'addresses_ready', addresses_ready_at: new Date().toISOString(),
+            total_flyers: finalAddressCount,
+            home_limit_applied: discoveredHomeCount > MAX_CAMPAIGN_HOMES,
+            discovered_home_count: discoveredHomeCount, data_quality_reason: homeCapNotice,
+          });
 
           await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
 

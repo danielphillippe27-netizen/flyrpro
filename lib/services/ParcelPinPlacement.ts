@@ -74,6 +74,12 @@ export function planParcelPinPlacements(input: {
     const addressId = text(p.address_id ?? p.id ?? address.id);
     if (!addressId || !movable(address) || input.protectedAddressIds?.has(addressId)) continue;
     try {
+      // Geometry-backed parcel stops represent the property, not a chosen roof.
+      // Ordinary civic/unit addresses continue through the existing placement rules.
+      if (p.geometry_target_kind === 'parcel' && text(p.geometry_target_id) === parcelId) {
+        placements.push({ addressId, parcelId, buildingId: null, coordinate: interiorCentroid(parcel), method: 'parcel_center' });
+        continue;
+      }
       const [minX, minY, maxX, maxY] = turf.bbox(parcel);
       const candidates = tree.search({ minX, minY, maxX, maxY }).flatMap(({ feature }) => {
         const intersection = turf.intersect(turf.featureCollection([parcel, feature]));

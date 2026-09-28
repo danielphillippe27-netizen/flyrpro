@@ -1630,21 +1630,7 @@ function OnboardingContent() {
             <h1 className={step === FINAL_ONBOARDING_STEP ? 'text-4xl font-bold leading-tight tracking-normal sm:text-5xl' : 'text-3xl font-bold leading-tight tracking-normal sm:text-4xl'}>
               {heading}
             </h1>
-            {step === FINAL_ONBOARDING_STEP && isSelfServeDemoOnboarding ? (
-              <Button
-                type="button"
-                onClick={async () => {
-                  await handleSubmit({
-                    checkoutSeats: selectedSeatCount,
-                    checkoutUseCase: useCase,
-                  });
-                }}
-                disabled={loading || authLoading}
-                className="mx-auto h-14 w-full max-w-md rounded-xl bg-[#09090b] text-lg font-bold text-white shadow-sm hover:bg-[#27272a] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a]"
-              >
-                {loading ? 'Creating...' : 'Show my map'}
-              </Button>
-            ) : subheading ? (
+            {subheading ? (
               <p className="text-lg font-semibold text-[#7b7f89]">{subheading}</p>
             ) : null}
           </div>
@@ -2170,6 +2156,14 @@ function OnboardingContent() {
                         </div>
                       )}
                       <div className="mt-4">
+                        {isDemo100Trial ? (
+                          <p className="mb-2 text-base font-semibold text-[#6f7480]">
+                            Regular price{' '}
+                            <s className="decoration-2">
+                              {formatPlanPrice(seatPricing.originalSeatMonthlyDisplay, billingCurrency)} /seat/month
+                            </s>
+                          </p>
+                        ) : null}
                         <span className="text-4xl font-bold text-[#050505]">
                           {card.priceLabel}
                         </span>
@@ -2208,6 +2202,21 @@ function OnboardingContent() {
                   );
                 })}
               </div>
+              {isSelfServeDemoOnboarding ? (
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    await handleSubmit({
+                      checkoutSeats: selectedSeatCount,
+                      checkoutUseCase: useCase,
+                    });
+                  }}
+                  disabled={loading || authLoading}
+                  className="mx-auto flex h-14 w-full max-w-md rounded-xl bg-[#09090b] text-lg font-bold text-white shadow-sm hover:bg-[#27272a] dark:bg-[#09090b] dark:text-white dark:hover:bg-[#27272a]"
+                >
+                  {loading ? 'Creating...' : 'Show my map'}
+                </Button>
+              ) : null}
             </div>
           )}
 
