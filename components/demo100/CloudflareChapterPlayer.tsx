@@ -20,6 +20,7 @@ type CloudflareChapterPlayerProps = {
   videoUid?: string;
   title: string;
   eyebrow: string;
+  showChapterHeader?: boolean;
   autoPlayWithSound?: boolean;
   holdAtEnd?: boolean;
   stopAtSeconds?: number;
@@ -59,6 +60,7 @@ export function CloudflareChapterPlayer({
   videoUid,
   title,
   eyebrow,
+  showChapterHeader = true,
   autoPlayWithSound = false,
   holdAtEnd = false,
   stopAtSeconds,
@@ -192,15 +194,17 @@ export function CloudflareChapterPlayer({
         onError={() => setSdkFailed(true)}
       />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-4 bg-gradient-to-b from-black/75 via-black/25 to-transparent px-5 pb-16 pt-5 sm:px-8">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-400">{eyebrow}</p>
-          <p className="mt-1 text-sm font-bold text-white/80">{title}</p>
+      {showChapterHeader ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-4 bg-gradient-to-b from-black/75 via-black/25 to-transparent px-5 pb-16 pt-5 sm:px-8">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-red-400">{eyebrow}</p>
+            <p className="mt-1 text-sm font-bold text-white/80">{title}</p>
+          </div>
+          <div className="hidden items-center gap-2 text-xs font-semibold text-white/45 sm:flex">
+            <span className="size-2 rounded-full bg-red-500" /> Guided WolfGrid demo
+          </div>
         </div>
-        <div className="hidden items-center gap-2 text-xs font-semibold text-white/45 sm:flex">
-          <span className="size-2 rounded-full bg-red-500" /> Guided WolfGrid demo
-        </div>
-      </div>
+      ) : null}
 
       {!url || sdkFailed ? (
         <div className="mx-5 max-w-xl rounded-3xl border border-white/10 bg-white/[0.05] p-8 text-center shadow-2xl">

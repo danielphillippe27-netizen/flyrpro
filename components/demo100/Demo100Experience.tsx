@@ -1156,6 +1156,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           videoUid={videoUids[video.uidKey]}
           title={video.title}
           eyebrow={video.eyebrow}
+          showChapterHeader={variant !== 'demo1'}
           autoPlayWithSound={stage !== 'intro_video'}
           holdAtEnd={variant === 'demo1' && stage === 'post_create_video'}
           stopAtSeconds={variant === 'demo1' && stage === 'post_create_video' ? 21 : undefined}
