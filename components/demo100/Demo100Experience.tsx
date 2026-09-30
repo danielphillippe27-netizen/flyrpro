@@ -1152,7 +1152,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           showChapterHeader={variant !== 'demo1'}
           autoPlayWithSound={stage !== 'intro_video'}
           holdAtEnd={variant === 'demo1' && stage === 'post_create_video'}
-          stopAtSeconds={variant === 'demo1' && stage === 'post_create_video' ? 21 : undefined}
+          stopAtSeconds={variant === 'demo1' && stage === 'post_create_video' ? 22 : undefined}
           completionOverlay={demo1ChoiceVisible && variant === 'demo1' && stage === 'post_create_video' ? (
             <div className="grid w-full max-w-2xl grid-cols-2 gap-8 sm:gap-16">
               <Button
