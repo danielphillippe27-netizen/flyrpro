@@ -9,6 +9,11 @@ export const DEMO100_STAGES = [
   'campaign_builder',
   'territory_preview',
   'post_create_video',
+  'branch_choice',
+  'team_video',
+  'solo_video',
+  'magic_video',
+  'end_video',
   'campaign_results',
   'assignments',
   'live_map',
@@ -62,8 +67,17 @@ export function isDemo100Stage(value: unknown): value is Demo100Stage {
 }
 
 export function nextDemo100Stage(stage: Demo100Stage): Demo100Stage {
-  const index = DEMO100_STAGES.indexOf(stage);
-  return DEMO100_STAGES[Math.min(index + 1, DEMO100_STAGES.length - 1)];
+  if (stage === 'post_create_video') return 'campaign_results';
+  if (stage === 'branch_choice') return 'team_video';
+  if (stage === 'team_video') return 'field_guide_intro_video';
+  if (stage === 'solo_video') return 'cta';
+  if (stage === 'magic_video') return 'end_video';
+  if (stage === 'end_video') return 'cta';
+  const sequence = DEMO100_STAGES.filter(
+    (candidate) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video'].includes(candidate),
+  );
+  const index = sequence.indexOf(stage);
+  return sequence[Math.min(index + 1, sequence.length - 1)] ?? 'cta';
 }
 
 export function getDemo100Outcomes(total: number): SelfServeDoorOutcome[] {
@@ -96,6 +110,8 @@ export function getDemo100StageNumber(stage: Demo100Stage): number {
   if (stage === 'intro_video') return 1;
   if (stage === 'campaign_builder') return 2;
   if (stage === 'territory_preview' || stage === 'post_create_video') return 3;
+  if (stage === 'branch_choice' || stage === 'team_video' || stage === 'solo_video' || stage === 'magic_video') return 4;
+  if (stage === 'end_video') return 9;
   if (stage === 'campaign_results') return 4;
   if (stage === 'assignments') return 5;
   if (stage === 'live_map') return 6;

@@ -28,12 +28,19 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 test('moves through the complete demo in order', () => {
-  DEMO100_STAGES.slice(0, -1).forEach((stage, index) => {
-    assert(nextDemo100Stage(stage) === DEMO100_STAGES[index + 1], `${stage} should advance once`);
+  const defaultPath = DEMO100_STAGES.filter(
+    (stage) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video'].includes(stage),
+  );
+  defaultPath.slice(0, -1).forEach((stage, index) => {
+    assert(nextDemo100Stage(stage) === defaultPath[index + 1], `${stage} should advance once`);
   });
   assert(nextDemo100Stage('cta') === 'cta', 'CTA should be terminal');
   assert(DEMO100_STAGES[2] === 'territory_preview', 'The 3D territory should appear immediately after creation');
   assert(DEMO100_STAGES[3] === 'post_create_video', 'The second video should follow the 3D territory reveal');
+  assert(nextDemo100Stage('post_create_video') === 'campaign_results', 'Demo100 should skip role branching by default');
+  assert(nextDemo100Stage('branch_choice') === 'team_video', 'The branch choice defaults to the team path');
+  assert(nextDemo100Stage('team_video') === 'field_guide_intro_video', 'The team video should lead into the second interactive demo');
+  assert(nextDemo100Stage('solo_video') === 'cta', 'The solo video should stop before the missing solo follow-up demo');
   assert(
     DEMO100_STAGES.indexOf('field_guide_intro_video') === DEMO100_STAGES.indexOf('team_stats') + 1,
     'The standalone field guide video should follow team stats',

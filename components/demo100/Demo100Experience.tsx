@@ -77,6 +77,10 @@ type VideoUids = {
   fieldGuideIntro?: string;
   iphone?: string;
   outro?: string;
+  team?: string;
+  solo?: string;
+  magic?: string;
+  end?: string;
 };
 
 type Demo100ExperienceProps = {
@@ -84,6 +88,7 @@ type Demo100ExperienceProps = {
   videoUids: VideoUids;
   founderCallHref: string;
   referralCode?: string;
+  variant?: 'demo100' | 'demo1';
 };
 
 type BoundaryPracticeStep = 'first_point' | 'move_cursor' | 'second_point' | 'double_click' | 'complete';
@@ -116,6 +121,10 @@ const VIDEO_STAGES: Partial<Record<Demo100Stage, {
 }>> = {
   intro_video: { uidKey: 'intro', title: 'Meet WolfGrid', eyebrow: 'Chapter 1 · The field, connected' },
   post_create_video: { uidKey: 'postCreate', title: 'From territory to outcomes', eyebrow: 'Chapter 3 · Your campaign' },
+  team_video: { uidKey: 'team', title: 'Team leader workflow', eyebrow: 'Team leader · Run the field' },
+  solo_video: { uidKey: 'solo', title: 'Solo owner workflow', eyebrow: 'Solo owner · Work your own market' },
+  magic_video: { uidKey: 'magic', title: 'Magic', eyebrow: 'One system · Bring it together' },
+  end_video: { uidKey: 'end', title: 'The WolfGrid difference', eyebrow: 'Your next step · See what comes next' },
   field_guide_intro_video: { uidKey: 'fieldGuideIntro', title: 'WolfGrid at the door', eyebrow: 'Chapter 8 · Take it into the field' },
   outro_video: { uidKey: 'outro', title: 'One system from map to CRM', eyebrow: 'Final chapter · Put it to work' },
 };
@@ -312,7 +321,7 @@ function MetricTile({
   );
 }
 
-export function Demo100Experience({ customerCode, videoUids, founderCallHref, referralCode }: Demo100ExperienceProps) {
+export function Demo100Experience({ customerCode, videoUids, founderCallHref, referralCode, variant = 'demo100' }: Demo100ExperienceProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -329,6 +338,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const boundaryPracticeClickCountRef = useRef(0);
   const isolatedLayerOpacitiesRef = useRef(new Map<string, { property: string; value: unknown }>());
   const [stage, setStage] = useState<Demo100Stage>('intro_video');
+  const [demo1ChoiceVisible, setDemo1ChoiceVisible] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [builderStep, setBuilderStep] = useState<'location' | 'selection'>('location');
   const [searchValue, setSearchValue] = useState('');
@@ -1078,9 +1088,29 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   const handleVideoComplete = useCallback(() => {
     track('video_complete', getDemo100StageNumber(stage), { chapter: stage });
-    const next = nextDemo100Stage(stage);
-    setAndTrackStage(next, 'stage_enter');
-  }, [setAndTrackStage, stage]);
+    if (variant === 'demo1' && (stage === 'team_video' || stage === 'solo_video')) {
+      setAndTrackStage('magic_video', 'stage_enter');
+      return;
+    }
+    if (variant === 'demo1' && stage === 'magic_video') {
+      setAndTrackStage('end_video', 'stage_enter');
+      return;
+    }
+    if (variant === 'demo1' && stage === 'end_video') {
+      setAndTrackStage('cta', 'stage_enter');
+      return;
+    }
+    if (variant === 'demo1' && stage === 'post_create_video') {
+      setDemo1ChoiceVisible(true);
+      return;
+    }
+    setAndTrackStage(nextDemo100Stage(stage), 'stage_enter');
+  }, [setAndTrackStage, stage, variant]);
+
+  const selectDemo1Path = useCallback((path: 'solo' | 'team') => {
+    track('demo1_path_selected', 4, { path, homes: buildings.length });
+    setAndTrackStage(path === 'team' ? 'team_video' : 'solo_video', 'stage_enter');
+  }, [buildings.length, setAndTrackStage]);
 
   const toggleMemberSelection = useCallback((memberId: string) => {
     setSelectedMemberIds((current) => {
@@ -1103,7 +1133,18 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const advanceDemo = useCallback(() => {
     if (video) {
       track('video_skipped', getDemo100StageNumber(stage), { chapter: stage });
-      setAndTrackStage(nextDemo100Stage(stage), 'stage_enter');
+      const next = variant === 'demo1'
+        ? stage === 'post_create_video'
+          ? 'branch_choice'
+          : stage === 'team_video' || stage === 'solo_video'
+            ? 'magic_video'
+            : stage === 'magic_video'
+              ? 'end_video'
+              : stage === 'end_video'
+                ? 'cta'
+                : nextDemo100Stage(stage)
+        : nextDemo100Stage(stage);
+      setAndTrackStage(next, 'stage_enter');
       return;
     }
     if (stage === 'campaign_builder') {
@@ -1132,7 +1173,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       return;
     }
     if (stage === 'team_stats') setAndTrackStage('field_guide_intro_video', 'stage_enter');
-  }, [allMembersSelected, assignmentMode, buildings.length, createDraft, setAndTrackStage, stage, video]);
+  }, [allMembersSelected, assignmentMode, buildings.length, createDraft, setAndTrackStage, stage, variant, video]);
 
   const resetDemo = () => {
     window.localStorage.removeItem(DEMO100_SESSION_STORAGE_KEY);
@@ -1201,6 +1242,25 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           title={video.title}
           eyebrow={video.eyebrow}
           autoPlayWithSound={stage !== 'intro_video'}
+          holdAtEnd={variant === 'demo1' && stage === 'post_create_video'}
+          completionOverlay={demo1ChoiceVisible && variant === 'demo1' && stage === 'post_create_video' ? (
+            <div className="grid w-full max-w-md grid-cols-2 gap-3">
+              <Button
+                type="button"
+                onClick={() => selectDemo1Path('solo')}
+                className="h-12 rounded-xl border border-white/15 bg-white text-base font-black text-zinc-950 shadow-2xl hover:bg-zinc-100 sm:h-14"
+              >
+                Solo
+              </Button>
+              <Button
+                type="button"
+                onClick={() => selectDemo1Path('team')}
+                className="h-12 rounded-xl bg-red-500 text-base font-black text-white shadow-2xl hover:bg-red-400 sm:h-14"
+              >
+                Team
+              </Button>
+            </div>
+          ) : null}
           onStarted={handleVideoStarted}
           onComplete={handleVideoComplete}
         />
@@ -1218,7 +1278,34 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         />
       ) : null}
 
-      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' ? (
+      {stage === 'branch_choice' ? (
+        <div className="fixed inset-0 z-[105] grid place-items-center overflow-y-auto bg-[#050505]/96 px-5 py-16 text-center backdrop-blur-xl">
+          <section className="w-full max-w-3xl">
+            <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-red-500 shadow-2xl shadow-red-950/50"><Users className="size-8" /></div>
+            <p className="mt-7 text-xs font-black uppercase tracking-[0.24em] text-red-400">Choose your workflow</p>
+            <h1 className="mt-4 text-balance text-5xl font-black tracking-[-0.06em] sm:text-7xl">How do you run the field?</h1>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">Pick the path that matches how you prospect. Team leaders get the team workflow and the second interactive demo. Solo owners get the solo path.</p>
+            <div className="mx-auto mt-8 grid max-w-2xl gap-3 sm:grid-cols-2">
+              <Button
+                type="button"
+                onClick={() => selectDemo1Path('solo')}
+                className="h-16 rounded-xl border border-white/10 bg-white text-base font-black text-zinc-950 hover:bg-zinc-100"
+              >
+                Solo <UserRoundCheck className="size-5" />
+              </Button>
+              <Button
+                type="button"
+                onClick={() => selectDemo1Path('team')}
+                className="h-16 rounded-xl bg-red-500 text-base font-black hover:bg-red-400"
+              >
+                Team <Users className="size-5" />
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' && stage !== 'branch_choice' && !(variant === 'demo1' && stage === 'post_create_video') ? (
         <Button
           type="button"
           onClick={advanceDemo}

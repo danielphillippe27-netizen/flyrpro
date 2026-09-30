@@ -1,12 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Script from 'next/script';
 import { ArrowRight, Loader2, Play, RotateCcw, Volume2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 type Demo100StreamPlayer = {
   muted: boolean;
+  currentTime: number;
+  duration: number;
   play: () => Promise<void>;
   pause?: () => void;
   addEventListener: (event: string, handler: () => void) => void;
@@ -19,6 +21,8 @@ type CloudflareChapterPlayerProps = {
   title: string;
   eyebrow: string;
   autoPlayWithSound?: boolean;
+  holdAtEnd?: boolean;
+  completionOverlay?: ReactNode;
   onStarted?: () => void;
   onComplete: () => void;
 };
@@ -41,6 +45,8 @@ export function CloudflareChapterPlayer({
   title,
   eyebrow,
   autoPlayWithSound = false,
+  holdAtEnd = false,
+  completionOverlay,
   onStarted,
   onComplete,
 }: CloudflareChapterPlayerProps) {
@@ -100,7 +106,13 @@ export function CloudflareChapterPlayer({
     const player = streamFactory(iframeRef.current);
     if (!player) return;
     playerRef.current = player;
-    const handleEnded = () => onComplete();
+    const handleEnded = () => {
+      if (holdAtEnd && Number.isFinite(player.duration) && player.duration > 0) {
+        player.currentTime = Math.max(0, player.duration - 0.15);
+        player.pause?.();
+      }
+      onComplete();
+    };
     const handlePlay = () => markStarted();
     const handleError = () => {
       setPlaybackError(true);
@@ -131,7 +143,7 @@ export function CloudflareChapterPlayer({
       player.pause?.();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [autoPlayWithSound, markStarted, onComplete, scriptReady, url]);
+  }, [autoPlayWithSound, holdAtEnd, markStarted, onComplete, scriptReady, url]);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#050505] text-white">
@@ -161,20 +173,31 @@ export function CloudflareChapterPlayer({
               ? 'The interactive demo can continue while the video service reconnects.'
               : 'This chapter is ready for its Cloudflare Stream video. Continue to preview the complete interactive flow.'}
           </p>
-          <Button type="button" onClick={onComplete} className="mt-7 h-12 rounded-xl bg-red-500 px-6 font-black text-white hover:bg-red-400">
-            Continue demo <ArrowRight className="size-4" />
-          </Button>
+          {completionOverlay ? (
+            <div className="mt-7">{completionOverlay}</div>
+          ) : (
+            <Button type="button" onClick={onComplete} className="mt-7 h-12 rounded-xl bg-red-500 px-6 font-black text-white hover:bg-red-400">
+              Continue demo <ArrowRight className="size-4" />
+            </Button>
+          )}
         </div>
       ) : (
-        <div className="absolute inset-0 size-full overflow-hidden bg-black">
-          <iframe
-            ref={iframeRef}
-            title={title}
-            src={url}
-            className="absolute inset-0 size-full border-0"
-            allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-            allowFullScreen
-          />
+        <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-black">
+          <div className="relative aspect-video w-[min(100vw,177.78dvh)] overflow-hidden bg-black">
+            <iframe
+              ref={iframeRef}
+              title={title}
+              src={url}
+              className="absolute inset-0 size-full border-0"
+              allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+              allowFullScreen
+            />
+            {completionOverlay ? (
+              <div className="absolute inset-x-0 bottom-[19%] z-20 flex justify-center px-4">
+                {completionOverlay}
+              </div>
+            ) : null}
+          </div>
 
           {needsGesture ? (
             <div className="absolute inset-0 z-10 grid place-items-center bg-black/45 px-5 backdrop-blur-[2px]">
