@@ -315,7 +315,6 @@ function MetricTile({
 export function Demo100Experience({ customerCode, videoUids, founderCallHref, referralCode, variant = 'demo100' }: Demo100ExperienceProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const boundaryGuideVideoRef = useRef<HTMLVideoElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const selectedLocationRef = useRef<[number, number]>([-79.3832, 43.6532]);
@@ -336,9 +335,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const [discoveredCount, setDiscoveredCount] = useState(0);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [showBoundaryGuide, setShowBoundaryGuide] = useState(false);
-  const [boundaryGuideWatched, setBoundaryGuideWatched] = useState(false);
-  const [boundaryGuideError, setBoundaryGuideError] = useState(false);
   const [territoryOrbitComplete, setTerritoryOrbitComplete] = useState(false);
   const [generatedBuildings, setGeneratedBuildings] = useState<Demo100Building[] | null>(null);
   const [generationStatus, setGenerationStatus] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
@@ -575,10 +571,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       || stage !== 'campaign_builder'
       || builderStep !== 'selection'
       || polygon
-      || showBoundaryGuide
     ) return;
     draw.changeMode('draw_polygon');
-  }, [builderStep, mapLoaded, polygon, showBoundaryGuide, stage]);
+  }, [builderStep, mapLoaded, polygon, stage]);
 
   const addBaseBuildings = useCallback((map: mapboxgl.Map) => {
     if (map.getLayer('demo100-base-buildings') || !map.getSource('composite')) return;
@@ -942,9 +937,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const handleLocationSelect = (suggestion: AddressSuggestion) => {
     const center: [number, number] = [suggestion.coordinate.longitude, suggestion.coordinate.latitude];
     selectedLocationRef.current = center;
-    setBoundaryGuideWatched(false);
-    setBoundaryGuideError(false);
-    setShowBoundaryGuide(true);
     setBuilderStep('selection');
     mapRef.current?.flyTo({ center, zoom: 16, pitch: 0, bearing: 0, duration: 1100 });
     track('builder_location_selected', 2, { label: suggestion.title });
@@ -1110,9 +1102,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     setSelectedMemberIds([]);
     setAssignmentMode('split');
     setLiveProgress(0);
-    setShowBoundaryGuide(false);
-    setBoundaryGuideWatched(false);
-    setBoundaryGuideError(false);
     setDemo1ChoiceVisible(false);
     setBuilderStep('location');
     setCampaignName('FIRST CAMPAIGN');
@@ -1272,9 +1261,8 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                     <span className="hidden sm:inline">Reset</span>
                   </Button>
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3">
+                <div className="mt-2 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3">
                   <p className="text-xs font-bold leading-4 text-white">Draw around the homes you want, then double-click to finish.</p>
-                  <button type="button" onClick={() => setShowBoundaryGuide(true)} className="shrink-0 text-xs font-black text-emerald-300 underline underline-offset-2">Replay guide</button>
                 </div>
               </section>
 
@@ -1300,47 +1288,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
               </section>
             </>
           )}
-        </div>
-      ) : null}
-
-      {stage === 'campaign_builder' && builderStep === 'selection' && showBoundaryGuide ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="boundary-guide-title" className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-[#050505]/95 px-4 py-8 backdrop-blur-xl">
-          <section className="w-full max-w-4xl rounded-[1.75rem] border border-white/10 bg-[#10131a] p-4 shadow-2xl sm:p-7">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Your first campaign · 15 second guide</p>
-            <h2 id="boundary-guide-title" className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">Watch how to draw your territory</h2>
-            <p className="mt-2 text-sm text-zinc-400">Then use the map behind this guide to choose the homes for your campaign.</p>
-            <video
-              ref={boundaryGuideVideoRef}
-              src="/demo/campaign-boundary-guide.mp4"
-              poster="/onboarding-create-campaign.png"
-              autoPlay
-              muted
-              playsInline
-              preload="auto"
-              onEnded={() => {
-                setBoundaryGuideWatched(true);
-                track('boundary_guide_complete', 2);
-              }}
-              onError={() => setBoundaryGuideError(true)}
-              onClick={() => { if (boundaryGuideVideoRef.current?.paused) void boundaryGuideVideoRef.current.play(); }}
-              className="mt-5 aspect-video w-full rounded-xl bg-black object-contain"
-              aria-label="Short guide showing how to draw a campaign boundary and select homes"
-            />
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-zinc-400">{boundaryGuideError ? 'Video unavailable. Draw a boundary on the map, then double-click to finish.' : boundaryGuideWatched ? 'You’re ready to draw around your own homes.' : 'The map unlocks when the guide finishes.'}</p>
-              <Button
-                type="button"
-                disabled={!boundaryGuideWatched && !boundaryGuideError}
-                onClick={() => {
-                  setShowBoundaryGuide(false);
-                  track('boundary_guide_dismissed', 2, { videoError: boundaryGuideError });
-                }}
-                className="h-12 rounded-xl bg-red-500 px-5 font-black hover:bg-red-400"
-              >
-                Draw my territory <ArrowRight className="size-4" />
-              </Button>
-            </div>
-          </section>
         </div>
       ) : null}
 
