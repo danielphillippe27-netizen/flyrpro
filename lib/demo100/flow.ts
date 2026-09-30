@@ -80,6 +80,15 @@ export function nextDemo100Stage(stage: Demo100Stage): Demo100Stage {
   return sequence[Math.min(index + 1, sequence.length - 1)] ?? 'cta';
 }
 
+export function nextDemo1Stage(stage: Demo100Stage): Demo100Stage {
+  if (stage === 'post_create_video') return 'branch_choice';
+  if (stage === 'team_video') return 'campaign_results';
+  if (stage === 'solo_video' || stage === 'team_stats') return 'magic_video';
+  if (stage === 'magic_video') return 'end_video';
+  if (stage === 'end_video') return 'cta';
+  return nextDemo100Stage(stage);
+}
+
 export function getDemo100Outcomes(total: number): SelfServeDoorOutcome[] {
   return buildSelfServeDoorOutcomes(Math.max(0, Math.trunc(total)));
 }
@@ -110,7 +119,8 @@ export function getDemo100StageNumber(stage: Demo100Stage): number {
   if (stage === 'intro_video') return 1;
   if (stage === 'campaign_builder') return 2;
   if (stage === 'territory_preview' || stage === 'post_create_video') return 3;
-  if (stage === 'branch_choice' || stage === 'team_video' || stage === 'solo_video' || stage === 'magic_video') return 4;
+  if (stage === 'branch_choice' || stage === 'team_video' || stage === 'solo_video') return 4;
+  if (stage === 'magic_video') return 8;
   if (stage === 'end_video') return 9;
   if (stage === 'campaign_results') return 4;
   if (stage === 'assignments') return 5;

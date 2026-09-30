@@ -48,6 +48,7 @@ import {
   getDemo100Metrics,
   getDemo100Outcomes,
   getDemo100StageNumber,
+  nextDemo1Stage,
   nextDemo100Stage,
   parseDemo100StoredState,
   type Demo100Member,
@@ -1000,23 +1001,11 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   const handleVideoComplete = useCallback(() => {
     track('video_complete', getDemo100StageNumber(stage), { chapter: stage });
-    if (variant === 'demo1' && (stage === 'team_video' || stage === 'solo_video')) {
-      setAndTrackStage('magic_video', 'stage_enter');
-      return;
-    }
-    if (variant === 'demo1' && stage === 'magic_video') {
-      setAndTrackStage('end_video', 'stage_enter');
-      return;
-    }
-    if (variant === 'demo1' && stage === 'end_video') {
-      setAndTrackStage('cta', 'stage_enter');
-      return;
-    }
     if (variant === 'demo1' && stage === 'post_create_video') {
       setDemo1ChoiceVisible(true);
       return;
     }
-    setAndTrackStage(nextDemo100Stage(stage), 'stage_enter');
+    setAndTrackStage(variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage), 'stage_enter');
   }, [setAndTrackStage, stage, variant]);
 
   const selectDemo1Path = useCallback((path: 'solo' | 'team') => {
@@ -1045,17 +1034,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const advanceDemo = useCallback(() => {
     if (video) {
       track('video_skipped', getDemo100StageNumber(stage), { chapter: stage });
-      const next = variant === 'demo1'
-        ? stage === 'post_create_video'
-          ? 'branch_choice'
-          : stage === 'team_video' || stage === 'solo_video'
-            ? 'magic_video'
-            : stage === 'magic_video'
-              ? 'end_video'
-              : stage === 'end_video'
-                ? 'cta'
-                : nextDemo100Stage(stage)
-        : nextDemo100Stage(stage);
+      const next = variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage);
       setAndTrackStage(next, 'stage_enter');
       return;
     }
@@ -1084,7 +1063,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       setAndTrackStage('team_stats', 'team_stats_viewed');
       return;
     }
-    if (stage === 'team_stats') setAndTrackStage('field_guide_intro_video', 'stage_enter');
+    if (stage === 'team_stats') setAndTrackStage(variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage), 'stage_enter');
   }, [allMembersSelected, assignmentMode, buildings.length, createDraft, setAndTrackStage, stage, variant, video]);
 
   const resetDemo = () => {
@@ -1526,8 +1505,8 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                 </div>
               ))}
             </div>
-            <Button type="button" onClick={() => setAndTrackStage('field_guide_intro_video', 'stage_enter')} className="mt-5 h-12 w-full rounded-xl bg-red-500 font-black hover:bg-red-400">
-              Take WolfGrid into the field <Phone className="size-4" />
+            <Button type="button" onClick={() => setAndTrackStage(variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage), 'stage_enter')} className="mt-5 h-12 w-full rounded-xl bg-red-500 font-black hover:bg-red-400">
+              {variant === 'demo1' ? 'See how it all connects' : 'Take WolfGrid into the field'} <Phone className="size-4" />
             </Button>
           </section>
         </div>

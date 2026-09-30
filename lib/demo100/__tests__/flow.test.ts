@@ -4,6 +4,8 @@ import {
   balancedDemo100ZoneIndex,
   getDemo100Metrics,
   getDemo100Outcomes,
+  getDemo100StageNumber,
+  nextDemo1Stage,
   nextDemo100Stage,
   parseDemo100StoredState,
 } from '@/lib/demo100/flow';
@@ -49,6 +51,26 @@ test('moves through the complete demo in order', () => {
     DEMO100_STAGES.indexOf('iphone_chapters') === DEMO100_STAGES.indexOf('field_guide_intro_video') + 1,
     'The synchronized iPhone chapter guide should follow its standalone introduction',
   );
+});
+
+test('Demo 1 team path includes the interactive campaign before the closing videos', () => {
+  const teamPath = [
+    'post_create_video',
+    'branch_choice',
+    'team_video',
+    'campaign_results',
+    'assignments',
+    'live_map',
+    'team_stats',
+    'magic_video',
+    'end_video',
+    'cta',
+  ] as const;
+  teamPath.slice(0, -1).forEach((stage, index) => {
+    assert(nextDemo1Stage(stage) === teamPath[index + 1], `${stage} should lead to ${teamPath[index + 1]}`);
+  });
+  assert(nextDemo1Stage('solo_video') === 'magic_video', 'Solo should continue to the shared closing videos');
+  assert(getDemo100StageNumber('magic_video') > getDemo100StageNumber('team_stats'), 'Magic should advance the progress bar after team results');
 });
 
 test('derives one consistent outcome and metrics set', () => {
