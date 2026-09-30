@@ -1158,8 +1158,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           eyebrow={video.eyebrow}
           autoPlayWithSound={stage !== 'intro_video'}
           holdAtEnd={variant === 'demo1' && stage === 'post_create_video'}
+          stopAtSeconds={variant === 'demo1' && stage === 'post_create_video' ? 21 : undefined}
           completionOverlay={demo1ChoiceVisible && variant === 'demo1' && stage === 'post_create_video' ? (
-            <div className="grid w-full max-w-md grid-cols-2 gap-3">
+            <div className="grid w-full max-w-2xl grid-cols-2 gap-8 sm:gap-16">
               <Button
                 type="button"
                 onClick={() => selectDemo1Path('solo')}

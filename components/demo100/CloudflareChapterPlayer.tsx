@@ -22,6 +22,7 @@ type CloudflareChapterPlayerProps = {
   eyebrow: string;
   autoPlayWithSound?: boolean;
   holdAtEnd?: boolean;
+  stopAtSeconds?: number;
   completionOverlay?: ReactNode;
   onStarted?: () => void;
   onComplete: () => void;
@@ -60,6 +61,7 @@ export function CloudflareChapterPlayer({
   eyebrow,
   autoPlayWithSound = false,
   holdAtEnd = false,
+  stopAtSeconds,
   completionOverlay,
   onStarted,
   onComplete,
@@ -67,6 +69,7 @@ export function CloudflareChapterPlayer({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const playerRef = useRef<Demo100StreamPlayer | null>(null);
   const startedRef = useRef(false);
+  const completedRef = useRef(false);
   const [scriptReady, setScriptReady] = useState(false);
   const [needsGesture, setNeedsGesture] = useState(!autoPlayWithSound);
   const [starting, setStarting] = useState(false);
@@ -120,12 +123,23 @@ export function CloudflareChapterPlayer({
     const player = streamFactory(iframeRef.current);
     if (!player) return;
     playerRef.current = player;
+    const complete = () => {
+      if (completedRef.current) return;
+      completedRef.current = true;
+      onComplete();
+    };
+    const handleTimeUpdate = () => {
+      if (stopAtSeconds === undefined || player.currentTime < stopAtSeconds) return;
+      player.pause?.();
+      if (player.currentTime > stopAtSeconds + 0.05) player.currentTime = stopAtSeconds;
+      complete();
+    };
     const handleEnded = () => {
       if (holdAtEnd && Number.isFinite(player.duration) && player.duration > 0) {
         player.currentTime = Math.max(0, player.duration - 0.15);
         player.pause?.();
       }
-      onComplete();
+      complete();
     };
     const handlePlay = () => {
       markStarted();
@@ -138,6 +152,7 @@ export function CloudflareChapterPlayer({
       setNeedsGesture(true);
     };
     player.addEventListener('ended', handleEnded);
+    player.addEventListener('timeupdate', handleTimeUpdate);
     player.addEventListener('play', handlePlay);
     player.addEventListener('error', handleError);
 
@@ -160,12 +175,13 @@ export function CloudflareChapterPlayer({
 
     return () => {
       player.removeEventListener?.('ended', handleEnded);
+      player.removeEventListener?.('timeupdate', handleTimeUpdate);
       player.removeEventListener?.('play', handlePlay);
       player.removeEventListener?.('error', handleError);
       player.pause?.();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [autoPlayWithSound, holdAtEnd, markStarted, onComplete, scriptReady, url]);
+  }, [autoPlayWithSound, holdAtEnd, markStarted, onComplete, scriptReady, stopAtSeconds, url]);
 
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#050505] text-white">
@@ -215,7 +231,7 @@ export function CloudflareChapterPlayer({
               allowFullScreen
             />
             {completionOverlay ? (
-              <div className="absolute inset-x-0 bottom-[19%] z-20 flex justify-center px-4">
+              <div className="absolute inset-x-0 bottom-[30%] z-20 flex justify-center px-4 sm:bottom-[31%]">
                 {completionOverlay}
               </div>
             ) : null}
