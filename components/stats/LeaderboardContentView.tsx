@@ -7,6 +7,7 @@ import type {
 } from '@/types/database';
 import { LeaderboardView } from './LeaderboardView';
 import { useWorkspace } from '@/lib/workspace-context';
+import { getFounderDemoLeaderboard, isFounderDemoAccount } from '@/lib/founder-demo-data';
 
 type TeamLeaderboardRow = {
   user_id: string;
@@ -122,6 +123,7 @@ export function LeaderboardContentView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [teamNotice, setTeamNotice] = useState<string | null>(null);
+  const [isDemoData, setIsDemoData] = useState(false);
   const {
     currentWorkspace,
     currentWorkspaceId,
@@ -153,6 +155,14 @@ export function LeaderboardContentView() {
         setError('You do not have access to this workspace leaderboard yet.');
         return;
       }
+
+      if (await isFounderDemoAccount()) {
+        setEntries(dedupeAndRankLeaderboardEntries(getFounderDemoLeaderboard(), sortBy));
+        setIsDemoData(true);
+        setTeamNotice('Names and scores shown here are sample data.');
+        return;
+      }
+      setIsDemoData(false);
 
       const response = await fetch(
         `/api/team/leaderboard?workspaceId=${encodeURIComponent(currentWorkspaceId)}`
@@ -200,6 +210,11 @@ export function LeaderboardContentView() {
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Track performance inside {currentWorkspace?.name ?? 'your workspace'}.
           </p>
+          {isDemoData ? (
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+              Demo leaderboard · Sample names and scores
+            </p>
+          ) : null}
         </div>
       </div>
 

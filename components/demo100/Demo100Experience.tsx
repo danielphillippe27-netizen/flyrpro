@@ -91,15 +91,6 @@ type Demo100ExperienceProps = {
   variant?: 'demo100' | 'demo1';
 };
 
-type BoundaryPracticeStep = 'first_point' | 'move_cursor' | 'second_point' | 'double_click' | 'complete';
-
-const BOUNDARY_PRACTICE_STEPS = [
-  { key: 'first_point', label: 'Click a spot', instruction: 'Click once to place your first point.' },
-  { key: 'move_cursor', label: 'Move cursor', instruction: 'Move your cursor to stretch the boundary line.' },
-  { key: 'second_point', label: 'Click again', instruction: 'Click another spot to add the next point.' },
-  { key: 'double_click', label: 'Double-click', instruction: 'Move to a final spot, then double-click to finish.' },
-] as const satisfies readonly { key: Exclude<BoundaryPracticeStep, 'complete'>; label: string; instruction: string }[];
-
 const OUTCOME_COLORS: Record<SelfServeDoorOutcome, string> = {
   no_answer: '#ef4444',
   answered: '#22c55e',
@@ -324,6 +315,7 @@ function MetricTile({
 export function Demo100Experience({ customerCode, videoUids, founderCallHref, referralCode, variant = 'demo100' }: Demo100ExperienceProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const boundaryGuideVideoRef = useRef<HTMLVideoElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const drawRef = useRef<MapboxDraw | null>(null);
   const selectedLocationRef = useRef<[number, number]>([-79.3832, 43.6532]);
@@ -332,10 +324,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const selectionFrameRef = useRef(0);
   const livePolygonTimerRef = useRef(0);
   const preserveDraftOnDrawDeleteRef = useRef(false);
-  const boundaryPracticeActiveRef = useRef(false);
-  const boundaryPracticeCompleteRef = useRef(false);
-  const boundaryPracticeStepRef = useRef<BoundaryPracticeStep>('first_point');
-  const boundaryPracticeClickCountRef = useRef(0);
   const isolatedLayerOpacitiesRef = useRef(new Map<string, { property: string; value: unknown }>());
   const [stage, setStage] = useState<Demo100Stage>('intro_video');
   const [demo1ChoiceVisible, setDemo1ChoiceVisible] = useState(false);
@@ -348,8 +336,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const [discoveredCount, setDiscoveredCount] = useState(0);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [boundaryPracticeComplete, setBoundaryPracticeComplete] = useState(false);
-  const [boundaryPracticeStep, setBoundaryPracticeStep] = useState<BoundaryPracticeStep>('first_point');
+  const [showBoundaryGuide, setShowBoundaryGuide] = useState(false);
+  const [boundaryGuideWatched, setBoundaryGuideWatched] = useState(false);
+  const [boundaryGuideError, setBoundaryGuideError] = useState(false);
   const [territoryOrbitComplete, setTerritoryOrbitComplete] = useState(false);
   const [generatedBuildings, setGeneratedBuildings] = useState<Demo100Building[] | null>(null);
   const [generationStatus, setGenerationStatus] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
@@ -452,6 +441,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   }, [assignmentMode, buildings, selectedMemberIdSet]);
 
   const setAndTrackStage = useCallback((next: Demo100Stage, event?: string) => {
+    if (next === 'post_create_video') setDemo1ChoiceVisible(false);
     setStage(next);
     if (event) track(event, getDemo100StageNumber(next), { stage: next });
   }, []);
@@ -562,7 +552,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     const container = map.getContainer();
     container.classList.add('flyr-territory-draw-cursor');
     const readLiveBoundary = () => {
-      if (boundaryPracticeActiveRef.current) return;
       window.clearTimeout(livePolygonTimerRef.current);
       livePolygonTimerRef.current = window.setTimeout(() => {
         const livePolygon = getLiveDrawnPolygon(draw);
@@ -586,10 +575,10 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       || stage !== 'campaign_builder'
       || builderStep !== 'selection'
       || polygon
-      || boundaryPracticeComplete
+      || showBoundaryGuide
     ) return;
     draw.changeMode('draw_polygon');
-  }, [boundaryPracticeComplete, builderStep, mapLoaded, polygon, stage]);
+  }, [builderStep, mapLoaded, polygon, showBoundaryGuide, stage]);
 
   const addBaseBuildings = useCallback((map: mapboxgl.Map) => {
     if (map.getLayer('demo100-base-buildings') || !map.getSource('composite')) return;
@@ -655,42 +644,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     drawRef.current = draw;
     map.addControl(draw);
 
-    const updateBoundaryPracticeStep = (nextStep: BoundaryPracticeStep) => {
-      boundaryPracticeStepRef.current = nextStep;
-      setBoundaryPracticeStep(nextStep);
-    };
-    const handlePracticeClick = () => {
-      if (!boundaryPracticeActiveRef.current) return;
-      if (boundaryPracticeStepRef.current === 'first_point') {
-        boundaryPracticeClickCountRef.current = 1;
-        updateBoundaryPracticeStep('move_cursor');
-      } else if (boundaryPracticeStepRef.current === 'second_point') {
-        boundaryPracticeClickCountRef.current = 2;
-        updateBoundaryPracticeStep('double_click');
-      }
-    };
-    const handlePracticeMove = () => {
-      if (!boundaryPracticeActiveRef.current || boundaryPracticeStepRef.current !== 'move_cursor') return;
-      updateBoundaryPracticeStep('second_point');
-    };
     const handleSelection = () => {
-      if (boundaryPracticeActiveRef.current) {
-        window.clearTimeout(livePolygonTimerRef.current);
-        window.cancelAnimationFrame(selectionFrameRef.current);
-        boundaryPracticeActiveRef.current = false;
-        boundaryPracticeCompleteRef.current = true;
-        boundaryPracticeClickCountRef.current = 0;
-        setBoundaryPracticeComplete(true);
-        updateBoundaryPracticeStep('complete');
-        preserveDraftOnDrawDeleteRef.current = true;
-        draw.deleteAll();
-        preserveDraftOnDrawDeleteRef.current = false;
-        setPolygon(null);
-        setBuildings([]);
-        setDiscoveredCount(0);
-        track('boundary_practice_complete', 2);
-        return;
-      }
       const nextPolygon = getDrawnPolygon(draw);
       if (nextPolygon) selectBuildings(nextPolygon);
     };
@@ -703,18 +657,11 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     map.on('draw.create', handleSelection);
     map.on('draw.update', handleSelection);
     map.on('draw.delete', handleDelete);
-    map.on('click', handlePracticeClick);
-    map.on('mousemove', handlePracticeMove);
     map.on('load', () => {
       addBaseBuildings(map);
       setMapLoaded(true);
       const stored = pendingRestoreRef.current;
       if (stored?.polygon && stored.selectedCount >= MIN_HOMES) {
-        boundaryPracticeActiveRef.current = false;
-        boundaryPracticeCompleteRef.current = true;
-        boundaryPracticeStepRef.current = 'complete';
-        setBoundaryPracticeComplete(true);
-        setBoundaryPracticeStep('complete');
         draw.set({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: stored.polygon }] });
         const bbox = stored.bbox?.length === 4 ? stored.bbox : polygonBbox(stored.polygon);
         map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 100, duration: 0 });
@@ -731,8 +678,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       map.off('draw.create', handleSelection);
       map.off('draw.update', handleSelection);
       map.off('draw.delete', handleDelete);
-      map.off('click', handlePracticeClick);
-      map.off('mousemove', handlePracticeMove);
       removeMapboxMapWhenSafe(map);
       mapRef.current = null;
       drawRef.current = null;
@@ -997,12 +942,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const handleLocationSelect = (suggestion: AddressSuggestion) => {
     const center: [number, number] = [suggestion.coordinate.longitude, suggestion.coordinate.latitude];
     selectedLocationRef.current = center;
-    boundaryPracticeActiveRef.current = true;
-    boundaryPracticeCompleteRef.current = false;
-    boundaryPracticeStepRef.current = 'first_point';
-    boundaryPracticeClickCountRef.current = 0;
-    setBoundaryPracticeComplete(false);
-    setBoundaryPracticeStep('first_point');
+    setBoundaryGuideWatched(false);
+    setBoundaryGuideError(false);
+    setShowBoundaryGuide(true);
     setBuilderStep('selection');
     mapRef.current?.flyTo({ center, zoom: 16, pitch: 0, bearing: 0, duration: 1100 });
     track('builder_location_selected', 2, { label: suggestion.title });
@@ -1013,20 +955,12 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     window.cancelAnimationFrame(selectionFrameRef.current);
     setSelectionError(null);
     setSelectionBusy(false);
-    if (!boundaryPracticeCompleteRef.current) {
-      boundaryPracticeActiveRef.current = true;
-      boundaryPracticeStepRef.current = 'first_point';
-      boundaryPracticeClickCountRef.current = 0;
-      setBoundaryPracticeStep('first_point');
-    } else {
-      boundaryPracticeActiveRef.current = false;
-    }
     drawRef.current?.deleteAll();
     setPolygon(null);
     setBuildings([]);
     setDiscoveredCount(0);
     drawRef.current?.changeMode('draw_polygon');
-    track('selection_tool_changed', 2, { tool: boundaryPracticeCompleteRef.current ? 'polygon' : 'polygon_practice' });
+    track('selection_tool_changed', 2, { tool: 'polygon' });
   };
 
   const resetBoundary = () => {
@@ -1038,18 +972,8 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     setPolygon(null);
     setBuildings([]);
     setDiscoveredCount(0);
-    if (boundaryPracticeCompleteRef.current) {
-      boundaryPracticeActiveRef.current = false;
-      boundaryPracticeStepRef.current = 'complete';
-      setBoundaryPracticeStep('complete');
-    } else {
-      boundaryPracticeActiveRef.current = true;
-      boundaryPracticeStepRef.current = 'first_point';
-      boundaryPracticeClickCountRef.current = 0;
-      setBoundaryPracticeStep('first_point');
-    }
     drawRef.current?.changeMode('draw_polygon');
-    track('boundary_reset', 2, { practiceComplete: boundaryPracticeCompleteRef.current });
+    track('boundary_reset', 2);
   };
 
   const createDraft = useCallback(() => {
@@ -1073,13 +997,6 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   const video = VIDEO_STAGES[stage];
   const iphoneChapters = IPHONE_CHAPTERS;
-  const boundaryPracticeStepIndex = boundaryPracticeStep === 'complete'
-    ? BOUNDARY_PRACTICE_STEPS.length
-    : BOUNDARY_PRACTICE_STEPS.findIndex((step) => step.key === boundaryPracticeStep);
-  const boundaryPracticeInstruction = boundaryPracticeStep === 'complete'
-    ? 'Practice complete. Select Draw boundary, then outline your real campaign.'
-    : BOUNDARY_PRACTICE_STEPS[boundaryPracticeStepIndex]?.instruction;
-
   const handleVideoStarted = useCallback(() => {
     if (videoStartedStageRef.current === stage) return;
     videoStartedStageRef.current = stage;
@@ -1193,12 +1110,10 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     setSelectedMemberIds([]);
     setAssignmentMode('split');
     setLiveProgress(0);
-    boundaryPracticeActiveRef.current = false;
-    boundaryPracticeCompleteRef.current = false;
-    boundaryPracticeStepRef.current = 'first_point';
-    boundaryPracticeClickCountRef.current = 0;
-    setBoundaryPracticeComplete(false);
-    setBoundaryPracticeStep('first_point');
+    setShowBoundaryGuide(false);
+    setBoundaryGuideWatched(false);
+    setBoundaryGuideError(false);
+    setDemo1ChoiceVisible(false);
     setBuilderStep('location');
     setCampaignName('FIRST CAMPAIGN');
     setStage('intro_video');
@@ -1355,37 +1270,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                     <span className="hidden sm:inline">Reset</span>
                   </Button>
                 </div>
-                <div aria-live="polite" className={`mt-2 rounded-xl border p-3 ${boundaryPracticeComplete ? 'border-emerald-400/25 bg-emerald-500/10' : 'border-red-400/25 bg-red-500/10'}`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`grid size-7 shrink-0 place-items-center rounded-full ${boundaryPracticeComplete ? 'bg-emerald-400 text-emerald-950' : 'bg-red-500 text-white'}`}>
-                      {boundaryPracticeComplete ? <Check className="size-4" /> : <MousePointer2 className="size-4" />}
-                    </span>
-                    <div className="min-w-0">
-                      <p className={`text-[9px] font-black uppercase tracking-[0.18em] ${boundaryPracticeComplete ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {boundaryPracticeComplete ? 'Your turn' : 'Practice boundary first'}
-                      </p>
-                      <p className="mt-0.5 text-xs font-bold leading-4 text-white">{boundaryPracticeInstruction}</p>
-                    </div>
-                  </div>
-                  {!boundaryPracticeComplete ? (
-                    <div className="mt-3 grid grid-cols-4 gap-1.5" aria-label="Boundary practice steps">
-                      {BOUNDARY_PRACTICE_STEPS.map((practiceStep, index) => {
-                        const isComplete = index < boundaryPracticeStepIndex;
-                        const isCurrent = index === boundaryPracticeStepIndex;
-                        return (
-                          <div
-                            key={practiceStep.key}
-                            className={`rounded-lg border px-1.5 py-2 text-center ${isCurrent ? 'border-red-400 bg-red-500/20 text-white' : isComplete ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-white/10 bg-black/20 text-zinc-500'}`}
-                          >
-                            <span className="mx-auto grid size-4 place-items-center rounded-full bg-white/10 text-[9px] font-black">
-                              {isComplete ? <Check className="size-3" /> : index + 1}
-                            </span>
-                            <p className="mt-1 truncate text-[9px] font-black">{practiceStep.label}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3">
+                  <p className="text-xs font-bold leading-4 text-white">Draw around the homes you want, then double-click to finish.</p>
+                  <button type="button" onClick={() => setShowBoundaryGuide(true)} className="shrink-0 text-xs font-black text-emerald-300 underline underline-offset-2">Replay guide</button>
                 </div>
               </section>
 
@@ -1396,21 +1283,62 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                     <p className="mt-1 text-4xl font-black tracking-tight">{buildings.length}</p>
                   </div>
                   <span className={`rounded-full px-3 py-1.5 text-xs font-black ${buildings.length >= MIN_HOMES && discoveredCount <= MAX_HOMES ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>
-                    {!boundaryPracticeComplete ? 'Practice first' : selectionBusy ? 'Reading map…' : discoveredCount > MAX_HOMES ? 'Area too large' : buildings.length >= MIN_HOMES ? 'Ready' : `Choose ${MIN_HOMES}+`}
+                    {selectionBusy ? 'Reading map…' : discoveredCount > MAX_HOMES ? 'Area too large' : buildings.length >= MIN_HOMES ? 'Ready' : `Choose ${MIN_HOMES}+`}
                   </span>
                 </div>
                 {selectionError ? <p className="mt-2 text-sm font-semibold text-red-300">{selectionError}</p> : null}
                 <Button
                   type="button"
                   onClick={createDraft}
-                  disabled={!boundaryPracticeComplete || !polygon || buildings.length < MIN_HOMES || discoveredCount > MAX_HOMES || selectionBusy}
+                  disabled={!polygon || buildings.length < MIN_HOMES || discoveredCount > MAX_HOMES || selectionBusy}
                   className="mt-3 h-12 w-full rounded-xl bg-red-500 text-sm font-black hover:bg-red-400"
                 >
-                  {boundaryPracticeComplete ? 'Create 3D Prospecting Map' : 'Complete the practice first'} <ArrowRight className="size-4" />
+                  Create 3D Prospecting Map <ArrowRight className="size-4" />
                 </Button>
               </section>
             </>
           )}
+        </div>
+      ) : null}
+
+      {stage === 'campaign_builder' && builderStep === 'selection' && showBoundaryGuide ? (
+        <div role="dialog" aria-modal="true" aria-labelledby="boundary-guide-title" className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-[#050505]/95 px-4 py-8 backdrop-blur-xl">
+          <section className="w-full max-w-4xl rounded-[1.75rem] border border-white/10 bg-[#10131a] p-4 shadow-2xl sm:p-7">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Your first campaign · 15 second guide</p>
+            <h2 id="boundary-guide-title" className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">Watch how to draw your territory</h2>
+            <p className="mt-2 text-sm text-zinc-400">Then use the map behind this guide to choose the homes for your campaign.</p>
+            <video
+              ref={boundaryGuideVideoRef}
+              src="/demo/campaign-boundary-guide.mp4"
+              poster="/onboarding-create-campaign.png"
+              autoPlay
+              muted
+              playsInline
+              preload="auto"
+              onEnded={() => {
+                setBoundaryGuideWatched(true);
+                track('boundary_guide_complete', 2);
+              }}
+              onError={() => setBoundaryGuideError(true)}
+              onClick={() => { if (boundaryGuideVideoRef.current?.paused) void boundaryGuideVideoRef.current.play(); }}
+              className="mt-5 aspect-video w-full rounded-xl bg-black object-contain"
+              aria-label="Short guide showing how to draw a campaign boundary and select homes"
+            />
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-zinc-400">{boundaryGuideError ? 'Video unavailable. Draw a boundary on the map, then double-click to finish.' : boundaryGuideWatched ? 'You’re ready to draw around your own homes.' : 'The map unlocks when the guide finishes.'}</p>
+              <Button
+                type="button"
+                disabled={!boundaryGuideWatched && !boundaryGuideError}
+                onClick={() => {
+                  setShowBoundaryGuide(false);
+                  track('boundary_guide_dismissed', 2, { videoError: boundaryGuideError });
+                }}
+                className="h-12 rounded-xl bg-red-500 px-5 font-black hover:bg-red-400"
+              >
+                Draw my territory <ArrowRight className="size-4" />
+              </Button>
+            </div>
+          </section>
         </div>
       ) : null}
 

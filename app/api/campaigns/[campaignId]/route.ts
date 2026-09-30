@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
-import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
+import { ensureCampaignAccess, ensureCampaignManagerAccess } from '@/app/api/campaigns/_utils/access';
 import { resolveCampaignRegion } from '@/lib/geo/regionResolver';
 import { bboxFromPolygon } from '@/lib/services/provisionHelpers';
 
@@ -156,10 +156,39 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       name?: unknown;
       description?: unknown;
       type?: unknown;
+      status?: unknown;
       territory_boundary?: unknown;
       bbox?: unknown;
       region?: unknown;
     };
+
+    if (Object.prototype.hasOwnProperty.call(body, 'status')) {
+      if (body.status !== 'archived' || Object.keys(body).some((key) => key !== 'status')) {
+        return NextResponse.json({ error: 'Only archiving is supported through this status action' }, { status: 400 });
+      }
+
+      const admin = createAdminClient();
+      const canManage = await ensureCampaignManagerAccess(admin, campaignId, user.id);
+      if (!canManage) {
+        return NextResponse.json({ error: 'Only campaign owners and workspace admins can archive this campaign' }, { status: 403 });
+      }
+
+      const { data: archivedCampaign, error: archiveError } = await admin
+        .from('campaigns')
+        .update({ status: 'archived' })
+        .eq('id', campaignId)
+        .select('id, status')
+        .maybeSingle();
+
+      if (archiveError) {
+        console.error('[PATCH /api/campaigns/[campaignId]] Failed to archive campaign:', archiveError);
+        return NextResponse.json({ error: archiveError.message }, { status: 500 });
+      }
+      if (!archivedCampaign || archivedCampaign.status !== 'archived') {
+        return NextResponse.json({ error: 'Campaign status was not updated' }, { status: 409 });
+      }
+      return NextResponse.json(archivedCampaign);
+    }
 
     const updates: Record<string, unknown> = {};
     if (typeof body.name === 'string') {
@@ -317,7 +346,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
     const { data: campaign, error: campaignError } = await admin
       .from('campaigns')
-      .select('id, owner_id')
+      .select('id')
       .eq('id', campaignId)
       .maybeSingle();
 
@@ -330,8 +359,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
-    if (campaign.owner_id !== user.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const canManage = await ensureCampaignManagerAccess(admin, campaignId, user.id);
+    if (!canManage) {
+      return NextResponse.json({ error: 'Only campaign owners and workspace admins can delete this campaign' }, { status: 403 });
     }
 
     const { error: parcelsError } = await admin.from('campaign_parcels').delete().eq('campaign_id', campaignId);

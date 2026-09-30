@@ -39,6 +39,20 @@ function streamUrl(customerCode: string | undefined, videoUid: string, autoPlayW
   return url.toString();
 }
 
+async function playWithTimeout(player: Demo100StreamPlayer) {
+  let timeout = 0;
+  try {
+    await Promise.race([
+      player.play(),
+      new Promise<never>((_, reject) => {
+        timeout = window.setTimeout(() => reject(new Error('Video playback timed out')), 8_000);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 export function CloudflareChapterPlayer({
   customerCode,
   videoUid,
@@ -87,7 +101,7 @@ export function CloudflareChapterPlayer({
     setPlaybackError(false);
     try {
       player.muted = false;
-      await player.play();
+      await playWithTimeout(player);
       markStarted();
       setNeedsGesture(false);
     } catch {
@@ -113,7 +127,12 @@ export function CloudflareChapterPlayer({
       }
       onComplete();
     };
-    const handlePlay = () => markStarted();
+    const handlePlay = () => {
+      markStarted();
+      setPlaybackError(false);
+      setNeedsGesture(false);
+      setStarting(false);
+    };
     const handleError = () => {
       setPlaybackError(true);
       setNeedsGesture(true);
@@ -125,12 +144,15 @@ export function CloudflareChapterPlayer({
     if (autoPlayWithSound) {
       setStarting(true);
       player.muted = false;
-      player.play()
+      playWithTimeout(player)
         .then(() => {
           markStarted();
           setNeedsGesture(false);
         })
-        .catch(() => setNeedsGesture(true))
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.message === 'Video playback timed out') setPlaybackError(true);
+          setNeedsGesture(true);
+        })
         .finally(() => setStarting(false));
     } else {
       player.pause?.();

@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy } from '@/lib/industry-copy';
+import { FOUNDER_DEMO_HOME, isFounderDemoAccount } from '@/lib/founder-demo-data';
 
 function DashboardSkeleton() {
   return (
@@ -56,6 +57,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
   const [data, setData] = useState<HomeDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDemoData, setIsDemoData] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentWorkspaceId) return;
@@ -74,6 +76,12 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
     setLoading(true);
     setError(null);
     try {
+      if (await isFounderDemoAccount()) {
+        setData(FOUNDER_DEMO_HOME);
+        setIsDemoData(true);
+        return;
+      }
+      setIsDemoData(false);
       const res = await fetchHomeDashboard(currentWorkspaceId);
       dashboardCache.set(cacheKey, { data: res, fetchedAt: Date.now() });
       setData(res);
@@ -138,6 +146,12 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         lastSessionAt={lastSessionAt}
       />
 
+      {isDemoData ? (
+        <p className="-mt-3 text-xs font-medium text-amber-700 dark:text-amber-300">
+          Demo data · Sample activity and scores for preview
+        </p>
+      ) : null}
+
       {/* TODO: Re-enable when accountability_posts migration is applied
           <WeeklyAccountabilityBanner />
       */}
@@ -172,7 +186,7 @@ export function HomeDashboardView({ disableGoalEditing = false }: HomeDashboardV
         </div>
       </div>
 
-      <RecentSnapshot recentCampaigns={recentCampaigns} copy={copy} />
+      <RecentSnapshot recentCampaigns={recentCampaigns} copy={copy} demo={isDemoData} />
     </div>
   );
 }

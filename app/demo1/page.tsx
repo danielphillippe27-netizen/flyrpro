@@ -73,11 +73,7 @@ export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
           'NEXT_PUBLIC_DEMO100_MAGIC_STREAM_VIDEO_UID',
           '50e2ff07612338e37cf17adb68c0c81d',
         ),
-        end: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_END_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_END_STREAM_VIDEO_UID',
-          '868eded9898942d896066b7ebbd8fac7',
-        ),
+        end: process.env.NEXT_PUBLIC_DEMO1_END_STREAM_VIDEO_UID || '3bbfc9234b70afd03648dd8e351908cf',
       }}
       founderCallHref={process.env.NEXT_PUBLIC_FOUNDER_CALL_URL || 'https://calendly.com/daniel-phillippe'}
       referralCode={first(params?.referralCode ?? params?.ref)}

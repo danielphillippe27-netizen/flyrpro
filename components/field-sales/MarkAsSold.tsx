@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { minorUnits, salesCommand, useFieldSales } from "@/lib/field-sales/client";
+import { minorUnits, money, salesCommand, useFieldSales } from "@/lib/field-sales/client";
 export type SaleEntryContext = Record<string, string>;
 type Entry = { capabilities?: Record<string, boolean>; enabled: boolean; needs_setup?: boolean; currency: string; today: string; verification_required: boolean; can_override_duplicate: boolean; has_more_appointments: boolean; appointment_options: { id: string; contact_id: string; name: string; address?: string; scheduled_at: string; note?: string }[]; selected?: { id: string; name: string; address?: string; rep_id: string; appointment_id: string; appointment_at: string; appointment_note?: string }; duplicates: { id: string; product: string; status: string; sold_on: string }[] };
 const input = "w-full rounded-xl border bg-background px-3 py-2";
@@ -29,12 +29,19 @@ function SaleForm({ workspace, data: d, busy, setBusy, saved, change }: { worksp
   const lead = d.selected!;
   const [amount, setAmount] = useState(""); const [product, setProduct] = useState(""); const [soldOn, setSoldOn] = useState(d.today); const [completion, setCompletion] = useState(""); const [notes, setNotes] = useState("");
   const [commission, setCommission] = useState("");
+  const [commissionType, setCommissionType] = useState<"percentage" | "fixed">("percentage");
   const [job, setJob] = useState(""); const [override, setOverride] = useState("");
   const [request] = useState(() => crypto.randomUUID()); const [error, setError] = useState("");
   return <form className="space-y-4" onSubmit={async e => {
     e.preventDefault(); setBusy(true); setError("");
     try {
-      const result = await salesCommand(workspace, "submit", { request_id: request, contact_id: lead.id, appointment_id: lead.appointment_id, value_minor: minorUnits(amount, d.currency), ...(d.capabilities?.commission && commission.trim() ? { commission_minor: minorUnits(commission, d.currency) } : {}), product, sold_on: soldOn, expected_completion_on: completion || undefined, notes, ...(d.duplicates.length ? { job_identifier: job, duplicate_override_reason: override } : {}) });
+      const valueMinor = minorUnits(amount, d.currency);
+      const commissionMinor = commission.trim()
+        ? commissionType === "fixed"
+          ? minorUnits(commission, d.currency)
+          : percentageCommission(valueMinor, commission)
+        : undefined;
+      const result = await salesCommand(workspace, "submit", { request_id: request, contact_id: lead.id, appointment_id: lead.appointment_id, value_minor: valueMinor, ...(d.capabilities?.commission && commissionMinor ? { commission_minor: commissionMinor } : {}), product, sold_on: soldOn, expected_completion_on: completion || undefined, notes, ...(d.duplicates.length ? { job_identifier: job, duplicate_override_reason: override } : {}) });
       saved(result.id);
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }}>
@@ -42,7 +49,7 @@ function SaleForm({ workspace, data: d, busy, setBusy, saved, change }: { worksp
     <label className="grid gap-2 font-medium">Contract value ({d.currency})<input className={`${input} text-2xl`} required inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" /></label>
     {d.duplicates.length > 0 && <section className="space-y-2 rounded-xl border border-amber-500 p-3"><p>An existing sale may already be associated with this customer.</p>{d.duplicates.map(s => <Link key={s.id} className="block text-sm underline" href={`/sales/${s.id}`}>{s.product || "Sale"} · {s.sold_on} · {s.status}</Link>)}{d.can_override_duplicate ? <><label className="grid gap-1 text-sm">Separate job identifier<input className={input} required value={job} onChange={e => setJob(e.target.value)} /></label><label className="grid gap-1 text-sm">Why is this a separate job?<input className={input} required value={override} onChange={e => setOverride(e.target.value)} /></label></> : <p className="text-sm">A manager can confirm a legitimate separate job.</p>}</section>}
     <details><summary className="cursor-pointer text-sm">Sale details</summary><div className="mt-3 space-y-3">
-      {d.capabilities?.commission && <label className="grid gap-1 text-sm">Expected gross commission ({d.currency})<input className={input} inputMode="decimal" value={commission} onChange={e => setCommission(e.target.value)} placeholder="Optional" /><span className="text-xs text-muted-foreground">Counts toward the rep’s commission after verification. This is not a payment record.</span></label>}
+      {d.capabilities?.commission && <div className="grid gap-2 text-sm"><span className="font-medium">Expected gross commission</span><div className="flex gap-2"><button type="button" aria-pressed={commissionType === "percentage"} className={`rounded-lg border px-3 py-2 ${commissionType === "percentage" ? "bg-muted" : ""}`} onClick={() => setCommissionType("percentage")}>Percentage</button><button type="button" aria-pressed={commissionType === "fixed"} className={`rounded-lg border px-3 py-2 ${commissionType === "fixed" ? "bg-muted" : ""}`} onClick={() => setCommissionType("fixed")}>Fixed fee</button></div><label className="grid gap-1">{commissionType === "fixed" ? `Fixed fee (${d.currency})` : "Commission (%)"}<input className={input} inputMode="decimal" value={commission} onChange={e => setCommission(e.target.value)} placeholder={commissionType === "fixed" ? "0.00" : "0"} /></label>{commissionType === "percentage" && commission.trim() && <p>Expected commission: {commissionPreview(amount, commission, d.currency)}</p>}<span className="text-xs text-muted-foreground">Counts toward the rep’s commission after verification. Payment is tracked separately.</span></div>}
       <label className="grid gap-1 text-sm">Product / service<input className={input} value={product} onChange={e => setProduct(e.target.value)} /></label>
       <label className="grid gap-1 text-sm">Sold date<input className={input} type="date" required max={d.today} value={soldOn} onChange={e => setSoldOn(e.target.value)} /></label>
       <label className="grid gap-1 text-sm">Expected completion<input className={input} type="date" min={soldOn} value={completion} onChange={e => setCompletion(e.target.value)} /></label>
@@ -52,4 +59,18 @@ function SaleForm({ workspace, data: d, busy, setBusy, saved, change }: { worksp
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <button className="w-full rounded-xl bg-primary px-4 py-3 font-medium text-primary-foreground disabled:opacity-50" disabled={busy || (d.duplicates.length > 0 && !d.can_override_duplicate)}>{busy ? "Saving…" : "Confirm sale"}</button>
   </form>;
+}
+
+function percentageCommission(valueMinor: string, percentage: string): string {
+  const rate = percentage.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(rate)) throw new Error("Enter a commission percentage from 0 to 100, with up to two decimal places.");
+  const [whole, fraction = ""] = rate.split(".");
+  const rateHundredths = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  if (rateHundredths > 10000n) throw new Error("Enter a commission percentage from 0 to 100, with up to two decimal places.");
+  return ((BigInt(valueMinor) * rateHundredths + 5000n) / 10000n).toString();
+}
+
+function commissionPreview(value: string, percentage: string, currency: string): string {
+  try { return money(percentageCommission(minorUnits(value, currency), percentage), currency); }
+  catch { return "Enter a valid contract value and percentage"; }
 }
