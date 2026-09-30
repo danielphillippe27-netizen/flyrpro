@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
@@ -335,6 +336,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const [discoveredCount, setDiscoveredCount] = useState(0);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [showBoundaryExample, setShowBoundaryExample] = useState(false);
   const [territoryOrbitComplete, setTerritoryOrbitComplete] = useState(false);
   const [generatedBuildings, setGeneratedBuildings] = useState<Demo100Building[] | null>(null);
   const [generationStatus, setGenerationStatus] = useState<'idle' | 'building' | 'ready' | 'error'>('idle');
@@ -937,6 +939,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   const handleLocationSelect = (suggestion: AddressSuggestion) => {
     const center: [number, number] = [suggestion.coordinate.longitude, suggestion.coordinate.latitude];
     selectedLocationRef.current = center;
+    setShowBoundaryExample(false);
     setBuilderStep('selection');
     mapRef.current?.flyTo({ center, zoom: 16, pitch: 0, bearing: 0, duration: 1100 });
     track('builder_location_selected', 2, { label: suggestion.title });
@@ -1103,6 +1106,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     setAssignmentMode('split');
     setLiveProgress(0);
     setDemo1ChoiceVisible(false);
+    setShowBoundaryExample(false);
     setBuilderStep('location');
     setCampaignName('FIRST CAMPAIGN');
     setStage('intro_video');
@@ -1261,8 +1265,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
                     <span className="hidden sm:inline">Reset</span>
                   </Button>
                 </div>
-                <div className="mt-2 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3">
-                  <p className="text-xs font-bold leading-4 text-white">Draw around the homes you want, then double-click to finish.</p>
+                <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 p-3">
+                  <p className="text-xs font-bold leading-4 text-white">Click around the homes you want, then double-click to finish.</p>
+                  <button type="button" onClick={() => setShowBoundaryExample(true)} className="shrink-0 text-xs font-black text-emerald-300 underline underline-offset-2">Replay guide</button>
                 </div>
               </section>
 
@@ -1288,6 +1293,32 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
               </section>
             </>
           )}
+        </div>
+      ) : null}
+
+      {stage === 'campaign_builder' && builderStep === 'selection' && showBoundaryExample ? (
+        <div role="dialog" aria-modal="true" aria-labelledby="boundary-example-title" className="fixed inset-0 z-[120] grid place-items-center overflow-y-auto bg-[#050505]/95 px-4 py-6 backdrop-blur-xl">
+          <section className="w-full max-w-5xl rounded-[1.5rem] border border-white/10 bg-[#10131a] p-4 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Boundary example</p>
+                <h2 id="boundary-example-title" className="mt-1 text-xl font-black sm:text-2xl">Make a shape around the homes</h2>
+              </div>
+              <Button type="button" onClick={() => setShowBoundaryExample(false)} className="shrink-0 rounded-xl bg-red-500 font-black hover:bg-red-400">Back to map</Button>
+            </div>
+            <p className="mt-3 text-sm text-zinc-300">Click the corners to outline your area. <strong className="text-white">Double-click to finish.</strong></p>
+            <div className="relative mt-4 aspect-[3450/2000] overflow-hidden rounded-xl border border-white/10 bg-black">
+              <Image
+                src="/demo/draw-boundary-example.png"
+                alt="Example four-corner boundary drawn around homes on the campaign map"
+                width={3450}
+                height={2070}
+                unoptimized
+                className="absolute inset-x-0 -top-[3%] h-auto w-full"
+              />
+            </div>
+            <p className="mt-3 text-xs text-zinc-400">Use this shape as an example, then outline homes in your own territory.</p>
+          </section>
         </div>
       ) : null}
 
