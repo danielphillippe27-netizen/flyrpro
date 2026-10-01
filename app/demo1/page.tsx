@@ -37,11 +37,7 @@ export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
     <Demo100Experience
       customerCode={process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE}
       videoUids={{
-        intro: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_INTRO_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_INTRO_STREAM_VIDEO_UID',
-          '98f73fd9a8262141c491d508bee8e620',
-        ),
+        intro: process.env.NEXT_PUBLIC_DEMO1_INTRO_STREAM_VIDEO_UID || '2995c8470dd67f6306b07c73bf4f0880',
         postCreate: demo1VideoUid(
           'NEXT_PUBLIC_DEMO1_POST_CREATE_STREAM_VIDEO_UID',
           'NEXT_PUBLIC_DEMO100_POST_CREATE_STREAM_VIDEO_UID',
