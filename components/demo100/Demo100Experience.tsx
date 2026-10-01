@@ -875,6 +875,23 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !mapLoaded || stage !== 'solo_live_map' || buildings.length === 0) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const startingBearing = map.getBearing();
+    const startedAt = performance.now();
+    let animationFrame = 0;
+    const orbit = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / LIVE_DURATION_MS);
+      map.jumpTo({ bearing: startingBearing + progress * 360, pitch: 62 });
+      if (progress < 1) animationFrame = window.requestAnimationFrame(orbit);
+    };
+    animationFrame = window.requestAnimationFrame(orbit);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [buildings.length, mapLoaded, stage]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !mapLoaded || (stage !== 'live_map' && stage !== 'solo_live_map') || !choreography) return;
     const repFeatures = liveMembers.flatMap((member) => {
       const homes = choreography.assignedHomes
@@ -1214,7 +1231,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         </div>
       ) : null}
 
-      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' && stage !== 'branch_choice' && !(variant === 'demo1' && stage === 'post_create_video') && !(stage === 'solo_live_map' && liveProgress < 1) ? (
+      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' && stage !== 'branch_choice' && !(variant === 'demo1' && stage === 'post_create_video') ? (
         <Button
           type="button"
           onClick={advanceDemo}
