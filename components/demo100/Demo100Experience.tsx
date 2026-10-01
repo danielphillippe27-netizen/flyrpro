@@ -892,7 +892,12 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || (stage !== 'live_map' && stage !== 'solo_live_map') || !choreography) return;
+    if (!map || !mapLoaded) return;
+    if (stage !== 'live_map' && stage !== 'solo_live_map') {
+      (map.getSource(REP_SOURCE_ID) as mapboxgl.GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    if (!choreography) return;
     const repFeatures = liveMembers.flatMap((member) => {
       const homes = choreography.assignedHomes
         .filter((home) => home.assigneeId === member.id)

@@ -59,7 +59,6 @@ test('Demo 1 team path includes the interactive campaign before the closing vide
     'post_create_video',
     'branch_choice',
     'team_video',
-    'campaign_results',
     'assignments',
     'live_map',
     'team_stats',

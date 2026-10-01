@@ -84,7 +84,7 @@ export function nextDemo100Stage(stage: Demo100Stage): Demo100Stage {
 
 export function nextDemo1Stage(stage: Demo100Stage): Demo100Stage {
   if (stage === 'post_create_video') return 'branch_choice';
-  if (stage === 'team_video') return 'campaign_results';
+  if (stage === 'team_video') return 'assignments';
   if (stage === 'solo_video') return 'solo_live_map';
   if (stage === 'solo_live_map') return 'solo_stats';
   if (stage === 'solo_stats' || stage === 'team_stats') return 'magic_video';
