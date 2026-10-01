@@ -107,6 +107,9 @@ const OUTCOME_LABELS: Record<SelfServeDoorOutcome, string> = {
   appointment: 'Appointment',
 };
 
+const SOLO_MEMBER: Demo100Member = { id: 'demo1-solo', name: 'You', color: '#ef4444' };
+const SOLO_MEMBERS: readonly Demo100Member[] = [SOLO_MEMBER];
+
 const VIDEO_STAGES: Partial<Record<Demo100Stage, {
   uidKey: keyof VideoUids;
   title: string;
@@ -362,7 +365,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
     () => metricsFromOutcomes(outcomes.slice(0, resultRevealCount)),
     [outcomes, resultRevealCount],
   );
-  const choreography = useMemo<DemoLiveChoreography | null>(() => {
+  const teamChoreography = useMemo<DemoLiveChoreography | null>(() => {
     if (buildings.length === 0) return null;
     return buildDemoLiveChoreography(
       buildings,
@@ -370,6 +373,17 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       buildings.length,
     );
   }, [buildings]);
+  const soloChoreography = useMemo<DemoLiveChoreography | null>(() => {
+    if (buildings.length === 0) return null;
+    return buildDemoLiveChoreography(
+      buildings,
+      [{ user_id: SOLO_MEMBER.id, display_name: SOLO_MEMBER.name, color: SOLO_MEMBER.color }],
+      buildings.length,
+    );
+  }, [buildings]);
+  const isSoloInteractive = variant === 'demo1' && (stage === 'solo_live_map' || stage === 'solo_stats');
+  const choreography = isSoloInteractive ? soloChoreography : teamChoreography;
+  const liveMembers = isSoloInteractive ? SOLO_MEMBERS : DEMO100_MEMBERS;
   const choreographyById = useMemo(
     () => new Map((choreography?.buildings ?? []).map((building) => [building.id, building])),
     [choreography],
@@ -395,14 +409,14 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   );
   const activeLiveHomeIds = useMemo(() => {
     if (!choreography || liveProgress >= 1) return new Set<string>();
-    return new Set(DEMO100_MEMBERS.flatMap((member) => {
+    return new Set(liveMembers.flatMap((member) => {
       const route = choreography.assignedHomes
         .filter((home) => home.assigneeId === member.id)
         .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
       const activeHome = route.find((home) => home.completeAtMs !== null && home.completeAtMs > liveElapsedMs);
       return activeHome ? [activeHome.id] : [];
     }));
-  }, [choreography, liveElapsedMs, liveProgress]);
+  }, [choreography, liveElapsedMs, liveMembers, liveProgress]);
   const completedLiveCount = completedLiveHomeIds.size;
   const assignmentPreviewById = useMemo(() => {
     const assigned = new Map<string, Demo100Member>();
@@ -692,14 +706,16 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         const assignment = choreographyById.get(building.id);
         const assignmentPreview = assignmentPreviewById.get(building.id);
         let color = stage === 'territory_preview' ? '#cbd5e1' : '#64748b';
-        if (stage === 'campaign_results' || stage === 'team_stats') {
-          color = index < resultRevealCount || stage === 'team_stats' ? OUTCOME_COLORS[outcomes[index]] : '#64748b';
+        if (stage === 'campaign_results' || stage === 'team_stats' || stage === 'solo_stats') {
+          color = index < resultRevealCount || stage === 'team_stats' || stage === 'solo_stats' ? OUTCOME_COLORS[outcomes[index]] : '#64748b';
         } else if (stage === 'assignments') {
           color = assignmentPreview?.color ?? '#475569';
-        } else if (stage === 'live_map') {
+        } else if (stage === 'live_map' || stage === 'solo_live_map') {
           color = completedLiveHomeIds.has(building.id)
             ? '#22c55e'
-            : assignmentMode === 'shared'
+            : isSoloInteractive
+              ? SOLO_MEMBER.color
+              : assignmentMode === 'shared'
               ? sharedMapColor
               : assignment?.assigneeColor ?? '#64748b';
           if (activeLiveHomeIds.has(building.id)) color = '#ffffff';
@@ -742,7 +758,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         },
       }, label);
     }
-  }, [activeLiveHomeIds, assignmentMode, assignmentPreviewById, buildings, choreographyById, completedLiveHomeIds, generatedBuildingsApplied, mapLoaded, outcomes, resultRevealCount, selectedMemberIds.length, selectedMemberIdSet, sharedMapColor, stage]);
+  }, [activeLiveHomeIds, assignmentMode, assignmentPreviewById, buildings, choreographyById, completedLiveHomeIds, generatedBuildingsApplied, isSoloInteractive, mapLoaded, outcomes, resultRevealCount, selectedMemberIds.length, selectedMemberIdSet, sharedMapColor, stage]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -859,8 +875,8 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || stage !== 'live_map' || !choreography) return;
-    const repFeatures = DEMO100_MEMBERS.flatMap((member) => {
+    if (!map || !mapLoaded || (stage !== 'live_map' && stage !== 'solo_live_map') || !choreography) return;
+    const repFeatures = liveMembers.flatMap((member) => {
       const homes = choreography.assignedHomes
         .filter((home) => home.assigneeId === member.id)
         .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
@@ -869,7 +885,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         ?? homes[homes.length - 1];
       return [{
         type: 'Feature' as const,
-        properties: { name: member.name, color: assignmentMode === 'shared' ? sharedMapColor : member.color },
+        properties: { name: member.name, color: !isSoloInteractive && assignmentMode === 'shared' ? sharedMapColor : member.color },
         geometry: { type: 'Point' as const, coordinates: home.center },
       }];
     });
@@ -892,7 +908,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         paint: { 'text-color': '#fff', 'text-halo-color': '#111827', 'text-halo-width': 2 },
       });
     }
-  }, [assignmentMode, choreography, liveElapsedMs, mapLoaded, sharedMapColor, stage]);
+  }, [assignmentMode, choreography, isSoloInteractive, liveElapsedMs, liveMembers, mapLoaded, sharedMapColor, stage]);
 
   useEffect(() => {
     if (stage !== 'campaign_results' || buildings.length === 0) return;
@@ -917,7 +933,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   }, [buildings.length, stage]);
 
   useEffect(() => {
-    if (stage !== 'live_map' || buildings.length === 0) return;
+    if ((stage !== 'live_map' && stage !== 'solo_live_map') || buildings.length === 0) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduceMotion) {
       setLiveProgress(1);
@@ -1063,7 +1079,11 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       setAndTrackStage('team_stats', 'team_stats_viewed');
       return;
     }
-    if (stage === 'team_stats') setAndTrackStage(variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage), 'stage_enter');
+    if (stage === 'solo_live_map') {
+      setAndTrackStage('solo_stats', 'solo_stats_viewed');
+      return;
+    }
+    if (stage === 'team_stats' || stage === 'solo_stats') setAndTrackStage(variant === 'demo1' ? nextDemo1Stage(stage) : nextDemo100Stage(stage), 'stage_enter');
   }, [allMembersSelected, assignmentMode, buildings.length, createDraft, setAndTrackStage, stage, variant, video]);
 
   const resetDemo = () => {
@@ -1173,7 +1193,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
             <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-red-500 shadow-2xl shadow-red-950/50"><Users className="size-8" /></div>
             <p className="mt-7 text-xs font-black uppercase tracking-[0.24em] text-red-400">Choose your workflow</p>
             <h1 className="mt-4 text-balance text-5xl font-black tracking-[-0.06em] sm:text-7xl">How do you run the field?</h1>
-            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">Pick the path that matches how you prospect. Team leaders get the team workflow and the second interactive demo. Solo owners get the solo path.</p>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">Pick the path that matches how you prospect. Watch a team work together or see how one person covers the whole territory.</p>
             <div className="mx-auto mt-8 grid max-w-2xl gap-3 sm:grid-cols-2">
               <Button
                 type="button"
@@ -1194,7 +1214,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         </div>
       ) : null}
 
-      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' && stage !== 'branch_choice' && !(variant === 'demo1' && stage === 'post_create_video') ? (
+      {stage !== 'cta' && stage !== 'campaign_builder' && stage !== 'iphone_chapters' && stage !== 'branch_choice' && !(variant === 'demo1' && stage === 'post_create_video') && !(stage === 'solo_live_map' && liveProgress < 1) ? (
         <Button
           type="button"
           onClick={advanceDemo}
@@ -1444,29 +1464,36 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         </div>
       ) : null}
 
-      {stage === 'live_map' ? (
+      {stage === 'live_map' || stage === 'solo_live_map' ? (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-24 sm:justify-start sm:px-8">
           <section className="pointer-events-auto w-full max-w-md rounded-[1.75rem] border border-white/10 bg-[#090b10]/94 p-5 shadow-2xl backdrop-blur-2xl">
             <div className="flex items-start justify-between gap-4">
-              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">Live team map · 4 reps</p><h2 className="mt-2 text-2xl font-black tracking-tight">{completedLiveCount} of {buildings.length} complete</h2></div>
+              <div><p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">{isSoloInteractive ? 'Live solo route · You' : 'Live team map · 4 reps'}</p><h2 className="mt-2 text-2xl font-black tracking-tight">{completedLiveCount} of {buildings.length} complete</h2></div>
               {liveProgress >= 1 ? <CheckCircle2 className="size-7 text-emerald-400" /> : <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-sm font-black text-emerald-300">{Math.round(liveProgress * 100)}%</span>}
             </div>
             <Progress value={liveProgress * 100} className="mt-4 h-2.5 bg-white/10 [&>[data-slot=progress-indicator]]:bg-emerald-500" />
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {zoneRows.map(({ member, assigned, completed }) => (
-                <div key={member.id} className="rounded-xl bg-white/[0.05] p-3 text-xs font-bold text-zinc-300">
-                  <span className="mb-2 block size-2.5 rounded-full" style={{ backgroundColor: assignmentMode === 'shared' ? sharedMapColor : member.color }} />
-                  {member.name} · {completed}/{assigned}
-                </div>
-              ))}
-            </div>
+            {isSoloInteractive ? (
+              <div className="mt-4 flex items-center justify-between rounded-xl bg-white/[0.05] p-3 text-sm font-bold text-zinc-300">
+                <span className="flex items-center gap-2"><span className="size-2.5 rounded-full bg-red-500" /> {liveProgress >= 1 ? 'You worked every selected door' : 'You are working every selected door'}</span>
+                <span>{completedLiveCount}/{buildings.length}</span>
+              </div>
+            ) : (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {zoneRows.map(({ member, assigned, completed }) => (
+                  <div key={member.id} className="rounded-xl bg-white/[0.05] p-3 text-xs font-bold text-zinc-300">
+                    <span className="mb-2 block size-2.5 rounded-full" style={{ backgroundColor: assignmentMode === 'shared' ? sharedMapColor : member.color }} />
+                    {member.name} · {completed}/{assigned}
+                  </div>
+                ))}
+              </div>
+            )}
             <Button
               type="button"
               disabled={liveProgress < 1}
-              onClick={() => setAndTrackStage('team_stats', 'team_stats_viewed')}
+              onClick={() => setAndTrackStage(isSoloInteractive ? 'solo_stats' : 'team_stats', isSoloInteractive ? 'solo_stats_viewed' : 'team_stats_viewed')}
               className="mt-4 h-12 w-full rounded-xl bg-white font-black text-zinc-950 hover:bg-zinc-100"
             >
-              View team performance <BarChart3 className="size-4" />
+              {isSoloInteractive ? 'View your results' : 'View team performance'} <BarChart3 className="size-4" />
             </Button>
           </section>
         </div>
@@ -1512,13 +1539,44 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
         </div>
       ) : null}
 
+      {stage === 'solo_stats' ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-end justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-24 sm:items-center sm:justify-end sm:px-8">
+          <section className="pointer-events-auto max-h-[calc(100dvh-8rem)] w-full max-w-lg overflow-y-auto rounded-[1.75rem] border border-white/10 bg-[#090b10]/95 p-5 shadow-2xl backdrop-blur-2xl sm:p-6">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400">Your campaign · Example results</p>
+            <h2 className="mt-2 text-3xl font-black tracking-[-0.04em]">Every door, one clear picture.</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">You worked all {compactNumber(finalMetrics.doors)} selected homes. Here is how the activity could add up.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2.5">
+              <MetricTile label="Doors worked" value={compactNumber(finalMetrics.doors)} icon={DoorOpen} accent="text-red-400" tone="border-red-400/35 bg-red-500/[0.07]" />
+              <MetricTile label="Conversations" value={compactNumber(finalMetrics.conversations)} icon={MessageSquare} accent="text-emerald-400" tone="border-emerald-400/35 bg-emerald-500/[0.07]" />
+              <MetricTile label="Leads" value={compactNumber(finalMetrics.leads)} icon={UserRoundPlus} accent="text-blue-400" tone="border-blue-400/35 bg-blue-500/[0.07]" />
+              <MetricTile label="Appointments" value={compactNumber(finalMetrics.appointments)} icon={CalendarDays} accent="text-yellow-300" tone="border-amber-300/35 bg-amber-400/[0.07]" />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2" aria-label="Solo campaign KPIs">
+              {performanceRatios.map(([label, value, tone]) => (
+                <div key={label} className={`rounded-xl border px-3 py-3 ${tone}`}>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-zinc-400">{label}</p>
+                  <p className="mt-1 text-xl font-black text-white">{value}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-3 text-sm">
+              <span className="text-zinc-400">No answers logged</span>
+              <strong className="text-white">{compactNumber(finalMetrics.noAnswers)}</strong>
+            </div>
+            <Button type="button" onClick={() => setAndTrackStage(nextDemo1Stage(stage), 'stage_enter')} className="mt-5 h-12 w-full rounded-xl bg-red-500 font-black hover:bg-red-400">
+              See how it all connects <ArrowRight className="size-4" />
+            </Button>
+          </section>
+        </div>
+      ) : null}
+
       {stage === 'cta' ? (
         <div className="fixed inset-0 z-[110] grid place-items-center overflow-y-auto bg-[#050505] px-5 py-20 text-center">
           <section className="w-full max-w-3xl">
             <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-red-500 shadow-2xl shadow-red-950/50"><Target className="size-8" /></div>
             <p className="mt-7 text-xs font-black uppercase tracking-[0.24em] text-red-400">Your territory is ready</p>
             <h1 className="mt-4 text-balance text-5xl font-black tracking-[-0.06em] sm:text-7xl">Turn every door into momentum.</h1>
-            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">Save the campaign you just built, invite your team, and connect every field conversation to the rest of your sales system.</p>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">Save the campaign you just built and connect every field conversation to the rest of your sales system.</p>
             <div className="mx-auto mt-8 grid max-w-xl gap-3 sm:grid-cols-2">
               <Button
                 type="button"

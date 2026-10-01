@@ -9,6 +9,7 @@ import {
   nextDemo100Stage,
   parseDemo100StoredState,
 } from '@/lib/demo100/flow';
+import { buildDemoLiveChoreography } from '@/lib/demo/team-live-map-choreography';
 
 let passed = 0;
 let failed = 0;
@@ -31,7 +32,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 test('moves through the complete demo in order', () => {
   const defaultPath = DEMO100_STAGES.filter(
-    (stage) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video'].includes(stage),
+    (stage) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video', 'solo_live_map', 'solo_stats'].includes(stage),
   );
   defaultPath.slice(0, -1).forEach((stage, index) => {
     assert(nextDemo100Stage(stage) === defaultPath[index + 1], `${stage} should advance once`);
@@ -69,8 +70,38 @@ test('Demo 1 team path includes the interactive campaign before the closing vide
   teamPath.slice(0, -1).forEach((stage, index) => {
     assert(nextDemo1Stage(stage) === teamPath[index + 1], `${stage} should lead to ${teamPath[index + 1]}`);
   });
-  assert(nextDemo1Stage('solo_video') === 'magic_video', 'Solo should continue to the shared closing videos');
   assert(getDemo100StageNumber('magic_video') > getDemo100StageNumber('team_stats'), 'Magic should advance the progress bar after team results');
+});
+
+test('Demo 1 solo path works every home before showing KPIs and the closing videos', () => {
+  const soloPath = [
+    'solo_video',
+    'solo_live_map',
+    'solo_stats',
+    'magic_video',
+    'end_video',
+    'cta',
+  ] as const;
+  soloPath.slice(0, -1).forEach((stage, index) => {
+    assert(nextDemo1Stage(stage) === soloPath[index + 1], `${stage} should lead to ${soloPath[index + 1]}`);
+  });
+  assert(getDemo100StageNumber('solo_live_map') < getDemo100StageNumber('solo_stats'), 'Solo results should follow the live route');
+  assert(getDemo100StageNumber('solo_stats') < getDemo100StageNumber('magic_video'), 'Magic should follow Solo results');
+  const homes = Array.from({ length: 24 }, (_, index) => {
+    const longitude = -79.4 + index * 0.0001;
+    const latitude = 43.7;
+    return {
+      id: `home-${index}`,
+      center: [longitude, latitude] as [number, number],
+      geometry: {
+        type: 'Polygon' as const,
+        coordinates: [[[longitude, latitude], [longitude + 0.00001, latitude], [longitude + 0.00001, latitude + 0.00001], [longitude, latitude]]],
+      },
+    };
+  });
+  const route = buildDemoLiveChoreography(homes, [{ user_id: 'demo1-solo', display_name: 'You', color: '#ef4444' }], homes.length);
+  assert(route.assignedHomes.length === homes.length, 'Solo should visit every selected home');
+  assert(route.assignedHomes.every((home) => home.assigneeId === 'demo1-solo' && home.completeAtMs !== null), 'One person should complete the full route');
 });
 
 test('derives one consistent outcome and metrics set', () => {

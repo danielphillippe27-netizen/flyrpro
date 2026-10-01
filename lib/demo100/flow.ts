@@ -22,6 +22,8 @@ export const DEMO100_STAGES = [
   'iphone_chapters',
   'outro_video',
   'cta',
+  'solo_live_map',
+  'solo_stats',
 ] as const;
 
 export type Demo100Stage = (typeof DEMO100_STAGES)[number];
@@ -74,7 +76,7 @@ export function nextDemo100Stage(stage: Demo100Stage): Demo100Stage {
   if (stage === 'magic_video') return 'end_video';
   if (stage === 'end_video') return 'cta';
   const sequence = DEMO100_STAGES.filter(
-    (candidate) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video'].includes(candidate),
+    (candidate) => !['branch_choice', 'team_video', 'solo_video', 'magic_video', 'end_video', 'solo_live_map', 'solo_stats'].includes(candidate),
   );
   const index = sequence.indexOf(stage);
   return sequence[Math.min(index + 1, sequence.length - 1)] ?? 'cta';
@@ -83,7 +85,9 @@ export function nextDemo100Stage(stage: Demo100Stage): Demo100Stage {
 export function nextDemo1Stage(stage: Demo100Stage): Demo100Stage {
   if (stage === 'post_create_video') return 'branch_choice';
   if (stage === 'team_video') return 'campaign_results';
-  if (stage === 'solo_video' || stage === 'team_stats') return 'magic_video';
+  if (stage === 'solo_video') return 'solo_live_map';
+  if (stage === 'solo_live_map') return 'solo_stats';
+  if (stage === 'solo_stats' || stage === 'team_stats') return 'magic_video';
   if (stage === 'magic_video') return 'end_video';
   if (stage === 'end_video') return 'cta';
   return nextDemo100Stage(stage);
@@ -126,6 +130,8 @@ export function getDemo100StageNumber(stage: Demo100Stage): number {
   if (stage === 'assignments') return 5;
   if (stage === 'live_map') return 6;
   if (stage === 'team_stats') return 7;
+  if (stage === 'solo_live_map') return 6;
+  if (stage === 'solo_stats') return 7;
   if (stage === 'field_guide_intro_video' || stage === 'iphone_chapters') return 8;
   return 9;
 }
