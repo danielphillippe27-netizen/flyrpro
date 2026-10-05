@@ -1,5 +1,6 @@
 'use client';
 
+import { KimiCocoCard } from './KimiCocoCard';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -1231,7 +1232,7 @@ export default function IntegrationsPage() {
                   ].filter((status) => status?.connected).length} connected
                 </span>
                 <span className="rounded-full bg-muted px-3 py-1.5 font-medium">
-                  {4 + VISIBLE_CONTRACTOR_INTEGRATIONS.length} available
+                  {5 + VISIBLE_CONTRACTOR_INTEGRATIONS.length} available
                 </span>
               </div>
             </div>
@@ -1258,6 +1259,7 @@ export default function IntegrationsPage() {
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <KimiCocoCard key={currentWorkspace?.id} workspaceId={currentWorkspace?.id}/>
           {/* Follow Up Boss Integration */}
           <Card>
             <CardHeader>

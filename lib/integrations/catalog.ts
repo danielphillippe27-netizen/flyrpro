@@ -1,4 +1,5 @@
 export type IntegrationProviderId =
+  | 'kimicoco'
   | 'followupboss'
   | 'boldtrail'
   | 'hubspot'
@@ -26,6 +27,7 @@ export type IntegrationCatalogEntry = {
 };
 
 export const REAL_ESTATE_INTEGRATIONS: IntegrationCatalogEntry[] = [
+  { id: 'kimicoco', displayName: 'KimiCoco', description: 'Send contacts, notes, appointments and follow-ups to KimiCoco.', industryGroup: 'real_estate', authModes: ['api_key'], preferredAuthMode: 'api_key', tokenLabel: 'Connection key', tokenPlaceholder: 'Paste your KimiCoco connection key', accent: 'rose' },
   {
     id: 'followupboss',
     displayName: 'Follow Up Boss',
@@ -158,6 +160,7 @@ export function normalizeIntegrationProvider(value: string | null | undefined): 
   if (provider === 'acculynx') return 'acculynx';
   if (provider === 'rooflink') return 'rooflink';
   if (provider === 'hubspot') return 'hubspot';
+  if (provider === 'kimicoco') return 'kimicoco';
   if (provider === 'zapier') return 'zapier';
   return null;
 }

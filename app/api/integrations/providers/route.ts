@@ -75,6 +75,9 @@ export async function GET(request: NextRequest) {
     ...(crmConnections ?? []).map((row) => normalizedProvider(row.provider)),
   ]);
 
+  const { data: kimiConnections } = workspaceIds.length ? await admin.from('kimicoco_connections').select('workspace_id').in('workspace_id', workspaceIds) : { data: [] };
+  if (kimiConnections?.length) connected.add('kimicoco');
+
   return NextResponse.json(
     getIntegrationsForIndustry(industry).map((provider) => ({
       id: provider.id,

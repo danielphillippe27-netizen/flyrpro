@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
+import { adaptKimiCoco } from '@/app/api/integrations/kimicoco/adapter';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const providerId = typeof body.providerId === 'string' ? body.providerId.trim() : '';
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+  if (providerId === 'kimicoco') return adaptKimiCoco(new NextRequest(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(body) }), 'connect');
   if (!allowedProviders.has(providerId) || !apiKey) {
     return NextResponse.json({ error: 'providerId and apiKey are required' }, { status: 400 });
   }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { POST as kimiCocoTestPush } from '@/app/api/integrations/kimicoco/test-push/route';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveWorkspaceIdForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest) {
     try {
       const body = await request.json();
       workspaceId = body?.workspaceId ?? null;
+      if (body?.provider === 'kimicoco') return kimiCocoTestPush(new NextRequest(request.url, { method: 'POST', headers: request.headers, body: JSON.stringify(body) }));
     } catch {
       workspaceId = null;
     }

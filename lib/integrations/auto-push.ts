@@ -7,6 +7,8 @@
  * Server-side only.
  */
 
+import { after } from 'next/server';
+import { dispatchKimiCoco } from '@/lib/integrations/kimicoco';
 import { createAdminClient } from '@/lib/supabase/server';
 import { getFubAuthForUserWorkspace } from '@/app/api/integrations/followupboss/_lib/auth';
 import { isFubConnectionProvider } from '@/app/api/integrations/followupboss/_lib/provider';
@@ -42,7 +44,7 @@ import {
 export type CrmPushResult = {
   provider: string;
   displayName: string;
-  status: 'synced' | 'failed' | 'skipped';
+  status: 'synced' | 'failed' | 'skipped' | 'pending';
   ms?: number;
   error?: string;
 };
@@ -173,6 +175,21 @@ export async function pushLeadToConnectedCrms(
   ) as ContractorProviderId[];
 
   const tasks: Array<() => Promise<CrmPushResult>> = [];
+
+  const { data: kimiConnection } = await supabase.from('kimicoco_connections')
+    .select('auto_sync').eq('workspace_id', workspaceId).maybeSingle();
+  if (kimiConnection?.auto_sync) {
+    tasks.push(async () => {
+      // The database trigger has already queued the saved contact. Delivery runs
+      // after the response, with the cron worker as a durable fallback.
+      try {
+        after(async () => {
+          try { await dispatchKimiCoco(workspaceId); } catch { /* The cron worker retries queued jobs. */ }
+        });
+      } catch { /* Outside a route context, the cron worker still delivers. */ }
+      return { provider: 'kimicoco', displayName: 'KimiCoco', status: 'pending' };
+    });
+  }
 
   // ── Follow Up Boss ──────────────────────────────────────────────────────────
   if (hasFub) {

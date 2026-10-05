@@ -181,6 +181,8 @@ export async function POST(request: NextRequest) {
     user_id: requestUser.id,
     workspace_id: workspace.workspaceId ?? null,
     full_name: fullName,
+    first_name: getString(body.first_name),
+    last_name: getString(body.last_name),
     email: getString(body.email),
     phone: getString(body.phone),
     address: getString(body.address) ?? linkedAddress?.address ?? '',
@@ -192,6 +194,11 @@ export async function POST(request: NextRequest) {
     notes: getString(body.notes),
     follow_up_at: getOptionalIsoString(body.follow_up_at),
     appointment_at: getOptionalIsoString(body.appointment_at),
+    appointment_title: getString(body.appointment_title),
+    appointment_notes: getString(body.appointment_notes),
+    appointment_location: getString(body.appointment_location),
+    follow_up_title: getString(body.follow_up_title),
+    follow_up_notes: getString(body.follow_up_notes),
     tags: getString(body.tags),
     address_id: addressId,
     gers_id: linkedAddress?.gers_id ?? null,
@@ -199,6 +206,7 @@ export async function POST(request: NextRequest) {
 
   let insert = await admin.from('contacts').insert(payload).select('*').single();
   const removableColumns = [
+    'first_name', 'last_name', 'appointment_title', 'appointment_notes', 'appointment_location', 'follow_up_title', 'follow_up_notes',
     'workspace_id',
     'source',
     'last_contacted',

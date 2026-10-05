@@ -69,9 +69,20 @@ export async function POST(request: NextRequest) {
     user_id: requestUser.id,
     workspace_id: workspace.workspaceId,
     full_name: fullName,
+    first_name: cleanedString(body.first_name ?? body.firstName),
+    last_name: cleanedString(body.last_name ?? body.lastName),
+    follow_up_notes: followUpNote,
+    appointment_notes: appointmentNote,
     status: outcome,
     source: 'android',
   };
+  for (const field of ['appointment_at', 'follow_up_at'] as const) {
+    const raw = cleanedString(body[field]);
+    if (raw && !Number.isNaN(Date.parse(raw))) payload[field] = new Date(raw).toISOString();
+  }
+  for (const field of ['appointment_title', 'follow_up_title'] as const) {
+    const value = cleanedString(body[field]); if (value) payload[field] = value;
+  }
   if (campaignId) payload.campaign_id = campaignId;
   if (email) payload.email = email;
   if (phone) payload.phone = phone;
@@ -87,7 +98,7 @@ export async function POST(request: NextRequest) {
     .select('id, campaign_id, full_name, status')
     .single();
   let guard = 0;
-  while (result.error && guard < 8 && removeMissingColumn(payload, result.error)) {
+  while (result.error && guard < 16 && removeMissingColumn(payload, result.error)) {
     guard += 1;
     result = await admin
       .from('contacts')
