@@ -41,7 +41,7 @@ type ContactLike = {
 };
 
 const FOLLOW_UP_DELAY_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_DEMO_DESTINATION_PATH = '/demo-1';
+const DEFAULT_DEMO_DESTINATION_PATH = '/demo1';
 
 function cleanText(value: string | null | undefined): string | null {
   const trimmed = value?.trim();

@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import { campaignTiming } from '../analytics';
+import type { CaptureEvent } from '../contracts';
+const origin = '2026-10-06T12:00:00Z';
+const first = '357b72da-6602-490b-8338-a97b6e07c94c';
+const second = 'e1a5c1bf-1b61-4fb8-a4da-37e74cd2d6f2';
+const event = (sequence: number, seconds: number, kind: CaptureEvent['kind'], targetId?: string): CaptureEvent => ({
+  id: `event-${sequence}`, sequence, occurredAt: new Date(Date.parse(origin) + seconds * 1000).toISOString(), kind, targetId, consent: 'granted',
+});
+const complete = [event(0, 10, 'door_started', first), event(1, 70, 'door_finished', first), event(2, 100, 'door_started', second), event(3, 220, 'door_finished', second)];
+let timing = campaignTiming(complete, origin);
+assert.equal(timing.markedDoorMs, 180000);
+assert.equal(timing.averageDoorMs, 90000);
+assert.equal(timing.betweenDoorsMs, 30000);
+assert.deepEqual(timing.doors.map(d => d.gapBeforeMs), [null, 30000]);
+assert.equal(timing.incompleteMarkers, 0);
+assert.deepEqual(campaignTiming([...complete].reverse(), origin), timing);
+assert.equal(campaignTiming([], origin).averageDoorMs, null);
+assert.equal(campaignTiming(complete.slice(0, 2), origin).betweenDoorsMs, null);
+timing = campaignTiming([...complete, event(4, 300, 'door_started', first)], origin);
+assert.equal(timing.incompleteMarkers, 1);
+assert.equal(timing.betweenDoorsMs, null);
+assert.equal(timing.markedDoorMs, 180000);
+timing = campaignTiming([event(0, 10, 'door_started', first), event(1, 30, 'door_started', second), event(2, 70, 'door_finished', first), event(3, 100, 'door_finished', second)], origin);
+assert.equal(timing.ambiguousMarkers, 2);
+assert.equal(timing.doors.length, 0);
+assert.equal(timing.markedDoorMs, 0);
+assert.equal(timing.betweenDoorsMs, null);
+timing = campaignTiming([event(0, 20, 'door_started', first), event(1, 10, 'door_finished', first)], origin);
+assert.equal(timing.incompleteMarkers, 1);
+assert.equal(timing.doors.length, 0);
+timing = campaignTiming([...complete, event(4, 230, 'paused')], origin);
+assert.equal(timing.includesPauses, true);
+assert.equal(campaignTiming([event(0, 10, 'door_finished', first)], origin).incompleteMarkers, 1);
+assert.equal(campaignTiming([event(0, 10, 'door_started', first), event(1, 20, 'door_started', first), event(2, 30, 'door_finished', first)], origin).incompleteMarkers, 1);
+console.log('Explicit door duration, gap timing, out-of-order delivery, missing/overlapping markers and pause disclosure passed');

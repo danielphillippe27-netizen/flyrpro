@@ -806,9 +806,9 @@ function MetricCard({ label, value }: MetricCardProps) {
 }
 
 function formatRating(lead: LeadResult): string {
-  if (typeof lead.rating !== 'number') return '-';
-  const count = typeof lead.userRatingCount === 'number' ? ` (${lead.userRatingCount})` : '';
-  return `${lead.rating.toFixed(1)}${count}`;
+  const rating = typeof lead.rating === 'number' ? `${lead.rating.toFixed(1)} stars` : 'No rating';
+  const count = typeof lead.userRatingCount === 'number' ? `${lead.userRatingCount.toLocaleString()} ratings` : 'Rating count unavailable';
+  return `${rating} · ${count}`;
 }
 
 function formatRunDate(value: string | null | undefined): string {
@@ -2334,7 +2334,7 @@ export function SalespersonPlacesLeadFinder() {
                 <TableHead className="min-w-[260px] px-4">Business</TableHead>
                 <TableHead className="min-w-[180px]">Contact</TableHead>
                 <TableHead className="min-w-[260px]">Address</TableHead>
-                <TableHead className="min-w-[120px]">Rating</TableHead>
+                <TableHead className="min-w-[210px]">Google ratings</TableHead>
                 <TableHead className="min-w-[120px]">Score</TableHead>
                 <TableHead className="w-[160px] text-right">Actions</TableHead>
               </TableRow>
@@ -2387,9 +2387,9 @@ export function SalespersonPlacesLeadFinder() {
                       <p className="mt-1 text-xs text-muted-foreground">
                         {lead.agencyBusinessName || lead.primaryType || lead.industry}
                       </p>
-                      {lead.websiteDomain ? (
-                        <p className="mt-1 text-xs text-muted-foreground">{lead.websiteDomain}</p>
-                      ) : null}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Website: {lead.website ? lead.websiteDomain || lead.website : 'No website listed'}
+                      </p>
                       {lead.jobSignals?.[0] ? (
                         <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
                           {lead.jobSignals[0].source}: {lead.jobSignals[0].title}
@@ -2432,9 +2432,14 @@ export function SalespersonPlacesLeadFinder() {
                           rel="noreferrer"
                         >
                           <Globe2 className="h-3.5 w-3.5" />
-                          Website
+                          Open website
                         </a>
-                      ) : null}
+                      ) : (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Globe2 className="h-3.5 w-3.5" />
+                          No website listed
+                        </span>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="whitespace-normal">

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { checkedDeletionReceipt, checkedDeletionStatus } from '../deletion-status';
+const recording = 'a966a7a0-0643-45b9-a704-7f2bfa0a1f39';
+const request = 'a615eb47-d5a4-4fe9-969f-528c53e1f37c';
+const other = 'c1a0fc78-4e61-475d-873d-d7e8ee0bfa8b';
+const status = { recordingId: recording, deletionEnabled: false, hidden: true, captureStopped: true, cleanup: { request_id: request, storage_state: 'done', provider_state: 'pending', storage_not_before: '2026-10-06T15:00:00+00:00', created_at: '2026-10-06T12:55:00Z', completed_at: null } };
+assert.equal(checkedDeletionStatus(status, recording).cleanup?.provider_state, 'pending');
+assert.throws(() => checkedDeletionStatus(status, other));
+assert.throws(() => checkedDeletionStatus({ ...status, manifest: [] }, recording));
+assert.throws(() => checkedDeletionStatus({ ...status, hidden: false }, recording));
+assert.throws(() => checkedDeletionStatus({ ...status, cleanup: { ...status.cleanup, storage_state: 'complete' } }, recording));
+const receipt = { recordingId: recording, requestId: request, storageState: 'done', providerState: 'pending', replayed: true, hidden: true, fullyDeleted: false };
+assert.equal(checkedDeletionReceipt(receipt, recording, request).fullyDeleted, false);
+assert.throws(() => checkedDeletionReceipt(receipt, recording, other));
+assert.throws(() => checkedDeletionReceipt({ ...receipt, fullyDeleted: true }, recording, request));
+console.log('Deletion status scope, exact request identity, partial cleanup and private-field exclusion checks passed');

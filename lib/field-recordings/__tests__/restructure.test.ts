@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { previewConversationSplit, previewConversationMerge, restructureRequestSchema, type RestructureSource } from '../restructure';
+const recording = crypto.randomUUID(), chunk = crypto.randomUUID();
+const source: RestructureSource = { id: crypto.randomUUID(), version: 1, recording_id: recording, chunk_id: chunk, review_state: 'pending', timing: { clock: 'campaign' },
+  segments: [{ id: 'one', text: 'Call next week.', startMs: 0, endMs: 2000, speaker: 'resident' }, { id: 'two', text: 'Another door.', startMs: 3000, endMs: 5000, speaker: null }] };
+const original = JSON.stringify(source);
+const parts = previewConversationSplit(source, 'two');
+assert.deepEqual(parts.flatMap(part => part.segments), source.segments);
+assert.equal(parts[0].consent, 'unknown'); assert.equal(parts[0].targetId, null); assert.equal(parts[0].analysis, null);
+assert.deepEqual(parts[0].sourceConversationIds, [source.id]); assert.equal(parts[0].timing.clock, 'campaign');
+assert.equal(JSON.stringify(source), original);
+for (const boundary of ['one', 'missing']) assert.throws(() => previewConversationSplit(source, boundary));
+const second = { ...source, id: crypto.randomUUID(), segments: [{ id: 'three', text: 'Resident asked for information.', startMs: 6000, endMs: 9000, speaker: 'resident' }] };
+const merged = previewConversationMerge([second, source]);
+assert.deepEqual(merged.segments.map(segment => segment.id), ['one', 'two', 'three']); assert.equal(merged.timing.spanMs, 9000); assert.equal(merged.timing.speechMs, null);
+assert.equal(merged.consent, 'unknown'); assert.equal(merged.note, null);
+assert.equal(previewConversationMerge([source, { ...second, timing: { clock: 'audio_unaligned' } }]).timing.clock, 'audio_unaligned');
+assert.throws(() => previewConversationMerge([source, source]));
+assert.throws(() => previewConversationMerge([source, { ...second, recording_id: crypto.randomUUID() }]));
+assert.throws(() => previewConversationMerge([source, { ...second, chunk_id: crypto.randomUUID() }]));
+assert.throws(() => previewConversationMerge([source, { ...second, review_state: 'approved' }]));
+assert.throws(() => previewConversationMerge([source, { ...second, segments: source.segments }]));
+assert.throws(() => previewConversationSplit({ ...source, segments: [...source.segments].reverse() }, 'one'));
+assert.equal(restructureRequestSchema.safeParse({ operation: 'merge', conversations: [{ id: source.id, version: 1 }, { id: source.id, version: 1 }] }).success, false);
+console.log('Conversation split/merge preview preservation, consent reset, lineage, ordering and version-state safeguards passed');

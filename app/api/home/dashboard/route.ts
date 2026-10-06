@@ -171,10 +171,6 @@ async function fetchContactMetricsRows(
   return runQuery('full_name, phone, email, address, campaign_id, status, created_at, updated_at');
 }
 
-/**
- * Doors hit = count of scan_events for campaigns owned by the user (QR scans).
- * Fallback: if we add "addresses marked visited/attempted" elsewhere, document there and keep UI consistent.
- */
 export async function GET(request: Request) {
   try {
     const authClient = await getSupabaseServerClient();
@@ -348,30 +344,19 @@ export async function GET(request: Request) {
       name: (c as { title?: string; name?: string }).title || (c as { name?: string }).name || 'Unnamed Campaign',
     }));
 
-    // Doors this week + last session: run both scan_events queries in parallel
-    let doorsThisWeek = 0;
+    // Keep the most recent scan timestamp for the header's last-activity display.
     let lastSessionAt: string | null = null;
 
     if (campaignIds.length > 0) {
       try {
-        const [countRes, lastScanRes] = await Promise.all([
-          supabase
-            .from('scan_events')
-            .select('*', { count: 'exact', head: true })
-            .in('campaign_id', campaignIds)
-            .gte('scanned_at', startOfWeek),
-          supabase
-            .from('scan_events')
-            .select('scanned_at')
-            .in('campaign_id', campaignIds)
-            .order('scanned_at', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        ]);
+        const lastScanRes = await supabase
+          .from('scan_events')
+          .select('scanned_at')
+          .in('campaign_id', campaignIds)
+          .order('scanned_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-        if (!countRes.error) {
-          doorsThisWeek = countRes.count ?? 0;
-        }
         if (lastScanRes.data?.scanned_at) {
           lastSessionAt = lastScanRes.data.scanned_at;
         }
@@ -384,7 +369,7 @@ export async function GET(request: Request) {
     const minutesThisWeek = 0;
     const sessionsThisWeek = 0;
     const weekSessions = (weekSessionsRes.data ?? []) as SessionMetricRow[];
-    const metricDoors = weekSessions.reduce((sum, row) => sum + (Number(row.doors_hit ?? 0) || 0), 0);
+    const doorsThisWeek = weekSessions.reduce((sum, row) => sum + (Number(row.doors_hit ?? 0) || 0), 0);
     const metricConvos = weekSessions.reduce((sum, row) => sum + (Number(row.conversations ?? 0) || 0), 0);
     const fallbackLeadCount = weekSessions.reduce((sum, row) => sum + (Number(row.leads_created ?? 0) || 0), 0);
     const metricsPeriodEnd = new Date().toISOString();
@@ -421,7 +406,7 @@ export async function GET(request: Request) {
       recentCampaigns,
       lastSessionAt,
       metrics: {
-        doors: metricDoors,
+        doors: doorsThisWeek,
         convos: metricConvos,
         leads: metricLeads,
         appointments: metricAppointments,

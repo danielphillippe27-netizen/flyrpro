@@ -24,7 +24,6 @@ import {
   ensureSalespersonReferralCode,
   normalizeSalespersonReferralCodeInput,
 } from '@/app/lib/billing/salespeople';
-import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 import {
   attachDiallerLeadToMaster,
   ensureSalespersonLeadMaster,
@@ -113,8 +112,8 @@ const VALID_DISPOSITIONS = new Set<DiallerLeadDisposition>([
   'dnc',
 ]);
 const FALLBACK_PUBLIC_ORIGIN = 'https://wolfgrid.app';
-const DIALER_DEMO_VIDEO_PATH = '/demo-1';
-const LISTING_DEMO_VIDEO_PATH = '/demo-2';
+const DIALER_DEMO_VIDEO_PATH = '/demo1';
+const LISTING_DEMO_VIDEO_PATH = '/demo1';
 
 type DiallerLeadCallRow = {
   id: string;
@@ -530,8 +529,7 @@ function buildSoloInterestedLinkText(lead: DiallerLead, demoUrl: string): string
 
 function buildBrokerageInterestedLinkText(params: {
   lead: DiallerLead;
-  teamDemoUrl: string;
-  listingDemoUrl: string;
+  demoUrl: string;
   signupUrl: string;
 }): string {
   const firstName = cleanText(params.lead.name).split(/\s+/)[0];
@@ -542,10 +540,9 @@ function buildBrokerageInterestedLinkText(params: {
     '',
     'Great connecting with you.',
     '',
-    'Here are the quick WolfGrid links for your brokerage:',
+    'Here is the WolfGrid demo for solo agents and teams:',
     '',
-    `Teams demo: ${params.teamDemoUrl}`,
-    `Individual agent listing demo: ${params.listingDemoUrl}`,
+    `Watch the demo: ${params.demoUrl}`,
     `Free trial: ${params.signupUrl}`,
     '',
     'If you know agents who could use this, feel free to share it with them.',
@@ -597,8 +594,7 @@ function extractEmailCtas(text: string, demoUrl: string): Array<{ label: string;
 function buildBrokerageDemoEmailBody(params: {
   lead: DiallerLead;
   senderName: string;
-  teamDemoUrl: string;
-  listingDemoUrl: string;
+  demoUrl: string;
   signupUrl: string;
 }): string {
   const firstName = cleanText(params.lead.name).split(/\s+/)[0];
@@ -609,10 +605,9 @@ function buildBrokerageDemoEmailBody(params: {
     '',
     'It was great connecting with you.',
     '',
-    'I wanted to send over two quick WolfGrid demos that might be useful for your brokerage:',
+    'Here is the WolfGrid demo for solo agents and teams:',
     '',
-    `Demo 1 - Teams: ${params.teamDemoUrl}`,
-    `Demo 2 - Individual Agent Listing: ${params.listingDemoUrl}`,
+    `Watch the demo: ${params.demoUrl}`,
     '',
     `Agents can also start with one included campaign here: ${params.signupUrl}`,
     '',
@@ -756,7 +751,6 @@ async function sendDemoEmail(
   const senderName = formatDemoSenderName(salesperson, context.requestUser.email);
   const from = `${senderName} <${handle}@${DEMO_EMAIL_DOMAIN}>`;
   const replyTo = cleanText(salesperson?.demo_email_reply_to) || cleanText(salesperson?.email) || cleanText(context.requestUser.email) || getEnv('RESEND_REPLY_TO');
-  const cleanToken = cleanText(overrides?.demoLinkToken);
   const publicOrigin = getPublicOrigin(request);
   const audience = normalizeDemoAudience(overrides?.demoAudience, lead);
   let demo: { url: string; referralCode: string | null; tracked: boolean };
@@ -773,76 +767,22 @@ async function sendDemoEmail(
       tracked: false,
     };
   } else {
-    try {
-      const generated = await generateDemoLinkForLead({
-        admin: context.admin,
-        leadId: lead.id,
-        user: context.requestUser,
-      });
-      const generatedDestination = new URL(generated.url);
-      const trackedLink = await createTrackedDemoLink({
-        admin: context.admin,
-        origin: publicOrigin,
-        salesperson,
-        workspaceId: context.workspaceId,
-        lead,
-        contact,
-        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-        source: 'salesperson',
-        campaign: 'power-dialer-demo',
-        destinationPath: generatedDestination.pathname,
-      });
-      demo = {
-        url: trackedLink?.url ?? generated.url,
-        referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-        tracked: Boolean(trackedLink),
-      };
-    } catch (generateError) {
-      console.warn('[dialer/leads] demo engine link generation failed; falling back to legacy demo URL', generateError);
-      demo = cleanToken
-        ? {
-            url: new URL(`/d/${encodeURIComponent(cleanToken)}`, publicOrigin).toString(),
-            referralCode: normalizeSalespersonReferralCodeInput(salesperson?.referral_code ?? '') || null,
-            tracked: true,
-          }
-        : await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
-    }
+    demo = await buildTrackedDialerDemoUrl(request, context, salesperson, lead, contact);
   }
-  const listingDemoUrl = buildSharedDialerDemoUrl(
-    publicOrigin,
-    demo.referralCode,
-    LISTING_DEMO_VIDEO_PATH,
-    'individual-agent-listing'
-  );
   const signupUrl = buildBrokerageSignupUrl(publicOrigin, demo.referralCode);
   const fallbackBody = audience === 'brokerage'
     ? buildBrokerageDemoEmailBody({
         lead,
         senderName,
-        teamDemoUrl: demo.url,
-        listingDemoUrl,
+        demoUrl: demo.url,
         signupUrl,
       })
     : audience === 'solo'
       ? buildSoloDemoEmailBody({ lead, senderName, demoUrl: demo.url })
       : null;
   const contactId = typeof contact?.id === 'string' ? contact.id : null;
-  if (cleanToken) {
-    const { error: linkUpdateError } = await context.admin
-      .from('salesperson_demo_links')
-      .update({
-        contact_id: contactId,
-        recipient_email: recipient.toLowerCase(),
-        recipient_name: cleanText(lead.name) || null,
-      })
-      .eq('token', cleanToken)
-      .eq('workspace_id', context.workspaceId);
-    if (linkUpdateError) {
-      console.warn('[dialer/leads] failed to attach demo link to contact', linkUpdateError);
-    }
-  }
   const content = buildDemoEmailContent(lead, demo.url, senderName, {
-    subject: overrides?.subject ?? (audience === 'brokerage' ? 'Two quick WolfGrid demos for your agents' : audience === 'solo' ? 'Quick WolfGrid listing demo' : null),
+    subject: overrides?.subject ?? (audience === 'brokerage' ? 'WolfGrid demo for your agents' : audience === 'solo' ? 'Quick WolfGrid demo' : null),
     body: overrides?.body ?? fallbackBody,
   });
   const resend = new Resend(apiKey);
@@ -893,18 +833,11 @@ async function sendInterestedLink(
     campaign: getDemoAudienceCampaign(audience),
   });
   const publicOrigin = getPublicOrigin(request);
-  const listingDemoUrl = buildSharedDialerDemoUrl(
-    publicOrigin,
-    demo.referralCode,
-    LISTING_DEMO_VIDEO_PATH,
-    getDemoAudienceCampaign('solo')
-  );
   const signupUrl = buildBrokerageSignupUrl(publicOrigin, demo.referralCode);
   const messageBody = audience === 'brokerage'
     ? buildBrokerageInterestedLinkText({
         lead,
-        teamDemoUrl: demo.url,
-        listingDemoUrl,
+        demoUrl: demo.url,
         signupUrl,
       })
     : audience === 'solo'
@@ -946,7 +879,7 @@ async function sendInterestedLink(
       actor_user_id: context.requestUser.id,
       activity_type: 'text',
       note: audience === 'brokerage'
-        ? `Brokerage demo SMS sent:\n${demo.url}\n${listingDemoUrl}\n${signupUrl}`
+        ? `Brokerage demo SMS sent:\n${demo.url}\n${signupUrl}`
         : `Demo SMS sent: ${demo.url}`,
       occurred_at: now,
     }),

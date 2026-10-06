@@ -1,6 +1,7 @@
 'use client';
 
 import { KimiCocoCard } from './KimiCocoCard';
+import { PlaudCard } from './PlaudCard';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -1259,6 +1260,7 @@ export default function IntegrationsPage() {
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <PlaudCard key={`plaud-${currentWorkspace?.id}`} workspaceId={currentWorkspace?.id} />
           <KimiCocoCard key={currentWorkspace?.id} workspaceId={currentWorkspace?.id}/>
           {/* Follow Up Boss Integration */}
           <Card>

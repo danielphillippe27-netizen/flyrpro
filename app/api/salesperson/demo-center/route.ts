@@ -125,8 +125,8 @@ export async function GET(request: NextRequest) {
       (await resolveAvailableDemoEmailHandle(admin as unknown as HandleLookupClient, salesperson, requestUser.email)) ||
       buildFallbackDemoEmailHandle(salesperson, requestUser.email);
 
-    const soloDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-agent', '/demo-2');
-    const teamDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-team', '/demo-1');
+    const soloDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-agent', '/demo1');
+    const teamDemoUrl = buildSegmentLink(origin, referralCode, 'real-estate-team', '/demo1');
 
     return NextResponse.json({
       salesperson: {
@@ -145,13 +145,13 @@ export async function GET(request: NextRequest) {
           origin,
           referralCode,
           'individual-agent-listing',
-          '/demo-2'
+          '/demo1'
         ),
         realEstateAgentUrl: soloDemoUrl,
         realEstateTeamUrl: teamDemoUrl,
-        roofingUrl: buildSegmentLink(origin, referralCode, 'roofing'),
-        solarUrl: buildSegmentLink(origin, referralCode, 'solar'),
-        homeServiceUrl: buildSegmentLink(origin, referralCode, 'home-service'),
+        roofingUrl: buildSegmentLink(origin, referralCode, 'roofing', '/demo1'),
+        solarUrl: buildSegmentLink(origin, referralCode, 'solar', '/demo1'),
+        homeServiceUrl: buildSegmentLink(origin, referralCode, 'home-service', '/demo1'),
       },
       stats: {
         clicks: clickCount,

@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { captureStateAfter, conversationTiming, matchDoor, transcriptSegmentSchema, type CaptureEvent } from '../contracts';
+import { conversationQuestions, parseJevAnalysis } from '../jev';
+
+const segment = (id: string, startMs: number, endMs: number) => ({ id, startMs, endMs, text: 'Example', speaker: null });
+assert.deepEqual(conversationTiming([segment('a', 0, 4000), segment('b', 2000, 6000), segment('c', 9000, 10000)]), { spanMs: 10000, speechMs: 7000 });
+assert.deepEqual(conversationTiming([]), { spanMs: 0, speechMs: 0 });
+assert.equal(transcriptSegmentSchema.safeParse(segment('a', 10, 0)).success, false);
+const event = (kind: CaptureEvent['kind']): CaptureEvent => ({ id: '5f50e5d9-6c2e-4c32-a1c8-f9bdd1158d45', kind, sequence: 0, occurredAt: '2026-10-06T14:00:00Z' });
+assert.equal(captureStateAfter('ready', event('start_requested')), 'start_requested');
+assert.equal(captureStateAfter('recording', event('disconnected')), 'unknown');
+assert.equal(captureStateAfter('recording', event('paused')), 'paused');
+assert.equal(captureStateAfter('paused', event('resumed')), 'recording');
+assert.equal(captureStateAfter('unknown', event('reconnected')), 'unknown');
+assert.equal(captureStateAfter('stop_requested', event('stop_confirmed')), 'stopped');
+const doors = [{ targetId: 'one', startMs: 0, endMs: 20000, consent: 'granted' as const }];
+assert.equal(matchDoor([segment('a', 100, 500)], doors), 'one');
+assert.equal(matchDoor([segment('a', 100, 500)], [...doors, { ...doors[0], targetId: 'two' }]), null);
+assert.equal(matchDoor([segment('a', 100, 500)], [{ ...doors[0], consent: 'declined' }]), null);
+assert.equal(matchDoor([segment('a', 100, 21000)], doors), null);
+assert.ok(JSON.stringify(conversationQuestions()).includes('Mere disinterest is insufficient'));
+assert.throws(() => parseJevAnalysis({ model: 'jev-1.13.0', answers: { outcome: { type: 'choice', choice: 'invented', confidence: 1, probabilities: {} } }, usage: { input_tokens: 1, output_tokens: 1 } }, []));
+console.log('Field recording timing, ambiguous matching, acknowledgements and Jev validation passed');

@@ -1,4 +1,6 @@
 import { ImageResponse } from 'next/og';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export const alt = 'WolfGrid 3D prospecting map';
 export const size = {
@@ -8,7 +10,9 @@ export const size = {
 
 export const contentType = 'image/png';
 
-export default function OpenGraphImage() {
+export default async function OpenGraphImage() {
+  const logo = await readFile(join(process.cwd(), 'public/brand/wolfgrid-share-logo.png'));
+  const logoSrc = `data:image/png;base64,${logo.toString('base64')}`;
   return new ImageResponse(
     (
       <div
@@ -32,17 +36,12 @@ export default function OpenGraphImage() {
             gap: '26px',
           }}
         >
-          <div
-            style={{
-              fontSize: 96,
-              fontWeight: 800,
-              letterSpacing: 0,
-              lineHeight: 1,
-              color: '#ffffff',
-            }}
-          >
-            WolfGrid
-          </div>
+          <img
+            src={logoSrc}
+            alt="WolfGrid"
+            width={960}
+            height={145}
+          />
           <div
             style={{
               fontSize: 34,

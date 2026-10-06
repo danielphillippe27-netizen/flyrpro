@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ensureSalespersonReferralCode, normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 import { createTrackedDemoLink } from '@/lib/dialer/demo-link-tracking';
 import { getDialerRequestContext } from '@/lib/dialer/server';
-import { generateDemoLinkForLead } from '@/lib/demo/generateDemoLinkForLead';
 import type { DiallerLead } from '@/types/database';
 
 export const runtime = 'nodejs';
@@ -15,8 +14,7 @@ type DemoMessagePayload = {
 };
 
 const FALLBACK_PUBLIC_ORIGIN = 'https://wolfgrid.app';
-const DEMO_VIDEO_PATH = '/demo-1';
-const LISTING_DEMO_VIDEO_PATH = '/demo-2';
+const DEMO_VIDEO_PATH = '/demo1';
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').trim();
@@ -109,8 +107,7 @@ function buildEmailBody(lead: DiallerLead, repName: string, demoUrl: string): st
 function buildBrokerageEmailBody(
   lead: DiallerLead,
   repName: string,
-  teamDemoUrl: string,
-  listingDemoUrl: string,
+  demoUrl: string,
   signupUrl: string
 ): string {
   const firstName = getFirstName(lead.name) || 'there';
@@ -119,10 +116,9 @@ function buildBrokerageEmailBody(
     '',
     'It was great connecting with you.',
     '',
-    'I wanted to send over two quick WolfGrid demos that might be useful for your brokerage:',
+    'Here is the WolfGrid demo for solo agents and teams:',
     '',
-    `Demo 1 - Teams: ${teamDemoUrl}`,
-    `Demo 2 - Individual Agent Listing: ${listingDemoUrl}`,
+    `Watch the demo: ${demoUrl}`,
     '',
     `Agents can also start with one included campaign here: ${signupUrl}`,
     '',
@@ -180,52 +176,18 @@ export async function POST(
     : null;
 
   const origin = getPublicOrigin(request);
-  const demoResult = await (async (): Promise<{
-    demoUrl: string;
-    trackedLink: Awaited<ReturnType<typeof createTrackedDemoLink>> | null;
-  }> => {
-    try {
-      const generated = await generateDemoLinkForLead({
-        admin: context.admin,
-        leadId,
-        user: context.requestUser,
-      });
-      const destination = new URL(generated.url);
-      const trackedLink = await createTrackedDemoLink({
-        admin: context.admin,
-        origin,
-        salesperson,
-        workspaceId: context.workspaceId,
-        lead: diallerLead,
-        referralCode,
-        source: 'salesperson',
-        campaign: 'power-dialer-demo',
-        destinationPath: destination.pathname,
-      });
-      return { demoUrl: trackedLink?.url ?? generated.url, trackedLink };
-    } catch (generateError) {
-      console.warn('[dialer/demo-message] demo engine link generation failed; falling back to tracked demo link', generateError);
-      const trackedLink = await createTrackedDemoLink({
-        admin: context.admin,
-        origin,
-        salesperson,
-        workspaceId: context.workspaceId,
-        lead: diallerLead,
-        referralCode,
-        source: 'salesperson',
-        campaign: 'power-dialer-demo',
-        destinationPath: DEMO_VIDEO_PATH,
-      });
-      return { demoUrl: trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode), trackedLink };
-    }
-  })();
-  const { demoUrl, trackedLink } = demoResult;
-  const listingDemoUrl = buildSharedDemoUrl(
+  const trackedLink = await createTrackedDemoLink({
+    admin: context.admin,
     origin,
+    salesperson,
+    workspaceId: context.workspaceId,
+    lead: diallerLead,
     referralCode,
-    LISTING_DEMO_VIDEO_PATH,
-    'individual-agent-listing'
-  );
+    source: 'salesperson',
+    campaign: 'power-dialer-demo',
+    destinationPath: DEMO_VIDEO_PATH,
+  });
+  const demoUrl = trackedLink?.url ?? buildSharedDemoUrl(origin, referralCode);
   const signupUrl = new URL('/onboarding', origin);
   signupUrl.searchParams.set('source', 'dialer');
   signupUrl.searchParams.set('campaign', 'brokerage-demo');
@@ -237,14 +199,14 @@ export async function POST(
 
   return NextResponse.json({
     demoUrl,
-    listingDemoUrl,
+    listingDemoUrl: demoUrl,
     demoLinkToken: trackedLink?.token ?? null,
     textBody: buildTextMessage(diallerLead, repName, demoUrl),
     emailSubject: template === 'brokerage'
-      ? 'Two quick WolfGrid demos for your agents'
+      ? 'WolfGrid demo for your agents'
       : 'Quick WolfGrid demo',
     emailBody: template === 'brokerage'
-      ? buildBrokerageEmailBody(diallerLead, repName, demoUrl, listingDemoUrl, signupUrl.toString())
+      ? buildBrokerageEmailBody(diallerLead, repName, demoUrl, signupUrl.toString())
       : buildEmailBody(diallerLead, repName, demoUrl),
     tracked: Boolean(trackedLink),
   });
