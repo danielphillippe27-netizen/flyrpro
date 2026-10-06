@@ -24,7 +24,6 @@ const teamFeatures = [
   { text: 'Shared progress and activity feed' },
   { text: 'Team leaderboards and analytics' },
   { text: 'Centralized billing' },
-  { text: 'Priority support' },
 ];
 
 const comparisonRows = [
@@ -34,7 +33,6 @@ const comparisonRows = [
   ['Team assignments', '—', 'Included'],
   ['Roles and permissions', '—', 'Included'],
   ['Team analytics', '—', 'Included'],
-  ['Priority support', '—', 'Included'],
 ];
 
 const faqs = [

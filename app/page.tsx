@@ -6,65 +6,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
-  BarChart3,
-  ClipboardCheck,
-  MapPinned,
-  QrCode,
-  Sparkles,
-  Target,
-  Users,
+  Play,
 } from 'lucide-react';
-import { LandingVideo } from '@/components/landing/LandingVideo';
 import { PublicSiteFooter } from '@/components/landing/PublicSiteFooter';
 import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
-
-const workflow = [
-  {
-    number: '01',
-    title: 'Draw territory',
-    copy: 'Outline an area and turn its streets, buildings, and addresses into a campaign in seconds.',
-    icon: MapPinned,
-  },
-  {
-    number: '02',
-    title: 'Assign to team',
-    copy: 'Give reps clear ownership of campaigns and territories so everyone knows exactly where to work.',
-    icon: Users,
-  },
-  {
-    number: '03',
-    title: 'Watch live',
-    copy: 'See your team move through the field and watch door results, conversations, and leads appear live.',
-    icon: Target,
-  },
-  {
-    number: '04',
-    title: 'Track all data',
-    copy: 'Track doors, conversations, leads, follow-ups, QR scans, and performance in one shared system.',
-    icon: BarChart3,
-  },
-];
-
-const industries = [
-  'Real estate',
-  'Roofing',
-  'Solar',
-  'Plumbing',
-  'Painting',
-  'HVAC',
-  'Landscaping',
-  'Pest control',
-  'Home services',
-  'Insurance',
-  'Finance',
-  'Charities',
-  'Political campaigns',
-  'Telecommunications',
-  'Home security',
-  'Energy',
-  'Fundraising',
-  'Door-to-door teams',
-];
 
 export default function LandingPage() {
   const router = useRouter();
@@ -106,179 +51,74 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-[#f7f5f2] text-zinc-950">
-      <PublicSiteHeader showAmbassador={false} />
+      <PublicSiteHeader showAmbassador={false} primaryAction={{ href: "/demo1?start=fresh", label: "Interactive demo" }} />
 
       <main>
-        <section className="relative overflow-hidden px-5 pb-16 pt-16 md:px-8 md:pb-24 md:pt-24">
-          <div className="pointer-events-none absolute left-1/2 top-0 h-[540px] w-[900px] -translate-x-1/2 rounded-full bg-red-500/10 blur-[120px]" />
-          <div className="relative mx-auto max-w-7xl">
-            <div className="mx-auto max-w-5xl text-center">
-              <p className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-red-700">
-                <Sparkles className="h-3.5 w-3.5" />
-                Field prospecting, finally connected
-              </p>
-              <h1 className="mt-7 text-balance text-5xl font-black leading-[0.95] tracking-[-0.055em] sm:text-6xl md:text-8xl">
-                Own every street.
-                <span className="block text-red-600">Follow every lead.</span>
+        <section className="px-5 py-12 md:px-8 lg:py-12">
+          <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:gap-12">
+            <div>
+              <h1 className=" text-5xl font-black leading-[0.98] tracking-[-0.055em] sm:text-6xl xl:text-7xl">
+                The World’s First<span className="mt-1 block">3D Prospecting System</span>
               </h1>
-              <p className="mx-auto mt-7 max-w-3xl text-pretty text-lg leading-8 text-zinc-600 md:text-xl">
-                Plan territories, guide reps, record every conversation, and turn field activity into a system your whole team can see.
+              <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-600">
+                The territory and door-to-door sales app that keeps your map, your team, and your follow-ups together.
               </p>
-              <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <Link
-                  href="/login"
-                  className="inline-flex h-13 w-full items-center justify-center rounded-full bg-zinc-950 px-7 text-sm font-bold text-white transition hover:bg-red-600 sm:w-auto"
-                >
-                  Start with one campaign
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-                <Link
-                  href="/#workflow"
-                  className="inline-flex h-13 w-full items-center justify-center rounded-full border border-zinc-300 bg-white/70 px-7 text-sm font-bold text-zinc-900 transition hover:border-zinc-950 sm:w-auto"
-                >
-                  See how it works
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link href="/demo1?start=fresh" className="inline-flex h-13 items-center justify-center rounded-full bg-red-600 px-7 text-sm font-bold text-white transition hover:bg-red-700">
+                  Interactive demo <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </div>
-              <p className="mt-4 text-xs font-medium text-zinc-500">No credit card required · iOS + Android + desktop</p>
             </div>
-
-            <div className="relative mx-auto mt-14 max-w-6xl md:mt-20">
-              <h2 className="mb-8 text-center text-3xl font-black tracking-[-0.035em] text-zinc-950 sm:text-4xl md:mb-10 md:text-5xl">
-                Worlds First 3D Prospecting Map
-              </h2>
-              <LandingVideo
-                videoId="f33655d88ab11a69ed2f111a1652a895"
-                label="WolfGrid campaign creation demonstration"
-                className="aspect-video border border-zinc-800"
-                videoClassName="object-cover"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="border-y border-zinc-200 bg-white px-5 py-7 md:px-8">
-          <div className="mx-auto grid max-w-7xl items-center gap-5 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-12">
-            <p className="shrink-0 text-center text-xs font-bold uppercase tracking-[0.18em] text-zinc-400 lg:text-left">
-              Built for teams that win in the field
-            </p>
-            <div className="industry-marquee-viewport min-w-0 overflow-hidden" aria-label="Industries using WolfGrid">
-              <div className="industry-marquee flex w-max items-center">
-                {[false, true].map((duplicate) => (
-                  <div
-                    key={duplicate ? 'duplicate' : 'primary'}
-                    className={`flex shrink-0 items-center gap-8 pr-8 ${duplicate ? 'industry-marquee-duplicate' : ''}`}
-                    aria-hidden={duplicate || undefined}
-                  >
-                    {industries.map((industry) => (
-                      <span key={industry} className="flex shrink-0 items-center gap-8 text-sm font-bold text-zinc-700">
-                        {industry}
-                        <span className="h-1 w-1 rounded-full bg-red-500" aria-hidden="true" />
-                      </span>
-                    ))}
-                  </div>
-                ))}
+            <div className="relative flex min-h-[480px] items-center justify-center py-7 sm:min-h-[520px] lg:h-[530px]">
+              <div className="relative w-[218px] rounded-[2.8rem] border-[3px] border-zinc-500 bg-zinc-950 p-[7px] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.45)] sm:w-[232px] lg:w-[238px]">
+                <div className="absolute -left-[5px] top-24 h-6 w-[3px] rounded-l bg-zinc-600" aria-hidden="true" />
+                <div className="absolute -left-[5px] top-36 h-10 w-[3px] rounded-l bg-zinc-600" aria-hidden="true" />
+                <div className="absolute -right-[5px] top-32 h-14 w-[3px] rounded-r bg-zinc-600" aria-hidden="true" />
+                <div className="relative overflow-hidden rounded-[2.2rem]">
+                  <Image src="/landing/hero-iphone-map.png" alt="WolfGrid on iPhone showing a 3D neighborhood map with green and red buildings and outlined properties" width={1206} height={2622} priority sizes="238px" className="block h-auto w-full" />
+                  <div className="absolute left-1/2 top-2 h-4 w-16 -translate-x-1/2 rounded-full bg-black" aria-hidden="true" />
+                  <div className="absolute bottom-2 left-1/2 h-1 w-20 -translate-x-1/2 rounded-full bg-white/80" aria-hidden="true" />
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section id="workflow" className="scroll-mt-24 bg-[#111] px-5 py-20 text-white md:px-8 md:py-32">
-          <div className="mx-auto max-w-7xl">
-            <div className="max-w-3xl">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-500">How WolfGrid works</p>
-              <h2 className="mt-4 text-4xl font-black leading-[1.02] tracking-[-0.04em] md:text-6xl">
-                From an empty map to a finished campaign.
-              </h2>
+        <section className="border-y border-zinc-200 bg-white px-5 py-6 md:px-8">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 md:flex-row">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">For people who prospect in person</p>
+            <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm font-bold text-zinc-800">
+              {['Roofing', 'Solar', 'Pest control', 'Real estate', 'Windows', 'Landscaping', 'Politics'].map((industry) => <span key={industry}>{industry}</span>)}
             </div>
-
-            <div className="mt-14 grid gap-px overflow-hidden rounded-[2rem] border border-white/10 bg-white/10 md:grid-cols-2 lg:grid-cols-4">
-              {workflow.map(({ number, title, copy, icon: Icon }) => (
-                <article key={number} className="bg-[#111] p-7 md:min-h-80 md:p-8">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold tracking-[0.2em] text-zinc-600">{number}</span>
-                    <Icon className="h-5 w-5 text-red-500" />
-                  </div>
-                  <h3 className="mt-16 text-2xl font-black">{title}</h3>
-                  <p className="mt-4 text-sm leading-7 text-zinc-400">{copy}</p>
-                </article>
-              ))}
-            </div>
-
-            <LandingVideo
-              videoId="35626091679be33b2feb207585a04ea6"
-              label="WolfGrid team campaign assignment demonstration"
-              className="mt-8 aspect-video border border-white/10"
-              videoClassName="object-cover"
-            />
           </div>
         </section>
 
-        <section id="product" className="scroll-mt-24 px-5 py-20 md:px-8 md:py-32">
-          <div className="mx-auto max-w-7xl">
-            <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
+        <section id="product" className="scroll-mt-24 bg-[#111] px-5 py-16 text-white md:px-8 md:py-20">
+          <div id="workflow" className="mx-auto max-w-7xl scroll-mt-24">
+            <div className="grid gap-6 md:grid-cols-2 md:items-end">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-600">Built for accountability</p>
-                <h2 className="mt-4 text-4xl font-black leading-[1.02] tracking-[-0.04em] md:text-6xl">
-                  Know what is happening without chasing updates.
-                </h2>
-                <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-600">
-                  Shared progress, activity feeds, leaderboards, and campaign analytics make the work visible without turning the day into reporting admin.
-                </p>
-                <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                  {[
-                    [Users, 'Team activity'],
-                    [BarChart3, 'Campaign analytics'],
-                    [QrCode, 'Address-level QR tracking'],
-                    [ClipboardCheck, 'Organized follow-up'],
-                  ].map(([Icon, label]) => {
-                    const FeatureIcon = Icon as typeof Users;
-                    return (
-                      <div key={label as string} className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-4">
-                        <FeatureIcon className="h-4 w-4 text-red-600" />
-                        <span className="text-sm font-bold">{label as string}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                <h2 className="mt-4 text-4xl font-black leading-[1.05] tracking-[-0.04em] md:text-5xl">A territory is more than<br />pins on a map.</h2>
               </div>
-              <div className="grid grid-cols-[0.72fr_1fr] items-end gap-4">
-                <div className="relative aspect-[4/5] overflow-hidden rounded-[1.75rem] bg-zinc-950 shadow-sm">
-                  <Image
-                    src="/field-agent-wolfgrid.jpg"
-                    alt="Field sales agent using WolfGrid outdoors"
-                    fill
-                    sizes="(min-width: 1024px) 21vw, 42vw"
-                    className="object-cover object-center"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/15 via-transparent to-transparent" aria-hidden="true" />
-                </div>
-                <LandingVideo
-                  videoId="ed341acd14ebf01cb7b4bf6491302134"
-                  label="WolfGrid team activity dashboard demonstration"
-                  className="aspect-[4/5] translate-y-8"
-                  videoClassName="object-cover"
-                />
-              </div>
+              <p className="max-w-lg text-lg leading-8 text-zinc-400">Explore your campaign in 3D. Keep addresses and activity in one view, so you can see where to work and where to return.</p>
             </div>
+            <Link href="/demo1?start=fresh" aria-label="Play the WolfGrid interactive demo" className="group relative mt-9 block overflow-hidden rounded-2xl border border-white/15 bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-red-500">
+              <Image src="/landing/interactive-demo-cover.png" alt="WolfGrid 3D neighborhood map with color-coded campaign results" width={2622} height={1206} sizes="(min-width: 1280px) 1280px, 100vw" className="h-auto w-full" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/15 transition group-hover:bg-black/25">
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-white shadow-xl transition group-hover:scale-110 group-hover:bg-red-500 sm:h-24 sm:w-24">
+                  <Play className="ml-1 h-7 w-7 fill-current sm:h-10 sm:w-10" aria-hidden="true" />
+                </span>
+                <span className="rounded-full bg-black/80 px-5 py-2 text-sm font-bold text-white sm:text-base">Launch interactive demo</span>
+              </div>
+            </Link>
           </div>
         </section>
 
-        <section className="bg-zinc-950 px-5 py-20 text-white md:px-8 md:py-28">
-          <div className="mx-auto flex max-w-5xl flex-col items-center text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-red-500">One campaign included</p>
-            <h2 className="mt-5 text-4xl font-black leading-[1.02] tracking-[-0.04em] md:text-6xl">
-              Put your next territory on the grid.
-            </h2>
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
-              Start on desktop, take the route with you on iOS or Android, and keep every result connected.
-            </p>
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <Link href="/login" className="inline-flex h-13 items-center justify-center rounded-full bg-red-600 px-7 text-sm font-bold text-white transition hover:bg-red-500">
-                Start free <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-              <Link href="/plans" className="inline-flex h-13 items-center justify-center rounded-full border border-white/20 px-7 text-sm font-bold text-white transition hover:bg-white/10">
-                View pricing
-              </Link>
+        <section className="bg-red-600 px-5 py-16 text-white md:px-8 md:py-20">
+          <div className="mx-auto flex max-w-7xl flex-col justify-between gap-8 lg:flex-row lg:items-center">
+            <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-white/80">Try it for yourself</p><h2 className="mt-4 text-4xl font-black leading-[1.05] tracking-[-0.04em] md:text-5xl">Put your next territory<br />on the grid.</h2><p className="mt-5 text-base text-white/90">Explore WolfGrid in the interactive demo, then start your first campaign free.</p></div>
+            <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
+              <Link href="/demo1?start=fresh" className="inline-flex h-13 items-center justify-center rounded-full bg-white px-8 text-sm font-bold text-zinc-950 transition hover:bg-zinc-100">Interactive demo <ArrowRight className="ml-2 h-4 w-4" /></Link>
+              <Link href="/plans" className="inline-flex h-13 items-center justify-center rounded-full border border-white/50 px-8 text-sm font-bold transition hover:bg-white/10">View pricing</Link>
             </div>
           </div>
         </section>

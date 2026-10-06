@@ -2,9 +2,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 
 const footerLinks = [
-  { href: '/plans', label: 'Pricing' },
-  { href: '/download', label: 'Download' },
-  { href: '/ambassador', label: 'Ambassador' },
   { href: '/privacy', label: 'Privacy' },
   { href: '/terms', label: 'Terms' },
 ];

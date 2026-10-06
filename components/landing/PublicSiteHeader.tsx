@@ -4,6 +4,7 @@ import Image from 'next/image';
 type PublicSiteHeaderProps = {
   active?: 'ambassador' | 'pricing' | 'download';
   showAmbassador?: boolean;
+  primaryAction?: { href: string; label: string };
 };
 
 function getNavLinkClass(isActive: boolean) {
@@ -12,7 +13,7 @@ function getNavLinkClass(isActive: boolean) {
     : 'text-sm font-medium text-zinc-600 transition hover:text-zinc-900';
 }
 
-export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHeaderProps) {
+export function PublicSiteHeader({ active, showAmbassador = false, primaryAction = { href: "/login", label: "Start free" } }: PublicSiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-[#f7f5f2]/90 backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] w-full max-w-[1440px] items-center justify-between px-5 md:px-8">
@@ -22,7 +23,7 @@ export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHe
             alt="WolfGrid"
             width={1900}
             height={250}
-            className="h-auto w-48 object-contain object-left md:w-56"
+            className="h-auto w-36 object-contain object-left sm:w-48 md:w-56"
             priority
           />
         </Link>
@@ -30,9 +31,6 @@ export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHe
         <nav className="hidden items-center gap-7 md:flex" aria-label="Public navigation">
           <Link href="/#product" className="text-sm font-medium text-zinc-600 transition hover:text-zinc-950">
             Product
-          </Link>
-          <Link href="/#workflow" className="text-sm font-medium text-zinc-600 transition hover:text-zinc-950">
-            How it works
           </Link>
           {showAmbassador && (
             <Link href="/ambassador" className={getNavLinkClass(active === 'ambassador')}>
@@ -55,10 +53,10 @@ export function PublicSiteHeader({ active, showAmbassador = true }: PublicSiteHe
             Sign in
           </Link>
           <Link
-            href="/login"
-            className="inline-flex h-10 items-center rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-red-600 md:px-5"
+            href={primaryAction.href}
+            className="inline-flex h-10 shrink-0 items-center whitespace-nowrap rounded-full bg-zinc-950 px-3 text-xs sm:px-4 sm:text-sm font-semibold text-white transition hover:bg-red-600 md:px-5"
           >
-            Start free
+            {primaryAction.label}
           </Link>
         </div>
       </div>

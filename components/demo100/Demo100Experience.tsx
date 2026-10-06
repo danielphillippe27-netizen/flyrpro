@@ -612,7 +612,8 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
   useEffect(() => {
     initTracking('demo100');
     track('open', 1, { device: navigator.userAgent.includes('Mobi') ? 'mobile' : 'desktop' });
-    const stored = parseDemo100StoredState(window.localStorage.getItem(DEMO100_SESSION_STORAGE_KEY));
+    const startFresh = new URLSearchParams(window.location.search).get('start') === 'fresh';
+    const stored = startFresh ? null : parseDemo100StoredState(window.localStorage.getItem(DEMO100_SESSION_STORAGE_KEY));
     pendingRestoreRef.current = stored;
     if (stored?.stage === 'intro_video' || stored?.stage === 'campaign_builder') {
       setStage(stored.stage);
