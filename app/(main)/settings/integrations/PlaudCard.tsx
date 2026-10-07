@@ -43,7 +43,7 @@ export function PlaudCard({ workspaceId }: { workspaceId?: string | null }) {
       <details className="space-y-2 rounded border p-3"><summary className="cursor-pointer text-sm font-medium">Set up live recording and AI</summary>
         <ol className="list-decimal space-y-2 pl-5 text-sm">
           <li>Obtain <a href="https://docs.plaud.ai/plaud-embedded/overview" target="_blank" rel="noopener noreferrer" className="underline">PLAUD Embedded developer access</a> for WolfGrid and configure device authentication and transcription credentials on the server.</li>
-          <li>Obtain a <a href="https://console.typesafe.ai" target="_blank" rel="noopener noreferrer" className="underline">TypeSafe AI account for Jev</a> and configure its server API key. Jev classifies outcomes and objections; the notes provider drafts the prose.</li>
+          <li>Configure your <a href="https://console.typesafe.ai" target="_blank" rel="noopener noreferrer" className="underline">TypeSafe API key for Jev</a> on the server. Jev classifies outcomes and objections; the notes provider drafts the prose.</li>
           <li>Configure the notes provider and processing dispatcher. Verify database migrations and private audio storage before uploading field recordings.</li>
           <li>Pair the pin in the mobile app, enable campaign recording, and test start, pause, resume, stop, upload and review. Validate audio timestamp behavior before enabling automatic timeline mapping.</li>
         </ol>

@@ -4,7 +4,13 @@ import { objections, outcomes, type TranscriptSegment } from './contracts';
 const probability = z.number().min(0).max(1);
 const choice = z.object({ type: z.literal('choice'), choice: z.enum(outcomes), confidence: probability, probabilities: z.record(z.string(), probability) });
 const noul = z.object({ type: z.literal('noul'), noul: probability });
-const responseSchema = z.object({ model: z.string(), answers: z.record(z.string(), z.unknown()), usage: z.object({ input_tokens: z.number().nonnegative(), output_tokens: z.number().nonnegative() }) });
+const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const responseSchema = z.object({
+  provider: z.literal('typesafe.ai').optional(),
+  model: z.string().min(1).max(120),
+  answers: z.record(z.string(), z.unknown()),
+  usage: z.object({ input_tokens: tokenCount, output_tokens: tokenCount }),
+});
 
 const descriptions: Record<typeof outcomes[number], string> = {
   conversation: 'Conversation occurred without an explicit next step.',
@@ -35,16 +41,20 @@ export function parseJevAnalysis(value: unknown, evidence: TranscriptSegment[]) 
   const outcome = choice.parse(result.answers.outcome);
   const intent = Object.fromEntries(['follow_up', 'appointment', 'do_not_contact'].map(key => [key, noul.parse(result.answers[key]).noul]));
   const objectionProbabilities = Object.fromEntries(objections.map(key => [key, noul.parse(result.answers[`objection_${key}`]).noul]));
-  return { model: result.model, rubricVersion: 'field-conversations-v1', outcome, intent, objections: objectionProbabilities, evidenceSegmentIds: evidence.map(s => s.id), usage: result.usage, requiresReview: true };
+  return { provider: 'typesafe.ai', model: result.model, rubricVersion: 'field-conversations-v1', outcome, intent, objections: objectionProbabilities, evidenceSegmentIds: evidence.map(s => s.id), usage: result.usage, requiresReview: true };
 }
 
 export async function analyzeWithJev(segments: TranscriptSegment[], context: { timezone: string; recordedAt: string }) {
   const key = process.env.TYPESAFE_API_KEY;
   if (!key) throw new Error('Jev is not configured');
   if (!segments.length || segments.reduce((n, s) => n + s.text.length, 0) > 60000) throw new Error('Conversation exceeds analysis limits');
+  const model = process.env.JEV_MODEL || 'jev-latest';
+  if (!['jev-1.13.0', 'jev-latest'].includes(model)) throw new Error('Unsupported TypeSafe Jev model');
+  const state = { ...context, segments };
+  if (JSON.stringify(state).length > 100000) throw new Error('Conversation exceeds Jev AI state limits');
   const response = await fetch('https://api.typesafe.ai/v1/systemone', {
     method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: process.env.JEV_MODEL || 'jev-1.13.0', state: { ...context, segments }, questions: conversationQuestions() }),
+    body: JSON.stringify({ model, state, questions: conversationQuestions() }),
     signal: AbortSignal.timeout(30000), redirect: 'error', cache: 'no-store',
   });
   // Provider bodies can contain personal content; never include them in errors or logs.
