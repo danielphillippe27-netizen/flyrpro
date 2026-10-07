@@ -1,5 +1,7 @@
 'use client';
 
+import BusinessResearchPanel from './BusinessResearchPanel';
+
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -1865,6 +1867,7 @@ export function SalespersonPlacesLeadFinder() {
   return (
     <>
     <div className={cn('space-y-5 transition duration-200', saveDialogOpen && 'blur-[2px]')}>
+      <BusinessResearchPanel workspaceId={saveWorkspaceId} />
       <section id="lead-config" className="rounded-md border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">

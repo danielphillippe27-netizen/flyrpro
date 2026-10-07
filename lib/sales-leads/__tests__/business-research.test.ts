@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { validateResearchResult, resultSchema } from '../business-research';
+const source = 'https://example.com/contact';
+const base = { name: 'Business', area: 'Richmond Hill', notes: 'Owner unknown', website: null, email: null, phone: null, owner: null, address: null };
+const found = { ...base, phone: { value: '905-555-0100', sourceUrl: source } };
+assert.equal(validateResearchResult(found, new Set([source])).phone?.value, '905-555-0100');
+assert.equal(validateResearchResult(found, new Set()).phone, null);
+assert.equal(validateResearchResult({ ...base, email: { value: 'guessed email', sourceUrl: source } }, new Set([source])).email, null);
+assert.equal(validateResearchResult({ ...base, website: { value: 'javascript:alert(1)', sourceUrl: source } }, new Set([source])).website, null);
+assert.equal(resultSchema.safeParse({ ...base, owner: { value: 'Name', sourceUrl: 'javascript:alert(1)' } }).success, false);
+assert.equal(validateResearchResult(base, new Set()).owner, null);
+assert.throws(() => validateResearchResult({ name: 'Malformed' }, new Set()));
+console.log('Business research source and validation checks passed.');
