@@ -7,9 +7,9 @@ export function useStormGLSettings(workspaceId: string | null) {
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   useEffect(() => {
     if (!workspaceId) { setLoadedFor(null); return; }
-    const key = `wolfgrid:storm-gl:v1:${workspaceId}`;
+    const key = `wolfgrid:storm-gl:v2:${workspaceId}`;
     const load = () => {
-      try { setSettings(readStormGLSettings(JSON.parse(localStorage.getItem(key) || 'null'))); }
+      try { setSettings(readStormGLSettings(JSON.parse(localStorage.getItem(key) || localStorage.getItem(`wolfgrid:storm-gl:v1:${workspaceId}`) || 'null'))); }
       catch { setSettings({ ...STRONGEST_STORM_SETTINGS }); }
       setLoadedFor(workspaceId);
     };
@@ -24,7 +24,7 @@ export function useStormGLSettings(workspaceId: string | null) {
   }, [workspaceId]);
   useEffect(() => {
     if (!workspaceId || loadedFor !== workspaceId) return;
-    const key = `wolfgrid:storm-gl:v1:${workspaceId}`;
+    const key = `wolfgrid:storm-gl:v2:${workspaceId}`;
     try {
       const value = JSON.stringify(settings);
       if (localStorage.getItem(key) === value) return;
