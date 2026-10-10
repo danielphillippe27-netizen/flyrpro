@@ -2331,6 +2331,7 @@ export default function CreateCampaignPage() {
             map={map.current}
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
+            territories={campaignOverlayFeatureCollection}
           />
         ) : null}
         {!isSelfServeDemo && mapLoaded && map.current && (

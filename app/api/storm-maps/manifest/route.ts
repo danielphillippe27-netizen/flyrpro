@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { isWorkspaceStormMapsActive } from '@/lib/storm-maps/addon';
 import { providerForLayer, STORM_RASTER_CATALOG } from '@/lib/storm-maps/catalog';
 import { issueStormMapsTileToken } from '@/lib/storm-maps/token';
-import { getEcccRadarFrameTimes } from '@/lib/storm-maps/providers';
+import { getEcccRadarFrameTimes, isXweatherConfigured } from '@/lib/storm-maps/providers';
 import type { StormMapsManifest, StormRasterLayer, StormRasterLayerId } from '@/lib/storm-maps/types';
 
 export const runtime = 'nodejs';
@@ -26,7 +26,14 @@ function radarProviderForCenter(lat: number, lon: number): 'iem' | 'eccc' {
   return likelyCanadaOrNorthernCoverage ? 'eccc' : 'iem';
 }
 
-function radarFrames(provider: 'iem' | 'eccc', now: number, ecccTimes: string[] = []) {
+function radarFrames(provider: 'iem' | 'eccc' | 'xweather', now: number, ecccTimes: string[] = []) {
+  if (provider === 'xweather') {
+    const current = roundedDate(now, 5);
+    return Array.from({ length: 13 }, (_, index) => {
+      const time = new Date(current.getTime() - (12 - index) * 5 * 60_000).toISOString();
+      return { key: time, time, label: time };
+    });
+  }
   if (provider === 'iem') {
     const current = roundedDate(now, 5, -5);
     return Array.from({ length: 12 }, (_, index) => {
@@ -87,7 +94,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'lat and lon must be valid coordinates' }, { status: 400 });
   }
 
-  const radarProvider = radarProviderForCenter(lat, lon);
+  const xweatherConfigured = isXweatherConfigured();
+  const radarProvider = xweatherConfigured ? 'xweather' : radarProviderForCenter(lat, lon);
   const generatedAt = Date.now();
   const ecccTimes = radarProvider === 'eccc' ? await getEcccRadarFrameTimes() : [];
   const tomorrowConfigured = Boolean(process.env.TOMORROW_IO_API_KEY);
@@ -125,11 +133,13 @@ export async function GET(request: NextRequest) {
     layers,
     featureEndpoint: '/api/storm-maps/features',
     providerHealth: {
+      xweather: { available: xweatherConfigured, status: xweatherConfigured ? 'ready' : 'unconfigured' },
       tomorrow: { available: tomorrowConfigured, status: tomorrowConfigured ? 'ready' : 'unconfigured' },
       iem: { available: true, status: 'ready' },
       eccc: { available: true, status: 'ready' },
     },
     attribution: [
+      ...(xweatherConfigured ? [{ label: 'Weather data © Vaisala Xweather', url: 'https://www.xweather.com/' }] : []),
       { label: 'Tomorrow.io', url: 'https://www.tomorrow.io/' },
       { label: 'NOAA/NWS', url: 'https://www.weather.gov/' },
       { label: 'Iowa Environmental Mesonet', url: 'https://mesonet.agron.iastate.edu/' },

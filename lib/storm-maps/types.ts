@@ -1,4 +1,4 @@
-export type StormMapsProvider = 'tomorrow' | 'iem' | 'eccc';
+export type StormMapsProvider = 'tomorrow' | 'iem' | 'eccc' | 'xweather';
 
 export type StormRasterLayerId =
   | 'radar'
@@ -45,7 +45,7 @@ export type StormMapsManifest = {
   generatedAt: string;
   expiresAt: string;
   tileToken: string;
-  radarProvider: 'iem' | 'eccc';
+  radarProvider: 'iem' | 'eccc' | 'xweather';
   layers: StormRasterLayer[];
   featureEndpoint: string;
   providerHealth: Record<StormMapsProvider, { available: boolean; status: 'ready' | 'unconfigured' }>;

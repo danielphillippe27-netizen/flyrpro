@@ -7,7 +7,7 @@ import {
   isStormMapsBetaAvailable,
   STORM_MAPS_ADDON_KEY,
 } from '@/lib/storm-maps/addon';
-import { validateTomorrowFullSuiteAccess } from '@/lib/storm-maps/providers';
+import { validateTomorrowFullSuiteAccess, isXweatherConfigured, validateXweatherAccess } from '@/lib/storm-maps/providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,10 +72,10 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Storm Maps is coming soon' }, { status: 503 });
   }
   if (body.enabled) {
-    const validation = await validateTomorrowFullSuiteAccess();
+    const validation = isXweatherConfigured() ? await validateXweatherAccess() : await validateTomorrowFullSuiteAccess();
     if (!validation.ok) {
       return NextResponse.json(
-        { error: 'Tomorrow.io production access must include all promised map fields, aggregative tiles, lightning, and premium hail layers before activation.' },
+        { error: isXweatherConfigured() ? 'Xweather Raster Maps radar access could not be verified. Check the application credentials and subscription.' : 'Tomorrow.io production access must include all promised map fields, aggregative tiles, lightning, and premium hail layers before activation.' },
         { status: 503 },
       );
     }

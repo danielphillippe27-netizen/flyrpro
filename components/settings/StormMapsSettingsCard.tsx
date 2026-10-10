@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { StormGLSettingsPanel } from '@/components/storm-maps/StormGLSettingsPanel';
+import { useStormGLSettings } from '@/components/storm-maps/useStormGLSettings';
 import { Clock3, CloudLightning, Loader2, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +16,7 @@ type StormMapsSettingsResponse = {
 };
 
 export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | null }) {
+  const { settings, setSettings } = useStormGLSettings(workspaceId);
   const [data, setData] = useState<StormMapsSettingsResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(workspaceId));
   const [saving, setSaving] = useState(false);
@@ -90,7 +93,7 @@ export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | n
               </Badge>
             </div>
             <CardDescription>
-              Live radar, official alerts, storm reports, and forecast overlays while building campaign territories.
+              MapsGL storm intelligence: radar, lightning, hail threats, storm cells, forecasts, and campaign risk.
             </CardDescription>
           </div>
           <div className="rounded-xl border border-cyan-200 bg-white/80 px-3 py-2 text-right shadow-sm dark:border-cyan-900 dark:bg-background/70">
@@ -143,6 +146,7 @@ export function StormMapsSettingsCard({ workspaceId }: { workspaceId: string | n
             </Button>
           </div>
         )}
+      {active && <details className="mt-5 rounded-xl border border-cyan-200/40 p-4 dark:border-cyan-900/60"><summary className="cursor-pointer text-sm font-semibold">Storm Maps display settings</summary><div className="mt-4"><StormGLSettingsPanel settings={settings} onChange={setSettings} /></div></details>}
       </CardContent>
     </Card>
   );

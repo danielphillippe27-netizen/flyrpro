@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { aggregationHoursForLayer, isProviderAllowedForLayer, isStormRasterLayerId, mapGradientForLayer, providerForLayer, tomorrowFieldForLayer } from '../catalog';
-import { buildTomorrowUrl, ecccOutlookLayersForBbox, normalizeEcccFeature, normalizeEcccOutlookFeature, normalizeIemReport, normalizeNoaaFeature, radarTimesFromCapabilities, xyzToWebMercatorBbox } from '../providers';
+import { buildXweatherUrl, buildTomorrowUrl, ecccOutlookLayersForBbox, normalizeEcccFeature, normalizeEcccOutlookFeature, normalizeIemReport, normalizeNoaaFeature, radarTimesFromCapabilities, xyzToWebMercatorBbox } from '../providers';
 import { isApprovedStormTileTime, stormTileIntersectsCoverage } from '../tile-policy';
 import { issueStormMapsTileToken, verifyStormMapsTileToken } from '../token';
 import fixtures from './fixtures/provider-fixtures.json';
@@ -46,6 +46,15 @@ try {
   assert.match(mapGradientForLayer('hailSize') || '', /f472b6/);
   assert.equal(isProviderAllowedForLayer('tomorrow', 'hailProbability'), true);
   assert.equal(aggregationHoursForLayer('accumulation24h'), 24);
+
+  assert.equal(providerForLayer('radar', 'xweather'), 'xweather');
+  assert.equal(isProviderAllowedForLayer('xweather', 'radar'), true);
+  assert.equal(isProviderAllowedForLayer('xweather', 'hailSize'), false);
+  const xweatherTile = { provider: 'xweather' as const, layerId: 'radar' as const, time: '2026-10-10T12:30:00.000Z', z: 8, x: 73, y: 92 };
+  assert.equal(buildXweatherUrl(xweatherTile, 'test-id', 'test-secret'), 'https://maps.api.xweather.com/test-id_test-secret/radar/8/73/92/20261010123000.png');
+  assert.equal(buildXweatherUrl(xweatherTile, 'test-api-key'), 'https://maps.api.xweather.com/test-api-key/radar/8/73/92/20261010123000.png');
+  assert.match(buildXweatherUrl({ ...xweatherTile, time: 'now' }, 'test-id', 'test-secret'), /current\.png$/);
+  assert.throws(() => buildXweatherUrl({ ...xweatherTile, time: 'invalid' }, 'test-id', 'test-secret'));
 
   const tomorrowFutureUrl = buildTomorrowUrl({
     provider: 'tomorrow', layerId: 'temperature', time: '2026-08-31T12:00:00Z', z: 8, x: 73, y: 92,

@@ -240,7 +240,7 @@ export function isStormRasterLayerId(value: string): value is StormRasterLayerId
 
 export function providerForLayer(
   layerId: StormRasterLayerId,
-  radarProvider: 'iem' | 'eccc',
+  radarProvider: 'iem' | 'eccc' | 'xweather',
 ): StormMapsProvider {
   if (layerId === 'radar') return radarProvider;
   if (radarProvider === 'iem' && (layerId === 'accumulation1h' || layerId === 'accumulation24h')) return 'iem';
@@ -248,7 +248,7 @@ export function providerForLayer(
 }
 
 export function isProviderAllowedForLayer(provider: StormMapsProvider, layerId: StormRasterLayerId) {
-  if (layerId === 'radar') return provider === 'iem' || provider === 'eccc';
+  if (layerId === 'radar') return provider === 'iem' || provider === 'eccc' || provider === 'xweather';
   if (layerId === 'accumulation1h' || layerId === 'accumulation24h') return provider === 'iem' || provider === 'tomorrow';
   return provider === 'tomorrow';
 }

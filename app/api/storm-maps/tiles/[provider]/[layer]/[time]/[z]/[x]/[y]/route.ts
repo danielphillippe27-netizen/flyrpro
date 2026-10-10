@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function isProvider(value: string): value is StormMapsProvider {
-  return value === 'tomorrow' || value === 'iem' || value === 'eccc';
+  return value === 'tomorrow' || value === 'iem' || value === 'eccc' || value === 'xweather';
 }
 
 function parseTileCoordinate(value: string, stripPng = false) {
