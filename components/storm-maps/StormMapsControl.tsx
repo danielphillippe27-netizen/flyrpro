@@ -11,6 +11,7 @@ import { StormGLSettingsPanel } from './StormGLSettingsPanel';
 import { useStormGLSettings } from './useStormGLSettings';
 import { bindStormFeaturePopups, upsertStormFeatures, removeStormFeatures, ensureStormDrawCasing } from '@/lib/storm-maps/map-layers';
 import { STORM_LAYER_GROUPS, WEATHER_SHADES, STRONGEST_STORM_SETTINGS, stormTimeRange, hailViewSettings, isHistoricalHailShade } from '@/lib/storm-maps/gl-settings';
+import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
@@ -136,10 +137,8 @@ export function StormMapsControl(props: Props) {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
     const range = stormTimeRange(settings.mode, settings.historyHours);
-    controller.timeline.pause(); setPlaying(false);
-    controller.timeline.startDate = range.start;
-    controller.timeline.endDate = range.end;
-    controller.timeline.goToDate(settings.mode === 'history' ? controller.timeline.endDate : range.current);
+    resetStormTimeline(controller, activeIds.current, range, settings.mode === 'history' ? range.end : range.current);
+    setPlaying(false);
     setRangeLabels({ start: settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
     setPosition(controller.timeline.position * 100); setClock(timeLabel(controller.timeline.currentDate));
   }, [ready, settings.mode, settings.historyHours]);

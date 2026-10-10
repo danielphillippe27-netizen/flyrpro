@@ -1,3 +1,4 @@
+import { resetStormTimeline } from '../gl-timeline';
 import assert from 'node:assert/strict';
 import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange, hailViewSettings, isHistoricalHailShade } from '../gl-settings';
 import { resolveGLRequest, allowedVectorProducts } from '../gl-proxy-policy';
@@ -45,3 +46,13 @@ assert.equal(hailViewSettings(historicalHail, 'live').mode, 'live');
 assert.equal(readStormGLSettings(historicalHail).shade, 'hail-size-max');
 assert.equal(isHistoricalHailShade('hail-size'), true);
 assert.equal(isHistoricalHailShade('temperatures'), false);
+
+// A mode switch must detach old child animations before seeking beyond their old range.
+
+const order: string[] = [];
+let oldAnimation = true;
+const timeline = { pause: () => order.push('pause'), clear: () => { oldAnimation = false; order.push('clear'); }, startDate: new Date(0), endDate: new Date(1), goToDate: (date: Date) => { assert.equal(oldAnimation, false); assert.ok(date >= timeline.startDate && date <= timeline.endDate); order.push('seek'); } };
+const active = new Set(['hail-size-max', 'hail-threats-polygons']);
+resetStormTimeline({ timeline, removeWeatherLayer: (id: string) => order.push(id) } as unknown as Parameters<typeof resetStormTimeline>[0], active, { start: new Date(10), end: new Date(20) }, new Date(15));
+assert.deepEqual(order, ['pause', 'hail-size-max', 'hail-threats-polygons', 'clear', 'seek']);
+assert.equal(active.size, 0);
