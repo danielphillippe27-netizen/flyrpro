@@ -41,6 +41,15 @@ export function StormMapsControl(props: Props) {
   const legendRef = useRef<HTMLDivElement | null>(null);
   const activeIds = useRef(new Set<string>());
   const [revision, setRevision] = useState(0);
+  const [zoom, setZoom] = useState(map?.getZoom() ?? 6);
+
+  useEffect(() => {
+    if (!map) return;
+    const update = () => setZoom(map.getZoom());
+    update();
+    map.on('zoomend', update);
+    return () => { map.off('zoomend', update); };
+  }, [map]);
 
   useEffect(() => {
     setEntitled(false); setManifest(null); setOpen(false);
@@ -99,7 +108,7 @@ export function StormMapsControl(props: Props) {
       account.servers.maps = `${server}/maps`;
       const beforeId = map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id;
       controller = new sdk.MapboxMapController(map, {
-        account, animation: { repeat: true, duration: 12, pauseWhileLoading: true },
+        account, animation: { repeat: true, duration: 12, pauseWhileLoading: true, preloadData: false },
         units: { temperature: 'C', speed: 'km/h', precipitation: 'mm' },
         slots: { slots: { underlay: { beforeId }, inlay: { beforeId } } },
       });
@@ -163,20 +172,28 @@ export function StormMapsControl(props: Props) {
     }
     const errors: string[] = [];
     for (const id of activeIds.current) {
-      if (!wanted.has(id)) { controller.removeWeatherLayer(id); activeIds.current.delete(id); }
+      if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
     }
     for (const [id, opacity] of wanted) {
+      // Keep broad risk areas at every zoom; individual strikes and tracks need a regional view.
+      const detail = id === 'lightning-flash' || id === 'lightning-strikes' || id.startsWith('stormcells-') || id.endsWith('-points') || id.endsWith('-tracks');
+      const visible = !detail || zoom >= 4;
       try {
+        if (!visible && !activeIds.current.has(id)) continue;
         if (!activeIds.current.has(id)) {
           if (!controller.weatherProvider.isWeatherLayer(id)) { errors.push(id); continue; }
-          controller.addWeatherLayer(id, { paint: { opacity }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
+          controller.addWeatherLayer(id, { paint: { opacity, ...(id === 'wind-particles' ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0 }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
           activeIds.current.add(id);
-        } else controller.setPaintProperty(id, 'opacity', opacity);
+        } else {
+          const layers = controller.getWeatherLayer(id);
+          for (const layer of Array.isArray(layers) ? layers : layers ? [layers] : []) layer.setPaintProperty('opacity', opacity);
+        }
+        controller.setWeatherLayerVisibility(id, visible);
       } catch { errors.push(id); }
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map]);
+  }, [ready, settings, map, zoom]);
 
   useEffect(() => {
     if (!ready) return;
@@ -252,7 +269,7 @@ export function StormMapsControl(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   return <>
     <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
-      <button type="button" onClick={() => { if (!open) { setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
+      <button type="button" onClick={() => { if (!open) { if (map.getZoom() < 4 || map.getZoom() > 10) map.easeTo({ zoom: 6, pitch: 0, duration: 600 }); setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
@@ -267,7 +284,8 @@ export function StormMapsControl(props: Props) {
           {settings.impact && <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-semibold">Campaign risk in view</p>{!settings.alerts && !settings.outlook ? <p className="mt-2 text-[11px] text-slate-400">Enable warnings or outlooks to assess mapped territories.</p> : !riskLoaded ? <p className="mt-2 text-[11px] text-slate-400">{riskError ? 'Official risk data unavailable. Retry by reopening Storm.' : 'Checking official risk areas…'}</p> : <><p className={`mt-2 text-sm font-semibold ${impacts.length ? 'text-amber-200' : 'text-cyan-200'}`}>{impacts.length} / {territories?.features.length || 0} mapped territories overlap risk areas</p><p className="mt-1 text-[10px] text-slate-400">{risk.features.filter((feature) => feature.properties.kind === 'alert').length} alerts · {risk.features.filter((feature) => feature.properties.kind === 'outlook').length} outlooks · {risk.features.filter((feature) => feature.properties.kind === 'report').length} reports in view</p>{impacts.slice(0, 4).map((item) => <div key={item.id} className="mt-2 border-t border-white/10 pt-2"><p className="text-[11px] font-medium">{item.name}</p><p className="text-[10px] text-slate-400">{item.events.join(' · ')}</p></div>)}<p className="mt-2 text-[10px] leading-relaxed text-slate-500">Based on loaded official warnings and outlooks. This is not a damage assessment.{riskError ? ' Refresh failed; showing the last loaded data.' : ''}</p></>}</div>}
           <p className="text-[10px] leading-relaxed text-slate-400">{settings.shade === 'none' ? 'Storm focus' : WEATHER_SHADES.find((shade) => shade.id === settings.shade)?.label} · {rangeTitle}. {settings.inspector ? 'Click the map to inspect weather.' : ''} Storm-cell tracks cover the U.S.; hail threats include Canada.</p>
         </div>
-        <button type="button" onClick={() => map.easeTo({ zoom: 6, pitch: 0, duration: 900 })} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 py-2 text-xs hover:bg-white/10"><MapIcon className="h-3.5 w-3.5" />Regional view</button>
+        <div className="mt-4 grid grid-cols-3 gap-2">{([{ label: 'Overview', zoom: 3 }, { label: 'Regional', zoom: 6 }, { label: 'Local', zoom: 9 }]).map((view) => <button key={view.label} type="button" onClick={() => map.easeTo({ zoom: view.zoom, pitch: 0, duration: 600 })} className="flex items-center justify-center gap-1 rounded-xl border border-white/15 py-2 text-xs hover:bg-white/10"><MapIcon className="h-3 w-3" />{view.label}</button>)}</div>
+        {zoom < 4 && <p className="mt-2 text-[10px] text-slate-400">Overview shows radar and broad risk areas. Zoom in for individual lightning strikes and storm tracks.</p>}
         <details className="mt-4" open><summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-slate-400">Layer legends</summary><div ref={legendRef} className="mt-2 max-h-48 overflow-auto text-xs" /></details>
         {(loading || !ready) && !error && <p role="status" className="mt-3 flex items-center gap-2 text-[11px] text-cyan-200"><Loader2 className="h-3 w-3 animate-spin" />Loading weather data…</p>}
         {(error || layerErrors.length > 0) && <p role="alert" className="mt-3 text-xs text-amber-200">{error || `Unavailable in this renderer: ${layerErrors.join(', ')}. Other layers remain active.`}</p>}
