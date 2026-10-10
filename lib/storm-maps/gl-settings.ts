@@ -14,7 +14,7 @@ export const WEATHER_SHADES = [
 ] as const;
 export type WeatherShade = typeof WEATHER_SHADES[number]['id'];
 export type WeatherMode = 'live' | 'history' | 'forecast';
-export type WeatherToggle = 'wind' | 'radar' | 'lightning' | 'lightningThreats' | 'hail' | 'cells' | 'alerts' | 'outlook' | 'reports' | 'inspector' | 'impact';
+export type WeatherToggle = 'wind' | 'radar' | 'lightning' | 'lightningThreats' | 'hail' | 'cells' | 'stormCones' | 'alerts' | 'outlook' | 'reports' | 'inspector' | 'impact';
 export type StormGLSettings = Record<WeatherToggle, boolean> & {
   shade: WeatherShade; mode: WeatherMode; opacity: number; radarOpacity: number;
   speed: number; historyHours: number; units: 'metric' | 'imperial';
@@ -22,13 +22,13 @@ export type StormGLSettings = Record<WeatherToggle, boolean> & {
 export const STRONGEST_STORM_SETTINGS: StormGLSettings = {
   shade: 'none', mode: 'live', opacity: 75, radarOpacity: 80,
   wind: true, radar: true, lightning: true, lightningThreats: true, hail: true,
-  cells: true, alerts: true, outlook: true, reports: true, inspector: true, impact: true,
+  cells: true, stormCones: false, alerts: true, outlook: true, reports: true, inspector: true, impact: true,
   speed: 12, historyHours: 6, units: 'metric',
 };
 export const STORM_LAYER_GROUPS = [
   { key: 'radar', title: 'Precipitation radar', detail: 'Rain, mixed precipitation & snow', ids: ['radar'] },
   { key: 'hail', title: 'Hail threats & tracks', detail: 'Includes Canada · nowcast up to 1 hour', ids: ['hail-threats-polygons', 'hail-threats-tracks', 'hail-threats-points'] },
-  { key: 'cells', title: 'Storm cells & cones', detail: 'U.S. radar cells, movement & forecast cones', ids: ['stormcells-positions', 'stormcells-tracks', 'stormcells-cones'] },
+  { key: 'cells', title: 'Storm cells & tracks', detail: 'U.S. radar cells, severity & movement', ids: ['stormcells-positions', 'stormcells-tracks'] },
   { key: 'lightning', title: 'Lightning activity', detail: 'Flashes & cloud-to-ground strikes · global', ids: ['lightning-flash', 'lightning-strikes'] },
   { key: 'lightningThreats', title: 'Lightning threat zones', detail: 'Observed & forecast threat areas', ids: ['lightning-threats-polygons', 'lightning-threats-tracks', 'lightning-threats-points'] },
   { key: 'wind', title: 'Wind particles', detail: 'Animated direction & speed', ids: ['wind-particles'] },
@@ -40,7 +40,7 @@ export function readStormGLSettings(raw: unknown): StormGLSettings {
   // Upgrade the previous untouched preset; preserve deliberate custom views.
   const legacyPreset = { ...STRONGEST_STORM_SETTINGS, shade: 'temperatures', radarOpacity: 95 };
   if (Object.entries(legacyPreset).every(([key, value]) => data[key] === value)) return result;
-  for (const key of ['wind', 'radar', 'lightning', 'lightningThreats', 'hail', 'cells', 'alerts', 'outlook', 'reports', 'inspector', 'impact'] as const) {
+  for (const key of ['wind', 'radar', 'lightning', 'lightningThreats', 'hail', 'cells', 'stormCones', 'alerts', 'outlook', 'reports', 'inspector', 'impact'] as const) {
     if (typeof data[key] === 'boolean') result[key] = data[key];
   }
   if (WEATHER_SHADES.some((shade) => shade.id === data.shade)) result.shade = data.shade as WeatherShade;

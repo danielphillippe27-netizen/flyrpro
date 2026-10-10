@@ -167,8 +167,9 @@ export function StormMapsControl(props: Props) {
     if (settings.shade !== 'none' && (!isHistoricalHailShade(settings.shade) || settings.mode === 'history')) wanted.set(settings.shade, settings.opacity / 100);
     for (const group of STORM_LAYER_GROUPS) {
       if (!settings[group.key]) continue;
-      for (const layer of group.ids) wanted.set(layer === 'radar' && settings.mode === 'forecast' ? 'gfs-radar' : layer, group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : 1);
+      for (const layer of group.ids) wanted.set(layer === 'radar' && settings.mode === 'forecast' ? 'gfs-radar' : layer, group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
+    if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
