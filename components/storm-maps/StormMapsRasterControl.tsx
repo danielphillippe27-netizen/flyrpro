@@ -173,14 +173,14 @@ export function StormMapsRasterControl({
         { credentials: 'include', cache: 'no-store', signal: controller.signal },
       );
       const payload = (await response.json().catch(() => ({}))) as StormMapsManifest & { error?: string };
-      if (!response.ok) throw new Error(payload.error || 'Could not load Storm Maps.');
+      if (!response.ok) throw new Error(payload.error || 'Could not load Storm.');
       setManifest(payload);
       const preferred = payload.layers.find((layer) => layer.id === layerIdRef.current && layer.available);
       const fallback = payload.layers.find((layer) => layer.id === 'radar' && layer.available) || payload.layers.find((layer) => layer.available);
       if (!preferred && fallback) setLayerId(fallback.id);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      setManifestError(error instanceof Error ? error.message : 'Could not load Storm Maps.');
+      setManifestError(error instanceof Error ? error.message : 'Could not load Storm.');
     } finally {
       if (!controller.signal.aborted) setManifestLoading(false);
     }
@@ -374,31 +374,31 @@ export function StormMapsRasterControl({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="absolute left-5 top-5 z-30 flex h-11 items-center gap-2 rounded-full border border-cyan-200/80 bg-slate-950/90 px-4 text-sm font-semibold text-white shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="absolute left-[5.5rem] top-2 z-30 flex h-11 items-center gap-2 rounded-full border border-cyan-200/80 bg-slate-950/90 px-4 text-sm font-semibold text-white shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
         aria-expanded={open}
         aria-controls="storm-maps-panel"
       >
         <CloudLightning className="h-5 w-5 text-cyan-300" />
-        Storm Maps
+        Storm
         <span className="rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 px-2 py-0.5 text-[9px] font-bold tracking-[0.16em] text-slate-950">BETA</span>
       </button>
 
       {open ? (
         <section
           id="storm-maps-panel"
-          aria-label="Storm Maps Beta controls"
+          aria-label="Storm Beta controls"
           className="absolute bottom-3 left-3 right-3 z-30 max-h-[min(76vh,44rem)] overflow-y-auto rounded-3xl border border-white/20 bg-slate-950/92 p-4 text-white shadow-2xl shadow-slate-950/40 backdrop-blur-2xl sm:bottom-auto sm:left-5 sm:right-auto sm:top-20 sm:w-[24rem]"
         >
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <CloudLightning className="h-5 w-5 text-cyan-300" />
-                <h2 className="font-semibold">Storm Maps</h2>
+                <h2 className="font-semibold">Storm</h2>
                 <Badge className="border-0 bg-gradient-to-r from-cyan-400 to-violet-500 text-[9px] tracking-widest text-slate-950">BETA</Badge>
               </div>
               <p className="mt-1 text-xs text-slate-400">Radar · hail intelligence · official risk</p>
             </div>
-            <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white" aria-label="Close Storm Maps">
+            <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white" aria-label="Close Storm">
               <X className="h-4 w-4" />
             </button>
           </div>
