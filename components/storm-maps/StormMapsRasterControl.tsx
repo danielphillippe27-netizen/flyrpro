@@ -374,13 +374,12 @@ export function StormMapsRasterControl({
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className="absolute left-[5.5rem] top-2 z-30 flex h-11 items-center gap-2 rounded-full border border-cyan-200/80 bg-slate-950/90 px-4 text-sm font-semibold text-white shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+        className="absolute left-[5.5rem] top-3 z-30 flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/80 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-2xl shadow-cyan-950/20 backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
         aria-expanded={open}
         aria-controls="storm-maps-panel"
       >
-        <CloudLightning className="h-5 w-5 text-cyan-300" />
+        <CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />
         Storm
-        <span className="rounded-full bg-gradient-to-r from-cyan-400 to-violet-500 px-2 py-0.5 text-[9px] font-bold tracking-[0.16em] text-slate-950">BETA</span>
       </button>
 
       {open ? (
@@ -392,7 +391,7 @@ export function StormMapsRasterControl({
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <CloudLightning className="h-5 w-5 text-cyan-300" />
+                <CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />
                 <h2 className="font-semibold">Storm</h2>
                 <Badge className="border-0 bg-gradient-to-r from-cyan-400 to-violet-500 text-[9px] tracking-widest text-slate-950">BETA</Badge>
               </div>

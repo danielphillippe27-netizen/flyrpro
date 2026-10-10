@@ -251,9 +251,9 @@ export function StormMapsControl(props: Props) {
   if (!entitled || !mapLoaded || !map) return null;
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   return <>
-    <div className="absolute left-[5.5rem] top-2 z-30 flex items-center gap-2">
-      <button type="button" onClick={() => { if (!open) { setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-11 items-center gap-2 rounded-full border border-cyan-200/60 bg-slate-950/90 px-4 text-sm font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-5 w-5 text-cyan-300" />Storm<span className="rounded-full bg-cyan-300 px-2 py-0.5 text-[9px] font-bold text-slate-950">GL</span>{open && <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />}</button>
-      {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="rounded-full border border-white/15 bg-slate-950/90 p-2.5 text-white"><X className="h-4 w-4" /></button>}
+    <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
+      <button type="button" onClick={() => { if (!open) { setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
+      {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
       <section id="storm-maps-gl-panel" aria-label="Storm command controls" style={{ display: panel ? undefined : 'none' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] max-h-[calc(100%-12rem)] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
