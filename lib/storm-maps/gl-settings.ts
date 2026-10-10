@@ -1,4 +1,7 @@
 export const WEATHER_SHADES = [
+  { id: 'hail-size', label: 'Hourly hail size', unit: 'mm / in' },
+  { id: 'hail-size-max', label: 'Maximum hail size over history', unit: 'mm / in' },
+  { id: 'hail-severe-probability-max', label: 'Maximum severe hail probability', unit: '%' },
   { id: 'temperatures', label: 'Temperature', unit: '°C / °F' },
   { id: 'wind-speeds', label: 'Wind speed', unit: 'km/h / mph' },
   { id: 'wind-gusts', label: 'Wind gusts', unit: 'km/h / mph' },
@@ -57,4 +60,15 @@ export function stormTimeRange(mode: WeatherMode, historyHours: number, now = Da
     end: new Date(anchor + (mode === 'history' ? 0 : mode === 'forecast' ? 24 : 1) * 3600_000),
     current: new Date(anchor),
   };
+}
+
+export function hailViewSettings(settings: StormGLSettings, view: 'live' | 'history'): StormGLSettings {
+  return { ...settings, hail: true, cells: true, inspector: true, alerts: true,
+    mode: view === 'live' ? 'live' : 'history', shade: view === 'live' ? 'none' : 'hail-size-max',
+    historyHours: view === 'history' ? 24 : settings.historyHours,
+    wind: false, radar: view === 'live', opacity: 85, radarOpacity: 55 };
+}
+
+export function isHistoricalHailShade(shade: WeatherShade) {
+  return shade === 'hail-size' || shade === 'hail-size-max' || shade === 'hail-severe-probability-max';
 }

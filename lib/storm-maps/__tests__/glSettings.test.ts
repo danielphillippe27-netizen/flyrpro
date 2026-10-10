@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange } from '../gl-settings';
+import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange, hailViewSettings, isHistoricalHailShade } from '../gl-settings';
 import { resolveGLRequest, allowedVectorProducts } from '../gl-proxy-policy';
 import { stormTerritoryImpact } from '../gl-impact';
 import type { StormFeatureProperties } from '../types';
@@ -33,3 +33,15 @@ const risk={type:'FeatureCollection' as const,features:[{type:'Feature' as const
 assert.deepEqual(stormTerritoryImpact(territories,risk).map(x=>x.id),['a']);
 assert.deepEqual(stormTerritoryImpact(territories,{...risk,features:[{...risk.features[0],properties:{...props,kind:'report' as const}}]}),[]);
 console.log('Strongest defaults, saved preferences, timeline bounds, proxy routes, and campaign risk intersections passed');
+
+const historicalHail = hailViewSettings(STRONGEST_STORM_SETTINGS, 'history');
+assert.equal(historicalHail.mode, 'history');
+assert.equal(historicalHail.historyHours, 24);
+assert.equal(historicalHail.shade, 'hail-size-max');
+assert.equal(historicalHail.radar, false);
+assert.equal(historicalHail.hail, true);
+assert.equal(hailViewSettings(historicalHail, 'live').shade, 'none');
+assert.equal(hailViewSettings(historicalHail, 'live').mode, 'live');
+assert.equal(readStormGLSettings(historicalHail).shade, 'hail-size-max');
+assert.equal(isHistoricalHailShade('hail-size'), true);
+assert.equal(isHistoricalHailShade('temperatures'), false);
