@@ -73,7 +73,7 @@ export default function StormsPage() {
     instance.on('error', error);
     const ready = () => { instance.resize(); setMapError(''); setLoaded(true); };
     instance.on('load', ready);
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); instance.off('error', error); instance.off('load', ready); removeMapboxMapWhenSafe(instance); };
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); instance.off('error', error); instance.off('load', ready); queueMicrotask(() => removeMapboxMapWhenSafe(instance)); };
   }, []);
   return <div className="relative min-h-0 flex-1 overflow-hidden" aria-label="Storm Maps workspace">
     <div ref={container} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />

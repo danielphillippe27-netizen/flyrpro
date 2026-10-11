@@ -4,8 +4,8 @@ import { StormTerritoryOverlay } from './StormTerritoryOverlay';
 import { useEffect, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
-type Props = { map: mapboxgl.Map; workspaceId: string; revision: number; active: SavedStormTerritory | null; onSelect: (territory: SavedStormTerritory | null) => void; onCampaign: (territory: SavedStormTerritory) => void };
-export function SavedStormTerritories({ map, workspaceId, revision, active, onSelect, onCampaign }: Props) {
+type Props = { renderOverlay?: boolean; map: mapboxgl.Map; workspaceId: string; revision: number; active: SavedStormTerritory | null; onSelect: (territory: SavedStormTerritory | null) => void; onCampaign: (territory: SavedStormTerritory) => void };
+export function SavedStormTerritories({ map, workspaceId, revision, active, onSelect, onCampaign, renderOverlay = true }: Props) {
   const [territories, setTerritories] = useState<SavedStormTerritory[]>([]), [error, setError] = useState(''), [loading, setLoading] = useState(false);
   useEffect(() => {
     const abort = new AbortController(); setLoading(true); setError('');
@@ -19,7 +19,7 @@ export function SavedStormTerritories({ map, workspaceId, revision, active, onSe
     const positions = territory.boundary.coordinates[0];
     map.fitBounds([[Math.min(...positions.map(p => p[0])),Math.min(...positions.map(p => p[1]))],[Math.max(...positions.map(p => p[0])),Math.max(...positions.map(p => p[1]))]], { padding: 100, maxZoom: 12, pitch: 0, bearing: 0, duration: 600 });
   };
-  return <><StormTerritoryOverlay map={map} territory={active} /><details open={!!active} className="mt-4 rounded-xl border border-cyan-300/25 p-3"><summary className="cursor-pointer text-xs font-semibold text-cyan-200">Saved storm territories</summary><div className="mt-3 space-y-2">
+  return <>{renderOverlay && <StormTerritoryOverlay map={map} territory={active} />}<details open={!!active} className="mt-4 rounded-xl border border-cyan-300/25 p-3"><summary className="cursor-pointer text-xs font-semibold text-cyan-200">Saved storm territories</summary><div className="mt-3 space-y-2">
     {loading && <p role="status" className="text-[11px]">Loading territories…</p>}
     {error && <p role="alert" className="text-[11px] text-amber-200">{error}</p>}
     {!loading && !error && !territories.length && <p className="text-[11px] text-slate-400">Select a hail intensity zone and save its boundary here.</p>}

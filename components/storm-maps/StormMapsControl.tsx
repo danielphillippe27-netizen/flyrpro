@@ -4,6 +4,8 @@ import { useStormPanelScroll } from './useStormPanelScroll';
 
 import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
+import { StormWorkbenchView } from './StormWorkbenchView';
+import { StormTerritoryOverlay } from './StormTerritoryOverlay';
 import type { StormDisplaySettings } from '@/lib/storm-maps/display-settings';
 import Link from 'next/link';
 import { StormOverlayPicker } from './StormOverlayPicker';
@@ -98,9 +100,9 @@ function StormWorkbench(props: Props) {
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
-      .then((r) => r.ok ? r.json() : null).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) setOpen(true); } }).catch(() => {});
+      .then((r) => r.ok ? r.json() : null).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) { setSettings(previous => ({ ...STRONGEST_STORM_SETTINGS, units: previous.units, shade: 'temperatures', hail: false, cells: false, lightning: false, lightningThreats: false, reports: false, outlook: false, opacity: 100, radarOpacity: 70 })); setOpen(true); } } }).catch(() => {});
     return () => abort.abort();
-  }, [workspaceId, standalone]);
+  }, [workspaceId, standalone, setSettings]);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     if (!map || !workspaceId) return;
@@ -232,7 +234,7 @@ function StormWorkbench(props: Props) {
           if (id === 'satellite-infrared-color' && config && !Array.isArray(config)) {
             config.source = { ...config.source, metadataUrl: `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}/maps/wolfgrid_session/satellite-infrared-color.json` };
           }
-          controller.addWeatherLayer(id === 'satellite-infrared-color' && config && !Array.isArray(config) ? config : id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(id.endsWith('wind-particles') ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'satellite-infrared-color' || id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
+          controller.addWeatherLayer(id === 'satellite-infrared-color' && config && !Array.isArray(config) ? config : id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(!props.standalone && id.endsWith('wind-particles') ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'satellite-infrared-color' || id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
           activeIds.current.add(id);
         } else {
           const layers = controller.getWeatherLayer(id);
@@ -243,7 +245,7 @@ function StormWorkbench(props: Props) {
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, workspaceId]);
+  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, workspaceId, props.standalone]);
 
   useEffect(() => {
     if (!ready) return;
@@ -318,6 +320,19 @@ function StormWorkbench(props: Props) {
   if (!mapLoaded || !map) return null;
   if (!entitled) return props.standalone ? <div className="absolute left-5 top-5 z-30 rounded-xl bg-slate-950 p-5 text-white">Storm Maps requires an active workspace Storm Maps add-on. <Link className="underline" href="/settings">Open settings</Link></div> : null;
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
+  if (props.standalone) return <>
+    <StormTerritoryOverlay map={map} territory={savedTerritory} />
+    <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={active => setTab(active ? 'intelligence' : 'overview')} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+      renderArchive={() => workspaceId ? <StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /> : null}
+      renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
+      renderTerritory={() => <>
+        <p className="mb-4 text-xs leading-relaxed text-slate-300">Select a measured intensity zone, save its boundary, then create campaigns inside it.</p>
+        {!hailSelectionEvent && <button type="button" onClick={() => { map.setProjection('mercator'); setTab('overview'); setSettings(hailViewSettings(settings, 'history')); }} className="mb-4 w-full rounded-lg bg-[#a9d7d5] py-3 text-xs font-semibold text-[#0c202c]">Select a hail intensity zone</button>}
+        {workspaceId && ready && controllerRef.current && hailSelectionEvent && !layerErrors.includes('hail-size-max') && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => { await saveTerritory(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' }); }} />}
+        {workspaceId && selectedEvent && !recentHailEvent && <StormTerritorySketch workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{ version: 1, event: { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end }, selectedAt: new Date().toISOString(), minimumHailMM: null, selection: 'user-drawn', evidenceKind: selectedEvent.hazard === 'hurricane' ? 'track' : 'reports' }} />}
+        {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() })} />}
+      </>} />
+  </>;
   return <>
     <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
       <button type="button" onClick={() => { props.onStormModeChange?.(true); if (!open) { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (map.getZoom() < 4) map.easeTo({ zoom: 5, pitch: 0, bearing: 0, duration: 600 }); else if (map.getPitch() !== 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 }); setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
