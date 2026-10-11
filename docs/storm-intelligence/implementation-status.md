@@ -13,6 +13,14 @@
 - Workspace archive request budget, additive database migrations, server-only provider credentials.
 - Stable MapsGL session URL with a rotating HttpOnly capability cookie; manifest refresh no longer recreates the renderer. Historical intelligence hides current warnings/outlooks.
 
+## Campaign review and inspection continuation
+
+- Storm-linked drawing now reviews overlapping saved campaign boundaries and recorded inspection locations inside the selected polygon. Polygon holes, boundary-only contact and separate unit labels are handled explicitly.
+- Campaign visibility is workspace-wide for owners/admins and owned campaigns for ordinary members. Campaigns without boundaries and other CRM opt-out sources are outside this review.
+- Review requests debounce after drawing edits and cancel stale requests. Caps (500 campaigns / 2,000 inspection records) and invalid stored boundaries produce explicit incomplete-review warnings.
+- Inspection worklist provides follow-up, pending, do-not-knock and all filters; search, map focus marker and append-only observation updates. It checks the newest 500 source records and labels truncation.
+- This is an advisory territory review. It does not identify exact duplicate homes, automatically exclude addresses, or provide a verified storm footprint. Final campaign addresses still resolve after creation.
+
 ## Provider verification
 
 Live account checks successfully retrieved historical Canadian point hail records and Hurricane Milton (2024-AL-14). Historical IEM report normalization tested against September 17, 2026.

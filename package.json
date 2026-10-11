@@ -44,7 +44,7 @@
     "territory-iq:toronto": "python3 scripts/ingest_toronto_territory_iq.py --env-file .env.local",
     "test:territory-iq-data": "cd ../municipal_data/territory_iq_canada && python3 -m unittest discover -s acquisition/tests -v",
     "test:crm-integrations": "npx tsx scripts/test-crm-integrations.ts",
-    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts"
+    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts && npx tsx lib/storm-maps/__tests__/intelligence.test.ts && npx tsx lib/storm-maps/__tests__/territoryReview.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.986.0",

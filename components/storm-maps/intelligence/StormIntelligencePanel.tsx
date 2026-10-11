@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { eventBounds, referenceOf, type StormEvent, type StormReference, type StormHazard, type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
+import { StormInspectionWorklist } from './StormInspectionWorklist';
 import { StormEventActivity } from './StormEventActivity';
 import { StormEventMap } from './StormEventMap';
 import { StormPropertyPanel } from './StormPropertyPanel';
@@ -9,7 +10,7 @@ const input='mt-1 w-full rounded-lg border border-white/15 bg-slate-900 px-2 py-
 const dateDaysAgo=(days:number)=>new Date(Date.now()-days*86400000).toISOString().slice(0,10);
 type Props={map:mapboxgl.Map;workspaceId:string;onSelect:(event:StormEvent|null)=>void;onCampaign?:(context:StormCampaignContext)=>void};
 export function StormIntelligencePanel({map,workspaceId,onSelect,onCampaign}:Props){
-  const [view,setView]=useState<'hail'|'hurricane'|'saved'>('hail');
+  const [view,setView]=useState<'hail'|'hurricane'|'saved'|'worklist'>('hail');
   const [hazard,setHazard]=useState<StormHazard>('hail');
   const [from,setFrom]=useState(()=>dateDaysAgo(7)),[to,setTo]=useState(()=>dateDaysAgo(0));
   const [events,setEvents]=useState<StormEvent[]>([]),[selected,setSelected]=useState<StormEvent|null>(null);
@@ -59,8 +60,9 @@ export function StormIntelligencePanel({map,workspaceId,onSelect,onCampaign}:Pro
   const lookupEvent:StormEvent={key:`location-hail:${from}`,title:`Location hail lookup · ${from} UTC`,hazard:'hail',source:'xweather',sourceId:'location-lookup',start:`${from}T00:00:00Z`,end:`${from}T23:59:59Z`,features:[],reportCount:0,maxHailMM:null,maxWindKPH:null,category:null,active:false,footprintStatus:'unavailable'};
   const filtered=events.filter(e=>e.title.toLowerCase().includes(search.toLowerCase()));
   return <div className="space-y-3">
-    <div className="grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{([['hail','Past storms'],['hurricane','Hurricanes'],['saved','Saved']] as const).map(([id,title])=><button key={id} onClick={()=>{requestRef.current?.abort();setBusy(false);setView(id);setEvents([]);select(null);setCoverage('');setError('');}} aria-pressed={view===id} className={`rounded-lg py-2 text-[11px] ${view===id?'bg-cyan-300 font-semibold text-slate-950':'text-slate-300'}`}>{title}</button>)}</div>
-    {view!=='saved'&&<><p className="text-[11px] leading-relaxed text-slate-400">Search the map region, then choose an event. Dates use UTC. Up to 31 days per search; older dates are supported.</p><div className="grid grid-cols-2 gap-2"><label className="text-[11px]">From<input aria-label="Storm history start date" type="date" value={from} onChange={e=>setFrom(e.target.value)} max={dateDaysAgo(0)} className={input}/></label><label className="text-[11px]">Through<input aria-label="Storm history end date" type="date" value={to} onChange={e=>setTo(e.target.value)} max={dateDaysAgo(0)} className={input}/></label></div>
+    <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">{([['hail','Past storms'],['hurricane','Hurricanes'],['saved','Saved'],['worklist','Inspections']] as const).map(([id,title])=><button key={id} onClick={()=>{requestRef.current?.abort();setBusy(false);setView(id);setEvents([]);select(null);setCoverage('');setError('');}} aria-pressed={view===id} className={`rounded-lg py-2 text-[11px] ${view===id?'bg-cyan-300 font-semibold text-slate-950':'text-slate-300'}`}>{title}</button>)}</div>
+    {view==='worklist'&&<StormInspectionWorklist key={workspaceId} workspaceId={workspaceId} map={map}/>}
+    {view!=='saved'&&view!=='worklist'&&<><p className="text-[11px] leading-relaxed text-slate-400">Search the map region, then choose an event. Dates use UTC. Up to 31 days per search; older dates are supported.</p><div className="grid grid-cols-2 gap-2"><label className="text-[11px]">From<input aria-label="Storm history start date" type="date" value={from} onChange={e=>setFrom(e.target.value)} max={dateDaysAgo(0)} className={input}/></label><label className="text-[11px]">Through<input aria-label="Storm history end date" type="date" value={to} onChange={e=>setTo(e.target.value)} max={dateDaysAgo(0)} className={input}/></label></div>
     {view==='hail'&&<select aria-label="Historical hazard" value={hazard} onChange={e=>setHazard(e.target.value as StormHazard)} className={input}><option value="hail">Hail reports</option><option value="wind">Wind reports</option><option value="tornado">Tornado reports</option></select>}
     <div className="flex gap-2">{[7,30].map(days=><button key={days} onClick={()=>{setFrom(dateDaysAgo(days-1));setTo(dateDaysAgo(0));}} className="rounded-lg border border-white/10 px-2 py-1 text-[10px]">Last {days} days</button>)}</div>
     <button disabled={busy} onClick={()=>void load()} className="w-full rounded-lg bg-cyan-300 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40">{busy?'Searching…':'Search this region'}</button>{view==='hurricane'&&<button disabled={busy} onClick={()=>void load(undefined,true)} className="w-full rounded-lg border border-white/15 py-2 text-xs">Active cyclones worldwide</button>}</>}
