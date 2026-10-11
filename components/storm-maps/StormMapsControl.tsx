@@ -52,6 +52,7 @@ function StormWorkbench(props: Props) {
   useEffect(() => { if (open) setTerritoryWindowEnd(new Date()); }, [open, settings.mode, settings.historyHours, settings.shade]);
   useEffect(() => { onStormModeChange?.(open); }, [open, onStormModeChange]);
   const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('overview');
+  const handleWorkbenchArchive = useCallback((active: boolean) => setTab(active ? 'intelligence' : 'overview'), []);
   const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
   const [territoryRevision, setTerritoryRevision] = useState(0);
   useEffect(() => { setSavedTerritory(null); }, [workspaceId]);
@@ -324,7 +325,7 @@ function StormWorkbench(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={active => setTab(active ? 'intelligence' : 'overview')} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
       renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
