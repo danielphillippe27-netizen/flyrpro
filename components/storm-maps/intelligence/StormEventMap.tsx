@@ -11,7 +11,10 @@ export function StormEventMap({map,event,minimumHailMM,onLocation}:{map:mapboxgl
     const modeChanged=(e:{mode?:string})=>{drawing=Boolean(e.mode?.startsWith('draw_'));};
     let popup:mapboxgl.Popup|undefined;
     const draw=()=>{
-      if(!event||!map.isStyleLoaded())return;
+      if(!event)return;
+      // Camera fitting can leave the style waiting for base-map tiles even
+      // after style.load. Retry once the map settles instead of losing the event.
+      if(!map.isStyleLoaded()){map.once('idle',draw);return;}
       const data:GeoJSON.FeatureCollection={type:'FeatureCollection',features:visibleEventFeatures(event,minimumHailMM)};
       const existing=map.getSource(source) as mapboxgl.GeoJSONSource|undefined;
       if(existing)existing.setData(data);else map.addSource(source,{type:'geojson',data});
@@ -30,7 +33,7 @@ export function StormEventMap({map,event,minimumHailMM,onLocation}:{map:mapboxgl
       popup?.remove();popup=new mapboxgl.Popup().setLngLat(e.lngLat).setDOMContent(el).addTo(map);
     };
     draw();map.on('style.load',draw);map.on('click',clicked);map.on('draw.modechange',modeChanged);
-    return()=>{map.off('draw.modechange',modeChanged);map.off('style.load',draw);map.off('click',clicked);popup?.remove();for(const id of layers)if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);};
+    return()=>{map.off('idle',draw);map.off('draw.modechange',modeChanged);map.off('style.load',draw);map.off('click',clicked);popup?.remove();for(const id of layers)if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);};
   },[map,event,minimumHailMM,onLocation]);
   return null;
 }
