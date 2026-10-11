@@ -13,11 +13,12 @@ export const campaignStormSchema = z.object({
   version: z.union([z.literal(1),z.literal(2)]), event: eventReferenceSchema,
   territoryId: z.uuid().optional(),
   territoryRevision: z.number().int().positive().optional(),
+  sampling: z.object({cellMeters:z.number().positive(),clickedMM:z.number().min(0).max(200),method:z.literal('numerical-map-contour')}).strict().optional(),
   zoneId: z.uuid().optional(), includeOutsideZone: z.boolean().optional(),
   selectedAt: z.iso.datetime({ offset: true }),
   minimumHailMM: z.number().min(0).max(150).nullable(),
   maximumHailMM: z.number().min(0).max(150).nullable().optional(),
-  selection: z.enum(['user-drawn', 'intensity-zone']), evidenceKind: z.enum(['reports', 'track', 'hail-size']),
+  selection: z.enum(['user-drawn', 'intensity-zone']), evidenceKind: z.enum(['reports', 'track', 'hail-size', 'hail-sampled']),
 }).strict().refine(value => value.maximumHailMM == null || (value.minimumHailMM != null && value.maximumHailMM > value.minimumHailMM), 'Invalid hail intensity band');
 export type StormCampaignContext = z.infer<typeof campaignStormSchema>;
 export type StormMapFeature = GeoJSON.Feature<GeoJSON.Geometry, {
