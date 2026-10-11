@@ -4,6 +4,9 @@ import { useStormPanelScroll } from './useStormPanelScroll';
 
 import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
+import Link from 'next/link';
+import { StormOverlayPicker } from './StormOverlayPicker';
+import { StormWeatherRail } from './StormWeatherRail';
 import { SavedStormTerritories } from './SavedStormTerritories';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
 
@@ -24,13 +27,17 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
+type Props = { standalone?: boolean; map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
 export function StormMapsControl(props: Props) {
+  return props.standalone ? <StormWorkbench {...props} /> : <StormOverlayPicker {...props} />;
+}
+
+function StormWorkbench(props: Props) {
   const panelScrollRef = useStormPanelScroll();
-  const { map, mapLoaded, workspaceId, territories } = props;
+  const { map, mapLoaded, workspaceId, territories, standalone, onStormModeChange } = props;
   const { settings, setSettings } = useStormGLSettings(workspaceId);
   const [entitled, setEntitled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -38,8 +45,8 @@ export function StormMapsControl(props: Props) {
   const [selectingTerritory, setSelectingTerritory] = useState(false);
   const [territoryWindowEnd, setTerritoryWindowEnd] = useState(() => new Date());
   useEffect(() => { if (open) setTerritoryWindowEnd(new Date()); }, [open, settings.mode, settings.historyHours, settings.shade]);
-  useEffect(() => { props.onStormModeChange?.(open); }, [open, props.onStormModeChange]);
-  const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('intelligence');
+  useEffect(() => { onStormModeChange?.(open); }, [open, onStormModeChange]);
+  const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('overview');
   const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
   const [territoryRevision, setTerritoryRevision] = useState(0);
   useEffect(() => { setSavedTerritory(null); }, [workspaceId]);
@@ -90,9 +97,9 @@ export function StormMapsControl(props: Props) {
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
-      .then((r) => r.ok ? r.json() : null).then((d) => { if (!abort.signal.aborted) setEntitled(d?.addon?.isActive === true); }).catch(() => {});
+      .then((r) => r.ok ? r.json() : null).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) setOpen(true); } }).catch(() => {});
     return () => abort.abort();
-  }, [workspaceId]);
+  }, [workspaceId, standalone]);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     if (!map || !workspaceId) return;
@@ -187,12 +194,12 @@ export function StormMapsControl(props: Props) {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller || !map) return;
-    const inspector = settings.inspector && !archiveView && !selectingTerritory ? controller.addDataInspectorControl({ event: 'click', stream: true, showCoordinates: true }) : undefined;
+    const inspector = settings.inspector && !archiveView && !selectingTerritory ? controller.addDataInspectorControl({ event: props.standalone ? 'move' : 'click', stream: true, showCoordinates: true }) : undefined;
     if (!settings.inspector || archiveView || selectingTerritory) controller.removeDataInspectorControl();
     const modeChanged = (event: { mode?: string }) => { if (event.mode?.startsWith('draw_')) inspector?.disable(); else inspector?.enable(); };
     map.on('draw.modechange', modeChanged);
     return () => { map.off('draw.modechange', modeChanged); controller.removeDataInspectorControl(); };
-  }, [ready, settings.inspector, map, archiveView, selectingTerritory]);
+  }, [ready, settings.inspector, map, archiveView, selectingTerritory, props.standalone]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -305,7 +312,8 @@ export function StormMapsControl(props: Props) {
   const enabledCount = toggled.length + [settings.alerts, settings.outlook, settings.reports].filter(Boolean).length;
   const rangeTitle = settings.mode === 'forecast' ? 'Forecast · next 24h' : settings.mode === 'history' ? `History · past ${settings.historyHours}h` : 'Live + 1h nowcast';
 
-  if (!entitled || !mapLoaded || !map) return null;
+  if (!mapLoaded || !map) return null;
+  if (!entitled) return props.standalone ? <div className="absolute left-5 top-5 z-30 rounded-xl bg-slate-950 p-5 text-white">Storm Maps requires an active workspace Storm Maps add-on. <Link className="underline" href="/settings">Open settings</Link></div> : null;
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   return <>
     <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
@@ -313,6 +321,7 @@ export function StormMapsControl(props: Props) {
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
+      {props.standalone && <StormWeatherRail settings={settings} onChange={value => { setSettings(value); setTab('overview'); setPanel(true); }} />}
       <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find storms. Save a storm territory.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
@@ -335,7 +344,7 @@ export function StormMapsControl(props: Props) {
           <div className="grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['live', 'history', 'forecast'] as const).map((mode) => <button key={mode} type="button" onClick={() => setSettings({ ...settings, mode })} aria-pressed={settings.mode === mode} className={`rounded-lg py-2 text-xs capitalize ${settings.mode === mode ? 'bg-white/15 font-semibold' : 'text-slate-400'}`}>{mode === 'history' ? 'Past' : mode}</button>)}</div>
           <div><p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Storm intelligence</p><div className="mt-2 flex flex-wrap gap-1.5">{toggled.map((group) => <span key={group.key} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px]">{group.title}</span>)}{settings.alerts && <span className="rounded-md border border-amber-300/20 bg-amber-300/10 px-2 py-1 text-[10px] text-amber-200">Official alerts</span>}{settings.outlook && <span className="rounded-md border border-violet-300/20 bg-violet-300/10 px-2 py-1 text-[10px] text-violet-200">Canadian outlook</span>}{settings.reports && <span className="rounded-md border border-white/10 px-2 py-1 text-[10px]">U.S. reports</span>}</div></div>
           {settings.mode !== 'history' && settings.impact && <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-semibold">Campaign risk in view</p>{!settings.alerts && !settings.outlook ? <p className="mt-2 text-[11px] text-slate-400">Enable warnings or outlooks to assess mapped territories.</p> : !riskLoaded ? <p className="mt-2 text-[11px] text-slate-400">{riskError ? 'Official risk data unavailable. Retry by reopening Storm.' : 'Checking official risk areas…'}</p> : <><p className={`mt-2 text-sm font-semibold ${impacts.length ? 'text-amber-200' : 'text-cyan-200'}`}>{impacts.length} / {territories?.features.length || 0} mapped territories overlap risk areas</p><p className="mt-1 text-[10px] text-slate-400">{risk.features.filter((feature) => feature.properties.kind === 'alert').length} alerts · {risk.features.filter((feature) => feature.properties.kind === 'outlook').length} outlooks · {risk.features.filter((feature) => feature.properties.kind === 'report').length} reports in view</p>{impacts.slice(0, 4).map((item) => <div key={item.id} className="mt-2 border-t border-white/10 pt-2"><p className="text-[11px] font-medium">{item.name}</p><p className="text-[10px] text-slate-400">{item.events.join(' · ')}</p></div>)}<p className="mt-2 text-[10px] leading-relaxed text-slate-500">Based on loaded official warnings and outlooks. This is not a damage assessment.{riskError ? ' Refresh failed; showing the last loaded data.' : ''}</p></>}</div>}
-          <p className="text-[10px] leading-relaxed text-slate-400">{settings.shade === 'none' ? 'Storm focus' : WEATHER_SHADES.find((shade) => shade.id === settings.shade)?.label} · {rangeTitle}. {settings.inspector ? 'Click the map to inspect weather.' : ''} Storm-cell tracks cover the U.S.; hail threats include Canada.</p>
+          <p className="text-[10px] leading-relaxed text-slate-400">{settings.shade === 'none' ? 'Storm focus' : WEATHER_SHADES.find((shade) => shade.id === settings.shade)?.label} · {rangeTitle}. {settings.inspector ? 'Hover over the map to inspect weather; tap on touch devices.' : ''} Storm-cell tracks cover the U.S.; hail threats include Canada.</p>
         </div>
         {!archiveView && isHistoricalHailShade(settings.shade) && <p className="mt-3 rounded-lg border border-violet-300/20 bg-violet-300/5 p-2 text-[10px] leading-relaxed text-violet-200">{settings.mode !== 'history' ? 'Hail-size history is hidden in Live and Forecast. Select History to view it.' : 'Hail-size coverage: U.S., Europe, Japan and Australia. Canada is not covered by this map layer; an empty map there does not mean no hail occurred.'}</p>}
         {settings.mode === 'forecast' && settings.hail && <p className="mt-2 text-[10px] text-slate-400">Hail tracks are short-range nowcasts, up to 60 minutes; they are not a 24-hour hail forecast.</p>}

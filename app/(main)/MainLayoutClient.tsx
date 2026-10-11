@@ -11,7 +11,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
+import { CloudLightning, Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -30,6 +30,7 @@ const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaign' },
+  { href: '/storms', icon: CloudLightning, label: 'Storms' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
@@ -79,6 +80,7 @@ const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
+    '/storms',
     '/leads',
     '/activity',
     '/appointments',
@@ -252,6 +254,7 @@ function MainLayoutShell({
           <main
             className={cn(
               'flex flex-1 flex-col min-h-0 p-0 m-0',
+              pathname?.startsWith('/storms') ||
               pathname?.startsWith('/campaigns') ||
               pathname?.startsWith('/offers') ||
               pathname?.startsWith('/map') ||
@@ -265,6 +268,7 @@ function MainLayoutShell({
             <div
               className={cn(
                 'flex flex-col min-h-0',
+                pathname?.startsWith('/storms') ||
                 pathname?.startsWith('/campaigns') ||
                 pathname?.startsWith('/offers') ||
                 pathname?.startsWith('/map') ||
