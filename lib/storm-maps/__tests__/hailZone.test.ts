@@ -1,7 +1,7 @@
 import { campaignWithinStormTerritory, stormTerritorySchema } from '../intelligence/storm-territories';
 import assert from 'node:assert/strict';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
-import { hailMillimeters, bandForHail, connectedHailCells, hailCellsPolygon } from '../intensity/hail-zone';
+import { smoothHailBoundary, hailMillimeters, bandForHail, connectedHailCells, hailCellsPolygon } from '../intensity/hail-zone';
 import { campaignStormSchema } from '../intelligence/model';
 assert.equal(hailMillimeters({ value: 1, unit: 'in', nodata: false }), 25.4);
 assert.equal(hailMillimeters({ value: 2.5, unit: 'cm', nodata: false }), 25);
@@ -51,3 +51,9 @@ assert.equal(campaignWithinStormTerritory(outside, parent), false);
 assert.equal(stormTerritorySchema.safeParse({ name: 'Iowa hail territory', boundary: parent, context }).success, true);
 assert.equal(stormTerritorySchema.safeParse({ name: '', boundary: parent, context }).success, false);
 console.log('Saved territories: validated boundaries, child containment, hole exclusion and outside rejection passed');
+
+const smoothed=smoothHailBoundary(boundary);
+assert.equal(smoothed.geometry.type,'Polygon');
+assert.equal(booleanPointInPolygon([3.5,3.5],smoothed),false,'Smoothing preserves the hole');
+assert.ok(smoothed.geometry.coordinates[0].length>boundary.geometry.coordinates[0].length);
+console.log('Smoothed hail outline preserves polygon holes');
