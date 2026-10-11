@@ -21,7 +21,7 @@ export function StormWorkbenchView(props: Props) {
   useEffect(() => { onArchive(true); return () => onArchive(false); }, [onArchive]);
   // Discovery is the default workspace; campaign overlays use their own picker.
   const focus = props.settings.cyclones ? 'Tropical' : props.settings.hail || props.settings.cells || props.settings.shade.startsWith('hail-') ? 'Severe' : 'General';
-  const open = (next: Panel) => { const target = panel === next ? null : next; setPanel(target); setCollapsed(false); props.onArchive(target === 'storms'); };
+  const open = (next: Panel) => { const target = panel === next ? null : next; setPanel(target); setCollapsed(false); props.onArchive(target === 'storms' || target === 'territory'); };
   const apply = (settings: StormGLSettings) => { props.onChange(settings); props.onArchive(false); };
   const focusOptions = [
     { name: 'General', icon: CloudSun, detail: 'Temperatures, radar, wind and current weather.', settings: { ...STRONGEST_STORM_SETTINGS, shade: 'temperatures' as const, hail: false, cells: false, lightning: false, lightningThreats: false, outlook: false, reports: false, radar: true, wind: true, opacity: 100, radarOpacity: 70 } },
@@ -37,7 +37,7 @@ export function StormWorkbenchView(props: Props) {
     </header>
     <StormWeatherRail compact settings={props.settings} alwaysShowNames={false} onChange={apply} />
     {(!dashboard || collapsed) && <button type="button" aria-label="Find storm" aria-expanded={panel === 'storms' && !collapsed} onClick={() => { if (collapsed && panel === 'storms') setCollapsed(false); else open('storms'); }} className="absolute left-12 top-4 z-30 flex h-14 items-center gap-3 rounded-xl bg-[#a9d7d5] px-6 text-base font-semibold text-[#0c202c] shadow-xl"><MapPin className="h-5 w-5" />Find storm</button>}
-    {dashboard && <StormListSidebar collapsed={collapsed} onCollapse={collapse} tab={panel as 'storms'|'saved'|'territory'} onTab={value=>{setPanel(value);props.onArchive(value==='storms');}} onCreate={()=>{setPanel('territory');props.onArchive(false);}}>
+    {dashboard && <StormListSidebar collapsed={collapsed} onCollapse={collapse} tab={panel as 'storms'|'saved'|'territory'} onTab={value=>{setPanel(value);props.onArchive(value==='storms');}} onCreate={()=>{setPanel('territory');props.onArchive(true);}}>
       {panel === 'storms' && props.renderArchive(() => open('territory'))}
       {panel === 'saved' && props.renderSaved()}
       {panel === 'territory' && props.renderTerritory()}

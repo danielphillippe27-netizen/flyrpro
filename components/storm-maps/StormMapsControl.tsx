@@ -333,7 +333,7 @@ function StormWorkbench(props: Props) {
       renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={() => <>
-        <p className="mb-4 text-xs leading-relaxed text-slate-300">Custom prospecting boundary. Historical exposure geometry is not yet verified; address counts represent all pins in your boundary.</p>
+        <p className="mb-4 text-xs leading-relaxed text-slate-300">Select your area, check the address count, then save.</p>
         {!selectedEvent && <p className="text-xs">Choose a storm in Find storm first.</p>}
         {workspaceId && selectedEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:selectedEvent.hazard==='hurricane'?'track':'reports'}} />}
         {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
