@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { gzipSync } from 'node:zlib';
+import { campaignAddressOverviewTile, isNetsymsUsAddressKey } from '@/app/api/campaigns/_utils/campaign-address-overview-tile';
 import type { PMTiles } from 'pmtiles';
 import { createAdminClient } from '@/lib/supabase/server';
 import {
@@ -20,6 +22,7 @@ function parseTile(tile: string[]) {
   const x = Number(xRaw);
   const y = Number(yClean);
   if (![z, x, y].every(Number.isInteger)) return null;
+  if (z<0 || z>24 || x<0 || y<0 || x>=2**z || y>=2**z) return null;
   return { z, x, y };
 }
 
@@ -76,6 +79,14 @@ export async function GET(
 
   let result: Awaited<ReturnType<PMTiles['getZxy']>>;
   try {
+    if (isNetsymsUsAddressKey(pmtilesKey)) {
+      const data=await campaignAddressOverviewTile(supabase,campaignId,parsedTile);
+      if(!data.length)return new NextResponse(null,{status:204,headers:{'Cache-Control':'private, max-age=30'}});
+      const compressed=gzipSync(data);
+      return new NextResponse(compressed.buffer.slice(compressed.byteOffset,compressed.byteOffset+compressed.byteLength),{
+        headers:{'Content-Type':'application/vnd.mapbox-vector-tile','Content-Encoding':'gzip','Cache-Control':'private, max-age=30'},
+      });
+    }
     const pmtilesUrl = await resolveArtifactUrl(snapshotRow, pmtilesKey);
     const archive = getCachedPmtilesArchive(pmtilesUrl);
     result = await archive.getZxy(parsedTile.z, parsedTile.x, parsedTile.y);
@@ -103,10 +114,12 @@ export async function GET(
     });
   }
 
-  return new NextResponse(result.data, {
+  const compressed=gzipSync(new Uint8Array(result.data));
+  return new NextResponse(compressed.buffer.slice(compressed.byteOffset,compressed.byteOffset+compressed.byteLength), {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.mapbox-vector-tile',
+      'Content-Encoding': 'gzip',
       'Cache-Control': result.cacheControl || 'public, max-age=86400, stale-while-revalidate=604800',
       ...(result.etag ? { ETag: result.etag } : {}),
       ...(result.expires ? { Expires: result.expires } : {}),

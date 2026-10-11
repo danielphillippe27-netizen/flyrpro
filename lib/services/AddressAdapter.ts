@@ -45,6 +45,7 @@ export interface StandardCampaignAddress {
   formatted: string;
   house_number?: string;
   street_name?: string;
+  unit?: string;
   locality?: string;
   region?: string;
   postal_code?: string;
@@ -178,6 +179,7 @@ export class AddressAdapter {
       formatted: typeof addr.formatted === 'string' ? addr.formatted : '',
       house_number: typeof addr.house_number === 'string' ? addr.house_number : undefined,
       street_name: typeof addr.street_name === 'string' ? addr.street_name : undefined,
+      unit: typeof addr.unit === 'string' ? addr.unit : undefined,
       locality:
         typeof addr.locality === 'string'
           ? addr.locality

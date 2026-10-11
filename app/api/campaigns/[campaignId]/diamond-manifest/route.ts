@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
+import { resolveAddressNativeZooms } from '@/app/api/campaigns/_utils/address-native-zooms';
 import {
   type CampaignSnapshotRow,
   resolveCampaignMapArtifact,
@@ -192,6 +193,15 @@ export async function GET(
     stringMetric(snapshotRow?.tile_metrics, 'addresses_tilejson_key') ??
     basicAddressPmtilesKey?.replace(/\.pmtiles$/i, '.json') ??
     null;
+
+  if (snapshotRow && basicAddressPmtilesKey) {
+    try {
+      const native = await resolveAddressNativeZooms(snapshotRow, basicAddressPmtilesKey);
+      snapshotRow.tile_metrics = { ...snapshotRow.tile_metrics, address_minzoom: native.minzoom, address_maxzoom: native.maxzoom };
+    } catch (error) {
+      console.warn('[DiamondManifest] Unable to read native address zooms', { campaignId, key: basicAddressPmtilesKey, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   if (!snapshotRow || (artifact.geometryProvider === 'address_points' && !basicAddressPmtilesKey) || (!artifact.pmtilesKey && !basicAddressPmtilesKey)) {
     return manifestJson({

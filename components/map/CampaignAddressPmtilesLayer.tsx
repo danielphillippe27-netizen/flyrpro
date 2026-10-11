@@ -594,7 +594,7 @@ export function CampaignAddressPmtilesLayer({
         id: CIRCLE_LAYER_ID,
         type: 'fill-extrusion',
         source: SOURCE_ID,
-        minzoom: 12,
+        minzoom: 10,
         filter: getLayerFilter('Polygon'),
         layout: {
           'fill-extrusion-edge-radius': 0.2,

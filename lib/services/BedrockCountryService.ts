@@ -340,6 +340,9 @@ function prefix(config: BedrockCountryConfig) {
 }
 
 function layerKey(config: BedrockCountryConfig, layer: 'addresses' | 'buildings' | 'parcels', filename: string) {
+  if (layer === 'addresses' && env(config, 'ADDRESS_PREFIX')) {
+    return `${env(config, 'ADDRESS_PREFIX')!.replace(/^\/+|\/+$/g, '')}/${filename}`;
+  }
   return `${prefix(config)}/${layer}/${filename}`;
 }
 
@@ -369,7 +372,7 @@ function usaAddressPmtilesKey(config: BedrockCountryConfig, regionCode?: string 
   if (config.country !== 'usa') return layerKey(config, 'addresses', 'addresses.pmtiles');
   const state = regionCode?.trim().toUpperCase();
   if (!state || !USA_ADDRESS_REGIONS.has(state)) return null;
-  return `${prefix(config)}/addresses/pmtiles_by_state/state=${state}/addresses.pmtiles`;
+  return layerKey(config, 'addresses', `pmtiles_by_state/state=${state}/addresses.pmtiles`);
 }
 
 function usaBuildingPmtilesKey(config: BedrockCountryConfig, regionCode?: string | null) {
@@ -727,8 +730,8 @@ export class BedrockCountryService {
       buildings_geojson_key: isUsBedrock ? null : layerKey(this.config, 'buildings', 'buildings.ndjson.gz'),
       addresses_pmtiles_key: addressPmtilesKey,
       addresses_tilejson_key: layerKey(this.config, 'addresses', 'addresses.json'),
-      addresses_geojson_key: layerKey(this.config, 'addresses', 'addresses.ndjson.gz'),
-      addresses_pmtiles_index_key: `${prefix(this.config)}/addresses/pmtiles-index.json`,
+      addresses_geojson_key: isUsBedrock ? null : layerKey(this.config, 'addresses', 'addresses.ndjson.gz'),
+      addresses_pmtiles_index_key: layerKey(this.config, 'addresses', 'pmtiles-index.json'),
       parcels_pmtiles_key: parcelPmtilesKey,
       parcels_tilejson_key: parcelPmtilesKey?.replace(/\.pmtiles$/i, '.json') ?? null,
       parcels_geojson_key: null,
@@ -745,12 +748,12 @@ export class BedrockCountryService {
       },
       join_key: 'address_id',
       sources: {
-        addresses: this.config.defaultSource,
+        addresses: env(this.config, 'ADDRESS_SOURCE') || this.config.defaultSource,
       },
       minzoom: 12,
       maxzoom: 18,
       address_minzoom: 10,
-      address_maxzoom: 18,
+      address_maxzoom: 16,
       parcel_minzoom: 10,
       parcel_maxzoom: 16,
       addresses_count: addressCount,

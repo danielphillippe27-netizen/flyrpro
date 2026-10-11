@@ -4,6 +4,7 @@ import Pbf from 'pbf';
 import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 import { type CampaignSnapshotRow, resolveArtifactUrl } from '@/lib/diamond/geometry';
 import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
+import { addressSourcePoint } from './address-source-point';
 
 export type ScopedAddressMetric = {
   hits: number;
@@ -267,6 +268,7 @@ export function normalizePmtilesAddressFeature(input: {
     formatted,
     house_number: houseNumber,
     street_name: streetName,
+    unit: stringValue(properties.unit) ?? stringValue(properties.street2) ?? stringValue(properties.unit_number),
     locality,
     region: region?.toUpperCase(),
     postal_code: stringValue(properties.postal_code) ?? stringValue(properties.postcode),
@@ -359,7 +361,7 @@ export async function fetchScopedPmtilesAddresses(options: {
         const feature = layer.feature(index).toGeoJSON(x, y, range.z) as GeoJSON.Feature;
         const point = firstPoint(feature.geometry as GeoJSON.Geometry | null | undefined);
         if (!point) continue;
-        const [lon, lat] = point;
+        const [lon, lat] = addressSourcePoint(feature.properties, point);
         if (lon < options.bbox[0] || lon > options.bbox[2] || lat < options.bbox[1] || lat > options.bbox[3]) continue;
         bboxCandidates += 1;
         if (!turf.booleanPointInPolygon(turf.point([lon, lat]), options.boundary)) continue;
