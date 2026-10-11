@@ -10,6 +10,7 @@ import {
 type GoogleCampaign2DMapProps = {
   addresses: CampaignAddress[];
   boundary?: GeoJSON.Polygon | null;
+  stormBoundary?: GeoJSON.Polygon | null;
   bbox?: [number, number, number, number] | null;
   theme: 'light' | 'dark';
   onReady?: () => void;
@@ -68,6 +69,7 @@ function addressBuildingId(address: CampaignAddress): string | null {
 export function GoogleCampaign2DMap({
   addresses,
   boundary,
+  stormBoundary,
   bbox,
   theme,
   onReady,
@@ -89,6 +91,7 @@ export function GoogleCampaign2DMap({
   const geoJson = useMemo<GeoJSON.FeatureCollection>(() => ({
     type: 'FeatureCollection',
     features: [
+      ...(stormBoundary ? ['storm-casing', 'storm-territory'].map(kind => ({ type: 'Feature' as const, geometry: stormBoundary, properties: { kind } })) : []),
       ...(boundary
         ? [{
             type: 'Feature' as const,
@@ -112,7 +115,7 @@ export function GoogleCampaign2DMap({
         }];
       }),
     ],
-  }), [addresses, boundary]);
+  }), [addresses, boundary, stormBoundary]);
   dataRef.current = geoJson;
 
   const syncData = useCallback(() => {
@@ -186,6 +189,10 @@ export function GoogleCampaign2DMap({
         const dataLayer = new google.maps.Data({ map });
         dataLayerRef.current = dataLayer;
         dataLayer.setStyle((feature) => {
+          if (feature.getProperty('kind') === 'storm-casing' || feature.getProperty('kind') === 'storm-territory') {
+            const casing = feature.getProperty('kind') === 'storm-casing';
+            return { fillColor: '#8b5cf6', fillOpacity: casing ? 0 : 0.08, strokeColor: casing ? '#ffffff' : '#111111', strokeOpacity: 1, strokeWeight: casing ? 6 : 3, clickable: false, zIndex: casing ? 1 : 2 };
+          }
           if (feature.getProperty('kind') === 'boundary') {
             return {
               fillColor: '#ef4444',

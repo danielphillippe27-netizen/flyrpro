@@ -1,7 +1,7 @@
 import { featureCollection, polygon } from '@turf/helpers';
 import union from '@turf/union';
 
-export const HAIL_BANDS = [12.7, 25.4, 38.1, 50.8, 76.2] as const;
+export const HAIL_BANDS = [0, 12.7, 25.4, 38.1, 50.8, 76.2] as const;
 export type HailSample = { value: number; unit?: string; nodata: boolean } | null | undefined;
 export function hailMillimeters(sample: HailSample): number | null {
   if (!sample || sample.nodata || !Number.isFinite(sample.value) || sample.value < 0) return null;
@@ -12,15 +12,16 @@ export function hailMillimeters(sample: HailSample): number | null {
   return null;
 }
 export function bandForHail(mm: number) {
+  if (!Number.isFinite(mm) || mm <= 0) throw new Error('No estimated hail at this point. Click inside a shaded hail area.');
   const minimum = [...HAIL_BANDS].reverse().find(value => mm >= value);
-  if (minimum == null) throw new Error('Choose an area with estimated hail of at least ½ inch.');
+  if (minimum == null) throw new Error('No estimated hail at this point. Click inside a shaded hail area.');
   return { minimum, maximum: HAIL_BANDS.find(value => value > minimum) ?? null };
 }
 
 /** Four-neighbour connectivity keeps separate storm pockets separate. Unknown cells are never included. */
 export function connectedHailCells(values: (number | null)[], width: number, height: number, seed: number, minimum: number, maximum: number | null) {
   if (values.length !== width * height || seed < 0 || seed >= values.length) throw new Error('Invalid hail grid.');
-  const qualifies = (id: number) => values[id] != null && values[id]! >= minimum && (maximum == null || values[id]! < maximum);
+  const qualifies = (id: number) => values[id] != null && values[id]! > 0 && values[id]! >= minimum && (maximum == null || values[id]! < maximum);
   if (!qualifies(seed)) throw new Error('The clicked point is outside this intensity range. Choose another zone or a lower threshold.');
   const cells = new Set<number>(); const seen = new Set<number>([seed]); const queue = [seed];
   for (let cursor = 0; cursor < queue.length; cursor++) {

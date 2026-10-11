@@ -9,6 +9,12 @@ assert.equal(hailMillimeters({ value: 999, nodata: true }), null);
 assert.equal(hailMillimeters({ value: NaN, nodata: false }), null);
 assert.equal(hailMillimeters({ value: 1, unit: 'unknown', nodata: false }), null);
 assert.deepEqual(bandForHail(44), { minimum: 38.1, maximum: 50.8 });
+assert.deepEqual(bandForHail(6), { minimum: 0, maximum: 12.7 });
+assert.throws(() => bandForHail(0), /No estimated hail/);
+assert.throws(() => bandForHail(NaN), /No estimated hail/);
+const trace = Array(25).fill(0); trace[12] = 6;
+assert.equal(connectedHailCells(trace, 5, 5, 12, 0, 12.7).size, 1);
+assert.throws(() => connectedHailCells(trace, 5, 5, 6, 0, 12.7), /outside/);
 const width = 9, height = 9, values: (number | null)[] = Array(width * height).fill(0);
 for (let y = 2; y <= 5; y++) for (let x = 2; x <= 5; x++) values[y * width + x] = 30;
 values[3 * width + 3] = 0; // preserve interior hole

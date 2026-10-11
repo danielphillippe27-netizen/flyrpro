@@ -1,5 +1,7 @@
 'use client';
 
+import { StormTerritoryOverlay, useSavedStormTerritory } from '@/components/storm-maps/StormTerritoryOverlay';
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -38,6 +40,7 @@ export function FlyrMapView() {
   const [error, setError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignV2 | null>(null);
+  const { territory: stormTerritory, error: stormTerritoryError } = useSavedStormTerritory(selectedCampaign?.workspace_id ?? currentWorkspaceId, selectedCampaign?.storm_context?.territoryId);
   const [campaignAddresses, setCampaignAddresses] = useState<CampaignAddress[]>([]);
   const [show3DBuildings, setShow3DBuildings] = useState(false);
   const [useFillExtrusion, setUseFillExtrusion] = useState(true);
@@ -528,6 +531,8 @@ export function FlyrMapView() {
         </div>
       )}
       <div ref={mapContainer} className="h-full w-full min-h-[400px]" />
+      {mapLoaded && map.current && <StormTerritoryOverlay map={map.current} territory={stormTerritory} />}
+      {stormTerritoryError && <p role="alert" className="absolute bottom-4 left-4 z-30 rounded-lg bg-background p-2 text-xs text-foreground">Storm territory overlay: {stormTerritoryError}</p>}
       <MapInfoButton show={mapLoaded && !error} />
       {mapLoaded && map.current && !error && useFillExtrusion && (
         <>

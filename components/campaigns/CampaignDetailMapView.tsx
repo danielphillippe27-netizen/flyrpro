@@ -1,5 +1,7 @@
 'use client';
 
+import { StormTerritoryOverlay, useSavedStormTerritory } from '@/components/storm-maps/StormTerritoryOverlay';
+
 import { WorkspaceCoverageSummary, type WorkspaceCoverageSnapshot } from '@/components/campaigns/WorkspaceCoverageSummary';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
@@ -838,6 +840,7 @@ export function CampaignDetailMapView({
   const { preset: mapPreset } = useMapStyle();
   const router = useRouter();
   const { currentWorkspaceId } = useWorkspace();
+  const { territory: stormTerritory, error: stormTerritoryError } = useSavedStormTerritory(campaign?.workspace_id ?? currentWorkspaceId, campaign?.storm_context?.territoryId);
   const { movieMapControlsEnabled } = useMovieMapControlsEnabled(currentWorkspaceId);
   const resolvedMapStyle = useMemo(() => resolveMapStyle(mapPreset, theme, 'v12'), [mapPreset, theme]);
   const mapShellRef = useRef<HTMLDivElement>(null);
@@ -3516,6 +3519,7 @@ export function CampaignDetailMapView({
       ) : useGoogle2D ? (
         <GoogleCampaign2DMap
           key={theme}
+          stormBoundary={stormTerritory?.boundary}
           addresses={mapAddresses}
           boundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
           bbox={campaignBbox}
@@ -3607,6 +3611,8 @@ export function CampaignDetailMapView({
           </div>
         </div>
       ) : null}
+      {map.current && mapLoaded && !useGoogle2D && <StormTerritoryOverlay map={map.current} territory={stormTerritory} />}
+      {stormTerritoryError && <p role="alert" className="absolute bottom-4 left-4 z-30 rounded-lg bg-background p-2 text-xs text-foreground">Storm territory overlay: {stormTerritoryError}</p>}
       {map.current && mapLoaded && (
         <>
           <MapInfoButton

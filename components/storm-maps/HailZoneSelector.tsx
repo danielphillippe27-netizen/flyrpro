@@ -6,8 +6,8 @@ import type { MapboxMapController } from '@xweather/mapsgl';
 import { HAIL_BANDS, bandForHail, connectedHailCells, hailCellsPolygon, hailMillimeters } from '@/lib/storm-maps/intensity/hail-zone';
 
 const SOURCE = 'wolfgrid-hail-zone-preview';
-const FILL = `${SOURCE}-fill`, LINE = `${SOURCE}-line`, LABEL = `${SOURCE}-label`;
-const label = (mm: number) => `${(mm / 25.4).toLocaleString(undefined, { maximumFractionDigits: 1 })}″ / ${mm.toFixed(1)} mm`;
+const FILL = `${SOURCE}-fill`, LINE = `${SOURCE}-line`, LABEL = `${SOURCE}-label`, CASING = `${SOURCE}-casing`;
+const label = (mm: number) => mm === 0 ? 'Trace hail (>0 mm)' : `${(mm / 25.4).toLocaleString(undefined, { maximumFractionDigits: 1 })}″ / ${mm.toFixed(1)} mm`;
 type Zone = { name: string; polygon: GeoJSON.Feature<GeoJSON.Polygon>; minimum: number; maximum: number | null; sampledMM: number; cellMeters: number };
 type Props = { map: mapboxgl.Map; controller: MapboxMapController; windowKey: string; onSelecting?: (active: boolean) => void; onApply: (zone: Zone) => void | Promise<void> };
 
@@ -32,6 +32,7 @@ export function HailZoneSelector({ map, controller, windowKey, onApply, onSelect
   useEffect(() => {
     const clear = () => {
       if (map.getLayer(LABEL)) map.removeLayer(LABEL);
+      if (map.getLayer(CASING)) map.removeLayer(CASING);
       if (map.getLayer(LINE)) map.removeLayer(LINE);
       if (map.getLayer(FILL)) map.removeLayer(FILL);
       if (map.getSource(SOURCE)) map.removeSource(SOURCE);
@@ -41,7 +42,8 @@ export function HailZoneSelector({ map, controller, windowKey, onApply, onSelect
     point.properties = { label: `Hail ${label(zone.minimum)}${zone.maximum == null ? '+' : ` – <${label(zone.maximum)}`}` };
     map.addSource(SOURCE, { type: 'geojson', data: featureCollection<GeoJSON.Geometry>([zone.polygon, point]) });
     map.addLayer({ id: FILL, type: 'fill', source: SOURCE, paint: { 'fill-color': '#22d3ee', 'fill-opacity': 0.12 } });
-    map.addLayer({ id: LINE, type: 'line', source: SOURCE, paint: { 'line-color': '#ffffff', 'line-width': 3, 'line-dasharray': [2, 1] } });
+    map.addLayer({ id: CASING, type: 'line', source: SOURCE, paint: { 'line-color': '#ffffff', 'line-width': 6 } });
+    map.addLayer({ id: LINE, type: 'line', source: SOURCE, paint: { 'line-color': '#111111', 'line-width': 3 } });
     map.addLayer({ id: LABEL, type: 'symbol', source: SOURCE, filter: ['==', '$type', 'Point'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-allow-overlap': true }, paint: { 'text-color': '#ffffff', 'text-halo-color': '#020617', 'text-halo-width': 2 } });
     return clear;
   }, [map, zone]);
@@ -94,7 +96,7 @@ export function HailZoneSelector({ map, controller, windowKey, onApply, onSelect
         const polygon = hailCellsPolygon(cells, size, size, extent);
         setZone({ name, polygon, minimum, maximum, sampledMM: clicked, cellMeters: Math.round(Math.max(dx * 111320 * Math.cos(event.lngLat.lat * Math.PI / 180), dy * 111320)) });
       } catch (reason) {
-        if (valid()) { sequence.current++; setBusy(false); setError(reason instanceof Error ? reason.message : 'Could not select this hail zone.'); }
+        if (valid()) { sequence.current++; setBusy(false); setArmed(true); setError(reason instanceof Error ? reason.message : 'Could not select this hail zone.'); }
       } finally { if (valid()) setBusy(false); }
     };
     map.on('click', select);
@@ -109,7 +111,7 @@ export function HailZoneSelector({ map, controller, windowKey, onApply, onSelect
     {armed && <p role="status" className="text-[10px]">Click inside the hail shading. Separate pockets stay separate.</p>}
     {busy && !zone && <button type="button" onClick={reset} className="text-xs text-cyan-200">Cancel</button>}
     {error && <p role="alert" className="text-[11px] text-amber-200">{error}</p>}
-    {zone && <><p className="text-[11px]">Selected {label(zone.minimum)}{zone.maximum == null ? ' or greater' : ` to under ${label(zone.maximum)}`}.</p><p className="text-[10px] text-slate-400">Clicked estimate: {label(zone.sampledMM)}. Approximate boundary sampled at {zone.cellMeters.toLocaleString()} m spacing. Review its edges before saving the territory.</p><label className="block text-[11px]">Territory name<input aria-label="Storm territory name" value={name} maxLength={160} disabled={busy} onChange={event => setName(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-white/15 bg-slate-900 px-2" /></label><button type="button" disabled={busy || !name.trim()} onClick={async () => { setBusy(true); setError(''); try { await onApply({ ...zone, name: name.trim() }); reset(); } catch (reason) { setBusy(false); setError(reason instanceof Error ? reason.message : 'Could not save territory.'); } }} className="w-full rounded-lg bg-red-500 py-2.5 text-xs font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Save storm territory'}</button><button type="button" disabled={busy} onClick={reset} className="text-xs text-cyan-200">Clear selection</button></>}
+    {zone && <><p className="text-[11px]">Selected {label(zone.minimum)}{zone.maximum == null ? ' or greater' : ` to under ${label(zone.maximum)}`}.</p><p className="text-[10px] text-slate-400">Clicked estimate: {label(zone.sampledMM)}. Approximate boundary sampled at {zone.cellMeters.toLocaleString()} m spacing. Review its edges before saving the territory.</p><label className="block text-[11px]">Territory name<input aria-label="Storm territory name" value={name} maxLength={160} disabled={busy} onChange={event => setName(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-white/15 bg-slate-900 px-2" /></label><button type="button" disabled={busy || !name.trim()} onClick={async () => { setBusy(true); setError(''); try { await onApply({ ...zone, name: name.trim() }); reset(); } catch (reason) { setBusy(false); setError(reason instanceof Error ? reason.message : 'Could not save territory.'); } }} className="w-full rounded-lg bg-red-500 py-2.5 text-xs font-semibold disabled:opacity-50">{busy ? 'Saving…' : 'Create storm territory'}</button><button type="button" disabled={busy} onClick={reset} className="text-xs text-cyan-200">Clear selection</button></>}
     <p className="text-[10px] text-slate-400">Selects one connected area from numerical hail estimates. Save this outline as a territory, then draw smaller campaigns inside it. Estimates do not confirm property damage.</p>
   </div>;
 }

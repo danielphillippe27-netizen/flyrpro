@@ -1,9 +1,14 @@
+import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
 import { stormTerritorySchema } from '@/lib/storm-maps/intelligence/storm-territories';
 export async function GET(request: NextRequest) {
   const c = await stormContext(request); if ('response' in c) return c.response;
-  const { data, error } = await c.admin.from('storm_territories').select('id,name,boundary,context,created_at').eq('workspace_id', c.workspaceId).order('created_at', { ascending: false }).limit(200);
+  const id = request.nextUrl.searchParams.get('id');
+  if (id && !z.uuid().safeParse(id).success) return NextResponse.json({ error: 'Invalid territory ID.' }, { status: 400 });
+  let query = c.admin.from('storm_territories').select('id,name,boundary,context,created_at').eq('workspace_id', c.workspaceId);
+  if (id) query = query.eq('id', id);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(id ? 1 : 200);
   if (error) return NextResponse.json({ error: 'Storm territories are unavailable. The database migration may be pending.' }, { status: 503 });
   return NextResponse.json({ territories: data }, { headers: { 'Cache-Control': 'private, no-store' } });
 }
