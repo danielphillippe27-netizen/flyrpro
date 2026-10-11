@@ -3,7 +3,6 @@ import { useState, type ReactNode, type RefObject } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { CloudSun, CloudLightning, Tornado, Settings2, MapPin, Layers, Bookmark, X, Play, Pause, Maximize, Info, ChevronDown } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
-import { StormLocationSearch } from './StormLocationSearch';
 import { StormWeatherRail } from './StormWeatherRail';
 import { STRONGEST_STORM_SETTINGS, hurricaneViewSettings, type StormGLSettings } from '@/lib/storm-maps/gl-settings';
 type Panel = 'focus' | 'storms' | 'territory' | 'layers' | 'about' | null;
@@ -25,8 +24,7 @@ export function StormWorkbenchView(props: Props) {
       <button type="button" title="About this map" aria-label="About this map" onClick={() => open('about')} className="rounded p-1 text-[#b5c5cb] hover:text-white max-sm:hidden"><Info className="h-5 w-5" /></button>
       <button type="button" title="Map settings" aria-label="Map settings" onClick={props.onSettings} className="rounded p-1 text-[#b5c5cb] hover:text-white"><Settings2 className="h-5 w-5" /></button>
     </header>
-    <StormLocationSearch map={props.map} />
-    <StormWeatherRail compact settings={props.settings} alwaysShowNames={props.alwaysShowNames} onChange={apply} />
+    <StormWeatherRail compact settings={props.settings} alwaysShowNames={false} onChange={apply} />
     <nav aria-label="Storm tools" className="absolute right-4 top-4 z-30 flex w-14 flex-col gap-2 rounded-xl bg-[#0c202c]/95 p-2 text-[#b5c5cb] shadow-xl">{([{ key: 'storms', label: 'Find past storms', icon: MapPin }, { key: 'territory', label: 'Storm territories', icon: Bookmark }, { key: 'layers', label: 'Layer settings', icon: Layers }] as const).map(tool => <button key={tool.key} type="button" aria-label={tool.label} title={tool.label} aria-pressed={panel === tool.key} onClick={() => open(tool.key)} className={`rounded-lg p-2 hover:bg-white/10 ${panel === tool.key ? 'bg-[#a9d7d5]/15 text-[#a9d7d5]' : ''}`}><tool.icon className="h-5 w-5" /></button>)}</nav>
     {panel && <section aria-label={`${panel} panel`} tabIndex={0} className="dark absolute left-4 top-20 z-30 max-h-[calc(100%-12rem)] w-[min(23rem,calc(100%-7rem))] overflow-y-auto rounded-2xl bg-[#0c202c]/95 p-5 text-white shadow-xl max-lg:top-36" style={{ overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold">{{focus:'Weather focus',storms:'Find storms',territory:'Storm territories',layers:'Weather layers',about:'About Storm Maps'}[panel]}</h2><button type="button" aria-label="Close map panel" onClick={() => open(null)} className="rounded-full bg-white/10 p-2"><X className="h-4 w-4" /></button></div>

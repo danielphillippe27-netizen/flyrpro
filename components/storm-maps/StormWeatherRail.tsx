@@ -3,7 +3,7 @@ import { CloudHail, CloudLightning, Tornado, Wind, Radar, Zap, Waves, Thermomete
 import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
 import { hailViewSettings, hurricaneViewSettings } from '@/lib/storm-maps/gl-settings';
 type Props = { settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; alwaysShowNames?: boolean; onSettings?: () => void; compact?: boolean };
-export function StormWeatherRail({ settings, onChange, alwaysShowNames = true }: Props) {
+export function StormWeatherRail({ settings, onChange, alwaysShowNames = false }: Props) {
   const shade = (id: StormGLSettings['shade']) => ({ ...settings, shade: settings.shade === id ? 'none' as const : id, inspector: true });
   const layers = [
     { label: 'Radar', icon: Radar, gradient: 'linear-gradient(130deg,#0e4422,#65bb16,#ffdc00,#eb1717)', detail: 'Precipitation radar; model precipitation in forecast mode.', active: settings.radar, apply: () => ({ ...settings, radar: !settings.radar }) },
@@ -22,7 +22,7 @@ export function StormWeatherRail({ settings, onChange, alwaysShowNames = true }:
   return <aside aria-label="Weather layers" className="absolute right-4 top-44 z-30 max-h-[calc(100%-17rem)] w-44 overflow-y-auto pr-1 text-white [scrollbar-width:none] max-sm:w-36">
     <div className="mb-2 flex justify-end gap-1">{(['live','history'] as const).map(mode => <button key={mode} type="button" aria-pressed={settings.mode === mode} onClick={() => onChange({ ...settings, mode, ...(mode === 'live' && settings.shade.startsWith('hail-') ? { shade: 'none', hail: true } : {}) })} className={`rounded-full px-3 py-1.5 text-[10px] ${settings.mode === mode ? 'bg-[#a9d7d5] text-[#0c202c]' : 'bg-[#0c202c]/90'}`}>{mode === 'live' ? 'Live map' : 'Past map'}</button>)}</div>
     <div className="space-y-2">{layers.map(layer => <button key={layer.label} type="button" aria-label={layer.label} title={layer.detail} aria-pressed={layer.active} onClick={() => onChange({ ...layer.apply(), inspector: true })} className="group flex w-full items-center justify-end gap-2 rounded-lg focus-visible:outline focus-visible:outline-[#a9d7d5]">
-      <span className={`rounded-full bg-[#172c38]/90 px-3 py-1.5 text-[11px] transition-opacity ${alwaysShowNames ? '' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}>{layer.label}</span>
+      <span className={`rounded-full bg-[#172c38]/90 px-3 py-1.5 text-[11px] transition-all duration-200 ${alwaysShowNames ? '' : 'translate-x-3 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100'}`}>{layer.label}</span>
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 shadow-lg ${layer.active ? 'border-[#a9d7d5]' : 'border-[#142d3b]'}`} style={{ background: layer.gradient }}><layer.icon aria-hidden="true" className="h-5 w-5 text-white drop-shadow-md" /></span>
     </button>)}</div>
   </aside>;
