@@ -323,6 +323,7 @@ function StormWorkbench(props: Props) {
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
     <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={active => setTab(active ? 'intelligence' : 'overview')} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+      renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() })} /> : null}
       renderArchive={() => workspaceId ? <StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={() => <>
