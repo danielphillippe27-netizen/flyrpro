@@ -1,5 +1,7 @@
 'use client';
 
+import { useStormPanelScroll } from './useStormPanelScroll';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import {
@@ -105,6 +107,7 @@ export function StormMapsRasterControl({
   mapLoaded: boolean;
   workspaceId: string | null;
 }) {
+  const panelScrollRef = useStormPanelScroll();
   const initialPreferences = useMemo(loadPreferences, []);
   const [entitled, setEntitled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -384,8 +387,10 @@ export function StormMapsRasterControl({
 
       {open ? (
         <section
+          ref={panelScrollRef}
           id="storm-maps-panel"
           aria-label="Storm Beta controls"
+          style={{ overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           className="absolute bottom-3 left-3 right-3 z-30 max-h-[min(76vh,44rem)] overflow-y-auto rounded-3xl border border-white/20 bg-slate-950/92 p-4 text-white shadow-2xl shadow-slate-950/40 backdrop-blur-2xl sm:bottom-auto sm:left-5 sm:right-auto sm:top-20 sm:w-[24rem]"
         >
           <div className="mb-4 flex items-start justify-between gap-3">

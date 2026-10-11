@@ -1,5 +1,7 @@
 'use client';
 
+import { useStormPanelScroll } from './useStormPanelScroll';
+
 import { HailZoneSelector } from './HailZoneSelector';
 import { SavedStormTerritories } from './SavedStormTerritories';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
@@ -26,6 +28,7 @@ const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric',
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
 export function StormMapsControl(props: Props) {
+  const panelScrollRef = useStormPanelScroll();
   const { map, mapLoaded, workspaceId, territories } = props;
   const { settings, setSettings } = useStormGLSettings(workspaceId);
   const [entitled, setEntitled] = useState(false);
@@ -291,7 +294,7 @@ export function StormMapsControl(props: Props) {
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
-      <section id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} onWheel={event => event.stopPropagation()} onTouchMove={event => event.stopPropagation()} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
+      <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find past storms. Plan your next campaign.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
         {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onCampaign={props.onStormCampaign ? (context) => { props.onStormCampaign?.(context); setPanel(false); } : undefined} /></div>}
