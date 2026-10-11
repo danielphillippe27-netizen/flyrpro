@@ -25,7 +25,11 @@ export default function StormsPage() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let value = DEFAULT_STORM_DISPLAY;
-    try { value = readStormDisplay(JSON.parse(localStorage.getItem(`wolfgrid:storm-display:v2:${currentWorkspaceId}`) || 'null')); } catch { /* optional storage */ }
+    try {
+      const saved = localStorage.getItem(`wolfgrid:storm-display:v2:${currentWorkspaceId}`);
+      const previous = localStorage.getItem(`wolfgrid:storm-display:${currentWorkspaceId}`);
+      value = saved ? readStormDisplay(JSON.parse(saved)) : { ...readStormDisplay(previous ? JSON.parse(previous) : null), projection: 'globe' };
+    } catch { /* optional storage */ }
     setPreferences({ workspace: currentWorkspaceId, value });
   }, [currentWorkspaceId]);
   const saveDisplay = (value: StormDisplaySettings) => {
