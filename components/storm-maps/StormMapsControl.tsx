@@ -168,11 +168,11 @@ function StormWorkbench(props: Props) {
           legendRef.current.replaceChildren();
           controller.addLegendControl(legendRef.current, { width: 274 });
         }
-        setReady(true);
+        setReady(true); setLoading(false);
       });
       controller.on('load:start', () => { if (!disposed) setLoading(true); });
       controller.on('load:complete', () => { if (!disposed) setLoading(false); });
-      controller.on('error', () => { if (!disposed) setError('Some weather data could not load. Reopen Storm to retry.'); });
+      controller.on('error', () => { if (!disposed) { setError('Some weather data could not load. Reopen Storm to retry.'); setLoading(false); } });
     }).catch(() => { if (!disposed) { setError('The weather renderer could not start.'); setLoading(false); } });
     return () => {
       disposed = true; controllerRef.current = null; sessionLayers.clear();
@@ -232,9 +232,10 @@ function StormWorkbench(props: Props) {
         if (!visible && !activeIds.current.has(id)) continue;
         if (!activeIds.current.has(id)) {
           if (!controller.weatherProvider.isWeatherLayer(id)) { errors.push(id); continue; }
-          const config = controller.weatherProvider.getWeatherLayerConfig(id);
+          const config = controller.weatherProvider.getWeatherLayerConfig(id, { timeline: controller.timeline });
           // The SDK hardcodes the raster metadata host; keep it behind our session proxy.
           if (id === 'satellite-infrared-color' && config && !Array.isArray(config)) {
+            config.id = id;
             config.source = { ...config.source, metadataUrl: `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}/maps/wolfgrid_session/satellite-infrared-color.json` };
           }
           controller.addWeatherLayer(id === 'satellite-infrared-color' && config && !Array.isArray(config) ? config : id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(!props.standalone && id.endsWith('wind-particles') ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'satellite-infrared-color' || id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
