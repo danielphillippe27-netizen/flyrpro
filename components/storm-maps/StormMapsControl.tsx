@@ -4,6 +4,7 @@ import { useStormPanelScroll } from './useStormPanelScroll';
 
 import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
+import type { StormDisplaySettings } from '@/lib/storm-maps/display-settings';
 import Link from 'next/link';
 import { StormOverlayPicker } from './StormOverlayPicker';
 import { StormWeatherRail } from './StormWeatherRail';
@@ -27,7 +28,7 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { standalone?: boolean; map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
+type Props = { displaySettings?: StormDisplaySettings; onDisplaySettings?: () => void; standalone?: boolean; map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
@@ -114,9 +115,10 @@ function StormWorkbench(props: Props) {
     const abort = new AbortController();
     const load = () => { void refresh(abort.signal).catch((e) => { if (!abort.signal.aborted) setError(e.message); }); };
     load();
-    const interval = window.setInterval(load, 10 * 60_000);
+    const minutes = props.displaySettings?.autoUpdateMinutes ?? 10;
+    const interval = minutes ? window.setInterval(() => { load(); setRevision(value => value + 1); setTerritoryWindowEnd(new Date()); }, minutes * 60_000) : undefined;
     return () => { abort.abort(); window.clearInterval(interval); };
-  }, [open, refresh]);
+  }, [open, refresh, props.displaySettings?.autoUpdateMinutes]);
 
   useEffect(() => {
     if (!map) return;
@@ -134,7 +136,7 @@ function StormWorkbench(props: Props) {
     const sessionLayers = new Set<string>();
     activeIds.current = sessionLayers;
     const projection = map.getProjection();
-    if (projection.name !== 'mercator') map.setProjection('mercator');
+    if (!props.standalone && projection.name !== 'mercator') map.setProjection('mercator');
     void import('@xweather/mapsgl').then(async (sdk) => {
       // MapsGL waits for Mapbox's first load when its style is busy. That event
       // has already fired on this map, so wait for the current style ourselves.
@@ -170,9 +172,9 @@ function StormWorkbench(props: Props) {
     return () => {
       disposed = true; controllerRef.current = null; sessionLayers.clear();
       controller?.dispose();
-      try { map.setProjection(projection); } catch { /* map already removed */ }
+      try { if (!props.standalone) map.setProjection(projection); } catch { /* map already removed */ }
     };
-  }, [open, map, mapLoaded, workspaceId, glEnabled, revision]);
+  }, [open, map, mapLoaded, workspaceId, glEnabled, revision, props.standalone]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -188,8 +190,9 @@ function StormWorkbench(props: Props) {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
     controller.timeline.duration = settings.speed;
-    controller.setUnitsForSystem(settings.units);
-  }, [ready, settings.speed, settings.units]);
+    if (props.displaySettings) controller.setUnits(props.displaySettings.customUnits);
+    else controller.setUnitsForSystem(settings.units);
+  }, [ready, settings.speed, settings.units, props.displaySettings]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -280,9 +283,9 @@ function StormWorkbench(props: Props) {
     };
     const moved = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 400); };
     void load(); map.on('moveend', moved);
-    const interval = window.setInterval(() => void load(), 5 * 60_000);
+    const minutes = props.displaySettings?.autoUpdateMinutes ?? 5; const interval = minutes ? window.setInterval(() => void load(), minutes * 60_000) : undefined;
     return () => { abort.abort(); window.clearInterval(interval); window.clearTimeout(timer); map.off('moveend', moved); cleanup?.(); try { removeStormFeatures(map); } catch { /* map removed */ } };
-  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView]);
+  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView, props.displaySettings?.autoUpdateMinutes]);
 
   const togglePlayback = () => {
     const timeline = controllerRef.current?.timeline;
@@ -321,7 +324,7 @@ function StormWorkbench(props: Props) {
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
-      {props.standalone && <StormWeatherRail settings={settings} onChange={value => { setSettings(value); setTab('overview'); setPanel(true); }} />}
+      {props.standalone && <StormWeatherRail alwaysShowNames={props.displaySettings?.alwaysShowNames} onSettings={props.onDisplaySettings} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); setPanel(true); }} />}
       <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find storms. Save a storm territory.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>

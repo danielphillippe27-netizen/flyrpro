@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { readStormDisplay, DEFAULT_STORM_DISPLAY, IMPERIAL_UNITS } from '../display-settings';
+assert.deepEqual(readStormDisplay(null), DEFAULT_STORM_DISPLAY);
+const custom = readStormDisplay({ projection: 'globe', baseMap: 'light', unitSystem: 'custom', customUnits: { speed: 'kts', pressure: 'mb', intensity: 'in/hr', temperature: 'invalid' }, autoUpdateMinutes: 0, autoHideControls: true });
+assert.equal(custom.projection, 'globe'); assert.equal(custom.customUnits.speed, 'kts'); assert.equal(custom.customUnits.temperature, 'C'); assert.equal(custom.customUnits.intensity, 'in/hr'); assert.equal(custom.autoUpdateMinutes, 0);
+assert.deepEqual(readStormDisplay({ unitSystem: 'imperial', customUnits: { speed: 'km/h' } }).customUnits, IMPERIAL_UNITS);
+assert.equal(readStormDisplay({ autoUpdateMinutes: 1, projection: 'invalid' }).autoUpdateMinutes, 10);
+assert.equal(readStormDisplay({ autoUpdateMinutes: null }).autoUpdateMinutes, 10);
+assert.notEqual(readStormDisplay(null).customUnits, DEFAULT_STORM_DISPLAY.customUnits);
+console.log('Display settings: defaults, independent units, presets, persisted Off and invalid preference recovery passed');
