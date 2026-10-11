@@ -1,12 +1,13 @@
 'use client';
+import { StormTerritoryAddressCount } from './StormTerritoryAddressCount';
 import { useEffect, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { stormTerritorySchema } from '@/lib/storm-maps/intelligence/storm-territories';
 import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 
-type Props = { map: mapboxgl.Map; context: StormCampaignContext; onSave: (name: string, boundary: GeoJSON.Polygon, context: StormCampaignContext) => Promise<void>; onSelecting: (selecting: boolean) => void };
+type Props = { map: mapboxgl.Map; workspaceId?: string; context: StormCampaignContext; onSave: (name: string, boundary: GeoJSON.Polygon, context: StormCampaignContext) => Promise<void>; onSelecting: (selecting: boolean) => void };
 const SOURCE = 'wolfgrid-storm-territory-sketch';
-export function StormTerritorySketch({ map, context, onSave, onSelecting }: Props) {
+export function StormTerritorySketch({ map, workspaceId, context, onSave, onSelecting }: Props) {
   const [drawing, setDrawing] = useState(false), [points, setPoints] = useState<number[][]>([]);
   const [name, setName] = useState(`${context.event.title} territory`.slice(0, 160)), [busy, setBusy] = useState(false), [error, setError] = useState('');
   useEffect(() => { onSelecting(drawing); return () => onSelecting(false); }, [drawing, onSelecting]);
@@ -51,6 +52,7 @@ export function StormTerritorySketch({ map, context, onSave, onSelecting }: Prop
     <button type="button" disabled={busy} onClick={() => setDrawing(value => !value)} className="w-full rounded-lg border border-cyan-300/40 py-2 text-xs text-cyan-200">{drawing ? 'Pause drawing' : points.length ? 'Continue drawing' : 'Draw territory on the map'}</button>
     {drawing && <p role="status" className="text-[10px]">Click each corner of the territory. {points.length} points placed.</p>}
     {points.length > 0 && <button type="button" disabled={busy} onClick={() => setPoints(value => value.slice(0, -1))} className="text-[11px] text-cyan-200">Undo last point</button>}
+    {workspaceId && points.length >= 3 && <StormTerritoryAddressCount workspaceId={workspaceId} boundary={{ type: 'Polygon', coordinates: [[...points, points[0]]] }} />}
     <button type="button" disabled={busy || points.length < 3 || !name.trim()} onClick={save} className="w-full rounded-lg bg-red-500 py-2.5 text-xs font-semibold disabled:opacity-40">{busy ? 'Saving…' : 'Create storm territory'}</button>
     {points.length > 0 && <button type="button" disabled={busy} onClick={() => { setDrawing(false); setPoints([]); }} className="text-[11px] text-cyan-200">Clear territory</button>}
     {error && <p role="alert" className="text-[11px] text-amber-200">{error}</p>}

@@ -1,4 +1,5 @@
 'use client';
+import { StormTerritoryAddressCount } from './StormTerritoryAddressCount';
 import { StormTerritoryOverlay } from './StormTerritoryOverlay';
 import { useEffect, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
@@ -23,6 +24,6 @@ export function SavedStormTerritories({ map, workspaceId, revision, active, onSe
     {error && <p role="alert" className="text-[11px] text-amber-200">{error}</p>}
     {!loading && !error && !territories.length && <p className="text-[11px] text-slate-400">Select a hail intensity zone and save its boundary here.</p>}
     {territories.map(territory => <button key={territory.id} type="button" aria-pressed={active?.id === territory.id} onClick={() => select(territory)} className={`w-full rounded-lg border p-2 text-left text-xs ${active?.id === territory.id ? 'border-cyan-300' : 'border-white/15'}`}><p className="font-semibold">{territory.name}</p><p className="mt-1 text-[10px] text-slate-400">{territory.context.event.start.slice(0,10)} · {territory.context.minimumHailMM == null ? 'Storm inspection area' : `${territory.context.minimumHailMM === 0 ? '>0' : territory.context.minimumHailMM.toFixed(1)} mm${territory.context.maximumHailMM == null ? '+' : `–${territory.context.maximumHailMM.toFixed(1)} mm`}`}</p></button>)}
-    {active && <div className="space-y-2 border-t border-white/10 pt-3"><p className="text-xs font-semibold">{active.name}</p><p className="text-[10px] text-slate-400">Black outline: saved storm territory. Draw a smaller campaign inside it. Reopen this territory to create more campaigns.</p><button type="button" onClick={() => onCampaign(active)} className="w-full rounded-lg bg-red-500 py-2 text-xs font-semibold">Draw campaign inside territory</button><button type="button" onClick={() => onSelect(null)} className="text-[11px] text-cyan-200">Hide territory</button></div>}
+    {active && <div className="space-y-2 border-t border-white/10 pt-3"><StormTerritoryAddressCount workspaceId={workspaceId} boundary={active.boundary} /><p className="text-xs font-semibold">{active.name}</p><p className="text-[10px] text-slate-400">Black outline: saved storm territory. Draw a smaller campaign inside it. Reopen this territory to create more campaigns.</p><button type="button" onClick={() => onCampaign(active)} className="w-full rounded-lg bg-red-500 py-2 text-xs font-semibold">Draw campaign inside territory</button><button type="button" onClick={() => onSelect(null)} className="text-[11px] text-cyan-200">Hide territory</button></div>}
   </div></details></>;
 }

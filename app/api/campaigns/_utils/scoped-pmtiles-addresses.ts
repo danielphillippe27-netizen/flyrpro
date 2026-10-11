@@ -293,6 +293,9 @@ export async function fetchScopedPmtilesAddresses(options: {
   promoteId?: string | null;
   minZoom?: number | null;
   maxZoom?: number | null;
+  exactZoom?: number;
+  preferredZoom?: number;
+  signal?: AbortSignal;
   addressLimit?: number;
   normalizeFeature: (input: ScopedAddressNormalizerInput) => StandardCampaignAddress | null;
 }): Promise<ScopedAddressResult> {
@@ -324,9 +327,11 @@ export async function fetchScopedPmtilesAddresses(options: {
   const headerStartedAt = performance.now();
   const header = await archive.getHeader();
   const headerMs = elapsedMs(headerStartedAt);
+  if (options.exactZoom != null && (options.exactZoom < header.minZoom || options.exactZoom > header.maxZoom)) throw new Error('Address tiles do not support the requested zoom.');
+  const preferredZoom = options.preferredZoom == null ? undefined : Math.max(header.minZoom, Math.min(header.maxZoom, options.preferredZoom));
   const rangeStartedAt = performance.now();
-  const maxZoom = Math.min(header.maxZoom, options.maxZoom ?? numberMetric(options.snapshot.tile_metrics, 'address_maxzoom') ?? header.maxZoom);
-  const minZoom = options.minZoom ?? numberMetric(options.snapshot.tile_metrics, 'address_minzoom') ?? header.minZoom;
+  const maxZoom = Math.min(header.maxZoom, options.exactZoom ?? preferredZoom ?? options.maxZoom ?? numberMetric(options.snapshot.tile_metrics, 'address_maxzoom') ?? header.maxZoom);
+  const minZoom = options.exactZoom ?? preferredZoom ?? options.minZoom ?? numberMetric(options.snapshot.tile_metrics, 'address_minzoom') ?? header.minZoom;
   const range = tileRangeForAddressBbox(options.bbox, maxZoom, minZoom);
   const rangeMs = elapsedMs(rangeStartedAt);
   if (!range) {
@@ -344,7 +349,8 @@ export async function fetchScopedPmtilesAddresses(options: {
   let layerHits = 0;
 
   await forEachWithConcurrency(tileCoords, ADDRESS_TILE_FETCH_CONCURRENCY, async ({ x, y, tileIndex }) => {
-    const tile = await archive.getZxy(range.z, x, y);
+    options.signal?.throwIfAborted();
+    const tile = await archive.getZxy(range.z, x, y, options.signal);
     if (!tile) return;
     touchedTiles += 1;
 
@@ -358,7 +364,15 @@ export async function fetchScopedPmtilesAddresses(options: {
     for (const { layer, layerIndex } of layers) {
       for (let index = 0; index < layer.length; index += 1) {
         scanned += 1;
-        const feature = layer.feature(index).toGeoJSON(x, y, range.z) as GeoJSON.Feature;
+        const raw = layer.feature(index);
+        if (options.preferredZoom != null) {
+          // Counting needs only the small boundary: skip exact-coordinate pins
+          // outside it before decoding their quantized tile geometry.
+          const exact = addressSourcePoint(raw.properties, [NaN, NaN]);
+          if (Number.isFinite(exact[0]) && (exact[0] < options.bbox[0] || exact[0] > options.bbox[2] || exact[1] < options.bbox[1] || exact[1] > options.bbox[3])) continue;
+          if (index % 1000 === 0) options.signal?.throwIfAborted();
+        }
+        const feature = raw.toGeoJSON(x, y, range.z) as GeoJSON.Feature;
         const point = firstPoint(feature.geometry as GeoJSON.Geometry | null | undefined);
         if (!point) continue;
         const [lon, lat] = addressSourcePoint(feature.properties, point);
@@ -414,6 +428,7 @@ export async function fetchScopedPmtilesAddresses(options: {
       partitioning: 'web_mercator_xyz',
       tilePadding: 0,
       timings: {
+        queryZoom: range.z,
         artifactMs,
         headerMs,
         rangeMs,
