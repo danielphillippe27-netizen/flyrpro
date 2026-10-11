@@ -40,3 +40,10 @@ Focused ESLint and changed-file type diagnostics must pass. Whole-project typech
 Database migrations use RLS plus revoked anonymous/authenticated table grants; all browser access goes through workspace-checked server routes. Migration tests use rollback-only writes and verify request 301 is rejected after a daily allowance of 300.
 
 Deploy only the storm-scoped commit; this checkout contains unrelated map/address changes. Browser verification must prove historical search, event selection, save/reopen, campaign linkage and session refresh. Preserve the user's existing campaign data during checks.
+
+### Production verification, October 10, 2026
+
+- Signed-in production retrieved Hurricane Milton (2024), rendered its centre track, saved a workspace reference and reopened it from Saved.
+- Draw campaign handed off the selected storm with a visible provenance banner. No test campaign or invented damage inspection was created; persisted campaign linkage still needs a real campaign verification.
+- Switching back to live overview rendered radar, storm tracks and wind particles through the session endpoint. Ten-minute token rotation and device performance are not yet benchmarked.
+- Database migration checks passed using rollback-only writes. Focused lint and storm tests passed; unrelated existing whole-project type errors remain.
