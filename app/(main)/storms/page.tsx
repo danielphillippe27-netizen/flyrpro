@@ -25,13 +25,13 @@ export default function StormsPage() {
   useEffect(() => {
     if (!currentWorkspaceId) return;
     let value = DEFAULT_STORM_DISPLAY;
-    try { value = readStormDisplay(JSON.parse(localStorage.getItem(`wolfgrid:storm-display:${currentWorkspaceId}`) || 'null')); } catch { /* optional storage */ }
+    try { value = readStormDisplay(JSON.parse(localStorage.getItem(`wolfgrid:storm-display:v2:${currentWorkspaceId}`) || 'null')); } catch { /* optional storage */ }
     setPreferences({ workspace: currentWorkspaceId, value });
   }, [currentWorkspaceId]);
   const saveDisplay = (value: StormDisplaySettings) => {
     if (!currentWorkspaceId) return;
     setPreferences({ workspace: currentWorkspaceId, value });
-    try { localStorage.setItem(`wolfgrid:storm-display:${currentWorkspaceId}`, JSON.stringify(value)); } catch { /* optional storage */ }
+    try { localStorage.setItem(`wolfgrid:storm-display:v2:${currentWorkspaceId}`, JSON.stringify(value)); } catch { /* optional storage */ }
   };
   useEffect(() => {
     if (!map || !loaded) return;
@@ -57,7 +57,7 @@ export default function StormsPage() {
   useEffect(() => {
     if (!container.current) return;
     mapboxgl.accessToken = getMapboxToken();
-    const instance = new mapboxgl.Map({ container: container.current, style: 'mapbox://styles/mapbox/dark-v11', center: [-85, 39], zoom: 4, projection: 'mercator' });
+    const instance = new mapboxgl.Map({ container: container.current, style: 'mapbox://styles/mapbox/dark-v11', center: [-85, 39], zoom: 2.3, projection: 'globe' });
     instance.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
     instance.addControl(new mapboxgl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'bottom-right');
     setMap(instance);
