@@ -12,7 +12,7 @@ import { StormMapsRasterControl } from './StormMapsRasterControl';
 import { StormGLSettingsPanel } from './StormGLSettingsPanel';
 import { useStormGLSettings } from './useStormGLSettings';
 import { bindStormFeaturePopups, upsertStormFeatures, removeStormFeatures, ensureStormDrawCasing } from '@/lib/storm-maps/map-layers';
-import { STORM_LAYER_GROUPS, WEATHER_SHADES, STRONGEST_STORM_SETTINGS, stormTimeRange, hailViewSettings, isHistoricalHailShade } from '@/lib/storm-maps/gl-settings';
+import { STORM_LAYER_GROUPS, WEATHER_SHADES, STRONGEST_STORM_SETTINGS, stormTimeRange, hurricaneViewSettings, stormLayerForMode, hailViewSettings, isHistoricalHailShade } from '@/lib/storm-maps/gl-settings';
 import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
@@ -111,6 +111,7 @@ export function StormMapsControl(props: Props) {
       const account = new sdk.Account('wolfgrid', 'session');
       const server = `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}`;
       account.servers.mapsgl = server;
+      account.servers.api = `${server}/api`;
       account.servers.maps = `${server}/maps`;
       const beforeId = map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id;
       controller = new sdk.MapboxMapController(map, {
@@ -169,10 +170,10 @@ export function StormMapsControl(props: Props) {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
     const wanted = new Map<string, number>();
-    if (settings.shade !== 'none' && (!isHistoricalHailShade(settings.shade) || settings.mode === 'history')) wanted.set(settings.shade, settings.opacity / 100);
+    if (settings.shade !== 'none' && (settings.shade !== 'satellite-infrared-color' || settings.mode !== 'forecast') && (!isHistoricalHailShade(settings.shade) || settings.mode === 'history')) wanted.set(settings.shade, settings.opacity / 100);
     for (const group of STORM_LAYER_GROUPS) {
       if (!settings[group.key]) continue;
-      for (const layer of group.ids) wanted.set(layer === 'radar' && settings.mode === 'forecast' ? 'gfs-radar' : layer, group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
+      for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
     if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); }
@@ -188,7 +189,12 @@ export function StormMapsControl(props: Props) {
         if (!visible && !activeIds.current.has(id)) continue;
         if (!activeIds.current.has(id)) {
           if (!controller.weatherProvider.isWeatherLayer(id)) { errors.push(id); continue; }
-          controller.addWeatherLayer(id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(id === 'wind-particles' ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
+          const config = controller.weatherProvider.getWeatherLayerConfig(id);
+          // The SDK hardcodes the raster metadata host; keep it behind our session proxy.
+          if (id === 'satellite-infrared-color' && config && !Array.isArray(config)) {
+            config.source = { ...config.source, metadataUrl: `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}/maps/wolfgrid_session/satellite-infrared-color.json` };
+          }
+          controller.addWeatherLayer(id === 'satellite-infrared-color' && config && !Array.isArray(config) ? config : id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(id.endsWith('wind-particles') ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'satellite-infrared-color' || id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
           activeIds.current.add(id);
         } else {
           const layers = controller.getWeatherLayer(id);
@@ -199,7 +205,7 @@ export function StormMapsControl(props: Props) {
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent]);
+  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, workspaceId]);
 
   useEffect(() => {
     if (!ready) return;
@@ -287,6 +293,7 @@ export function StormMapsControl(props: Props) {
         <div hidden={tab !== 'overview'} className="mt-4 space-y-4">
           <p className={`rounded-lg border p-2 text-[11px] ${settings.mode === 'history' ? 'border-violet-300/30 text-violet-200' : 'border-amber-300/30 text-amber-200'}`}>{settings.mode === 'history' ? 'PAST · Hail-size shading shows historical estimates. Threat tracks are archived predictions.' : settings.mode === 'forecast' ? 'FORECAST · Predicted weather and threat areas.' : 'LIVE · Current weather with short-range forecast threats.'}</p>
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setSettings({ ...STRONGEST_STORM_SETTINGS })} className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 py-2 text-xs font-semibold text-cyan-200">Strongest preset</button><button type="button" onClick={() => setSettings({ ...settings, shade: 'none', mode: 'live', radar: true })} className="rounded-xl border border-white/15 py-2 text-xs hover:bg-white/10">Radar focus</button></div>
+          <div className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 p-3"><p className="text-xs font-semibold text-cyan-200">Hurricane maps</p><div className="mt-2 grid grid-cols-2 gap-2">{(['satellite', 'forecast'] as const).map((view) => <button key={view} type="button" onClick={() => setSettings(hurricaneViewSettings(settings, view))} className="rounded-lg border border-white/15 py-2 text-[11px] hover:bg-white/10">Hurricane {view}</button>)}</div><p className="mt-2 text-[10px] leading-relaxed text-slate-400">Satellite shows observed cloud-top temperatures over the past 6 hours. Forecast shows GFS precipitation, wind and pressure lines. Tracks and cones come from published cyclone advisories; the cone describes uncertainty in the storm centre.</p></div>
           <div className="rounded-xl border border-violet-300/20 bg-violet-300/5 p-3"><p className="text-xs font-semibold text-violet-200">Hail intelligence</p><div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={() => setSettings(hailViewSettings(settings, 'live'))} className="rounded-lg border border-white/15 py-2 text-[11px] hover:bg-white/10">Live hail tracks</button><button type="button" onClick={() => setSettings(hailViewSettings(settings, 'history'))} className="rounded-lg border border-white/15 py-2 text-[11px] hover:bg-white/10">Past 24h hail size</button></div><p className="mt-2 text-[10px] leading-relaxed text-slate-400">Live threat areas and tracks include Canada; predictions extend up to 60 minutes. Hail-size maps cover the U.S., Europe, Japan and Australia. Map data does not confirm property damage.</p></div>
           <div className="grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['live', 'history', 'forecast'] as const).map((mode) => <button key={mode} type="button" onClick={() => setSettings({ ...settings, mode })} aria-pressed={settings.mode === mode} className={`rounded-lg py-2 text-xs capitalize ${settings.mode === mode ? 'bg-white/15 font-semibold' : 'text-slate-400'}`}>{mode === 'history' ? 'Past' : mode}</button>)}</div>
           <div><p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Storm intelligence</p><div className="mt-2 flex flex-wrap gap-1.5">{toggled.map((group) => <span key={group.key} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px]">{group.title}</span>)}{settings.alerts && <span className="rounded-md border border-amber-300/20 bg-amber-300/10 px-2 py-1 text-[10px] text-amber-200">Official alerts</span>}{settings.outlook && <span className="rounded-md border border-violet-300/20 bg-violet-300/10 px-2 py-1 text-[10px] text-violet-200">Canadian outlook</span>}{settings.reports && <span className="rounded-md border border-white/10 px-2 py-1 text-[10px]">U.S. reports</span>}</div></div>

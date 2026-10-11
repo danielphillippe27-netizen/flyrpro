@@ -23,6 +23,7 @@ async function proxy(request: NextRequest, context: Context) {
   const isAuth = destination.kind === 'auth';
   const isImage = destination.kind === 'image';
   const isMaps = destination.kind === 'maps';
+  const isApi = destination.kind === 'api';
   const headers: Record<string, string> = {};
   if (isAuth) {
     const id = process.env.XWEATHER_CLIENT_ID;
@@ -30,7 +31,7 @@ async function proxy(request: NextRequest, context: Context) {
     if (!id || !secret) return NextResponse.json({ error: 'MapsGL credentials are not configured' }, { status: 503 });
     headers.Authorization = `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`;
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
-  } else if (!isMaps) {
+  } else if (!isMaps && !isApi) {
     const authorization = request.headers.get('authorization');
     if (!authorization?.startsWith('Bearer ')) return NextResponse.json({ error: 'Weather session required' }, { status: 401 });
     headers.Authorization = authorization;
@@ -38,11 +39,22 @@ async function proxy(request: NextRequest, context: Context) {
   }
   try {
     const mapsKey = `${process.env.XWEATHER_CLIENT_ID}_${process.env.XWEATHER_CLIENT_SECRET}`;
-    if (isMaps && (!process.env.XWEATHER_CLIENT_ID || !process.env.XWEATHER_CLIENT_SECRET)) return NextResponse.json({ error: 'Weather credentials are not configured' }, { status: 503 });
+    if ((isMaps || isApi) && (!process.env.XWEATHER_CLIENT_ID || !process.env.XWEATHER_CLIENT_SECRET)) return NextResponse.json({ error: 'Weather credentials are not configured' }, { status: 503 });
     const url = isMaps
       ? new URL(`/${mapsKey}/${destination.upstream}`, 'https://maps.aerisapi.com')
-      : new URL(`/${destination.upstream}`, ORIGIN);
+      : new URL(`/${destination.upstream}`, isApi ? 'https://data.api.xweather.com' : ORIGIN);
     url.search = request.nextUrl.search;
+    if (isApi) {
+      url.search = '';
+      url.searchParams.set('client_id', process.env.XWEATHER_CLIENT_ID!);
+      url.searchParams.set('client_secret', process.env.XWEATHER_CLIENT_SECRET!);
+      url.searchParams.set('filter', 'active,dateline');
+      url.searchParams.set('limit', '1000');
+      for (const key of ['from', 'to']) {
+        const value = request.nextUrl.searchParams.get(key);
+        if (value && /^[\dT:Z.+-]+$/.test(value)) url.searchParams.set(key, value);
+      }
+    }
     const upstream = await fetch(url, {
       method: request.method, headers,
       body: isAuth ? 'grant_type=client_credentials' : isImage ? await request.text() : undefined,

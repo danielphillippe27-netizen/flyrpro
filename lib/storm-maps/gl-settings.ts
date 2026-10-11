@@ -2,6 +2,7 @@ export const WEATHER_SHADES = [
   { id: 'hail-size', label: 'Hourly hail size', unit: 'mm / in' },
   { id: 'hail-size-max', label: 'Maximum hail size over history', unit: 'mm / in' },
   { id: 'hail-severe-probability-max', label: 'Maximum severe hail probability', unit: '%' },
+  { id: 'satellite-infrared-color', label: 'Hurricane satellite (infrared)', unit: 'Cloud-top temperature' },
   { id: 'temperatures', label: 'Temperature', unit: '°C / °F' },
   { id: 'wind-speeds', label: 'Wind speed', unit: 'km/h / mph' },
   { id: 'wind-gusts', label: 'Wind gusts', unit: 'km/h / mph' },
@@ -14,18 +15,20 @@ export const WEATHER_SHADES = [
 ] as const;
 export type WeatherShade = typeof WEATHER_SHADES[number]['id'];
 export type WeatherMode = 'live' | 'history' | 'forecast';
-export type WeatherToggle = 'wind' | 'radar' | 'lightning' | 'lightningThreats' | 'hail' | 'cells' | 'stormCones' | 'alerts' | 'outlook' | 'reports' | 'inspector' | 'impact';
+export type WeatherToggle = 'cyclones' | 'pressure' | 'wind' | 'radar' | 'lightning' | 'lightningThreats' | 'hail' | 'cells' | 'stormCones' | 'alerts' | 'outlook' | 'reports' | 'inspector' | 'impact';
 export type StormGLSettings = Record<WeatherToggle, boolean> & {
   shade: WeatherShade; mode: WeatherMode; opacity: number; radarOpacity: number;
   speed: number; historyHours: number; units: 'metric' | 'imperial';
 };
 export const STRONGEST_STORM_SETTINGS: StormGLSettings = {
   shade: 'none', mode: 'live', opacity: 75, radarOpacity: 80,
-  wind: true, radar: true, lightning: true, lightningThreats: true, hail: true,
+  cyclones: false, pressure: false, wind: true, radar: true, lightning: true, lightningThreats: true, hail: true,
   cells: true, stormCones: false, alerts: true, outlook: true, reports: true, inspector: true, impact: true,
   speed: 12, historyHours: 6, units: 'metric',
 };
 export const STORM_LAYER_GROUPS = [
+  { key: 'cyclones', title: 'Hurricane tracks & cones', detail: 'Active tropical cyclones · advisory track & forecast uncertainty', ids: ['tropical-cyclones'] },
+  { key: 'pressure', title: 'Pressure lines (isobars)', detail: 'Equal sea-level pressure · hPa · GFS in forecast mode', ids: ['pressure-msl-contour'] },
   { key: 'radar', title: 'Precipitation radar', detail: 'Rain, mixed precipitation & snow', ids: ['radar'] },
   { key: 'hail', title: 'Hail threats & tracks', detail: 'Includes Canada · nowcast up to 1 hour', ids: ['hail-threats-polygons', 'hail-threats-tracks', 'hail-threats-points'] },
   { key: 'cells', title: 'Storm cells & tracks', detail: 'U.S. radar cells, severity & movement', ids: ['stormcells-positions', 'stormcells-tracks'] },
@@ -40,7 +43,7 @@ export function readStormGLSettings(raw: unknown): StormGLSettings {
   // Upgrade the previous untouched preset; preserve deliberate custom views.
   const legacyPreset = { ...STRONGEST_STORM_SETTINGS, shade: 'temperatures', radarOpacity: 95 };
   if (Object.entries(legacyPreset).every(([key, value]) => data[key] === value)) return result;
-  for (const key of ['wind', 'radar', 'lightning', 'lightningThreats', 'hail', 'cells', 'stormCones', 'alerts', 'outlook', 'reports', 'inspector', 'impact'] as const) {
+  for (const key of ['cyclones', 'pressure', 'wind', 'radar', 'lightning', 'lightningThreats', 'hail', 'cells', 'stormCones', 'alerts', 'outlook', 'reports', 'inspector', 'impact'] as const) {
     if (typeof data[key] === 'boolean') result[key] = data[key];
   }
   if (WEATHER_SHADES.some((shade) => shade.id === data.shade)) result.shade = data.shade as WeatherShade;
@@ -71,4 +74,16 @@ export function hailViewSettings(settings: StormGLSettings, view: 'live' | 'hist
 
 export function isHistoricalHailShade(shade: WeatherShade) {
   return shade === 'hail-size' || shade === 'hail-size-max' || shade === 'hail-severe-probability-max';
+}
+
+export function hurricaneViewSettings(settings: StormGLSettings, view: 'satellite' | 'forecast'): StormGLSettings {
+  return { ...settings, shade: view === 'satellite' ? 'satellite-infrared-color' : 'none',
+    mode: view === 'satellite' ? 'history' : 'forecast', historyHours: 6,
+    cyclones: true, pressure: view === 'forecast', wind: view === 'forecast', radar: view === 'forecast',
+    hail: false, cells: false, stormCones: false, lightning: false, lightningThreats: false,
+    alerts: true, outlook: false, reports: false, inspector: true, opacity: 100, radarOpacity: 70 };
+}
+
+export function stormLayerForMode(id: string, mode: WeatherMode) {
+  return mode === 'forecast' && ['radar', 'wind-particles', 'pressure-msl-contour'].includes(id) ? `gfs-${id}` : id;
 }

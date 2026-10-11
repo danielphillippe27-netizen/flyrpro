@@ -1,6 +1,6 @@
 import { resetStormTimeline } from '../gl-timeline';
 import assert from 'node:assert/strict';
-import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange, hailViewSettings, isHistoricalHailShade } from '../gl-settings';
+import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange, hailViewSettings, hurricaneViewSettings, stormLayerForMode, isHistoricalHailShade } from '../gl-settings';
 import { resolveGLRequest, allowedVectorProducts } from '../gl-proxy-policy';
 import { stormTerritoryImpact } from '../gl-impact';
 import type { StormFeatureProperties } from '../types';
@@ -56,3 +56,20 @@ const active = new Set(['hail-size-max', 'hail-threats-polygons']);
 resetStormTimeline({ timeline, removeWeatherLayer: (id: string) => order.push(id) } as unknown as Parameters<typeof resetStormTimeline>[0], active, { start: new Date(10), end: new Date(20) }, new Date(15));
 assert.deepEqual(order, ['pause', 'hail-size-max', 'hail-threats-polygons', 'clear', 'seek']);
 assert.equal(active.size, 0);
+
+const hurricane = hurricaneViewSettings(STRONGEST_STORM_SETTINGS, 'satellite');
+assert.equal(hurricane.mode, 'history');
+assert.equal(hurricane.shade, 'satellite-infrared-color');
+assert.equal(hurricane.radar, false);
+assert.equal(hurricane.cyclones, true);
+assert.deepEqual(readStormGLSettings(hurricane), hurricane);
+const forecast = hurricaneViewSettings(hurricane, 'forecast');
+assert.equal(forecast.shade, 'none');
+assert.equal(forecast.pressure, true);
+assert.equal(stormLayerForMode('pressure-msl-contour', forecast.mode), 'gfs-pressure-msl-contour');
+assert.equal(stormLayerForMode('wind-particles', forecast.mode), 'gfs-wind-particles');
+assert.equal(stormLayerForMode('tropical-cyclones', forecast.mode), 'tropical-cyclones');
+assert.equal(resolveGLRequest(['api', 'tropicalcyclones', 'archive', 'search'], 'GET')?.kind, 'api');
+assert.equal(resolveGLRequest(['api', 'users'], 'GET'), null);
+assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '-1hr.png'], 'GET'), null);
+assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '20261010130000.png'], 'GET')?.kind, 'maps');
