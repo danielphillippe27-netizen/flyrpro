@@ -22,7 +22,7 @@ export function StormIntelligencePanel({map,workspaceId,onSelect,onCampaign}:Pro
   const [minimum,setMinimum]=useState(0),[search,setSearch]=useState('');
   const [point,setPoint]=useState<{lon:number;lat:number}|null>(null);
   const requestRef=useRef<AbortController|null>(null);
-  const select=useCallback((event:StormEvent|null)=>{setSelected(event);setPoint(null);onSelect(event);if(event){const b=eventBounds(event);if(b&&b[2]-b[0]<180)map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:{top:100,bottom:130,left:350,right:map.getContainer().clientWidth>1100?420:80},maxZoom:9,duration:600});}},[map,onSelect]);
+  const select=useCallback((event:StormEvent|null)=>{setSelected(event);setPoint(null);onSelect(event);if(event){const b=eventBounds(event);if(b&&b[2]-b[0]<180)map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:{top:100,bottom:130,left:350,right:map.getContainer().clientWidth>1100?420:80},maxZoom:12,pitch:0,bearing:0,retainPadding:false,duration:600});}},[map,onSelect]);
   useEffect(()=>()=>requestRef.current?.abort(),[]);
   useEffect(()=>{setSelected(null);setEvents([]);setPoint(null);},[workspaceId]);
   async function load(reference?:StormReference,active=false){
