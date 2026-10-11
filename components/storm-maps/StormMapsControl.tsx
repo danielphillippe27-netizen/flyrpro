@@ -6,6 +6,8 @@ import type { MapboxMapController } from '@xweather/mapsgl';
 import '@xweather/mapsgl/dist/mapsgl.css';
 import { CloudLightning, Play, Pause, X, Loader2, Settings2, Map as MapIcon, ChevronDown } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
+import { StormIntelligencePanel } from './intelligence/StormIntelligencePanel';
+import type { StormEvent, StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { StormMapsRasterControl } from './StormMapsRasterControl';
 import { StormGLSettingsPanel } from './StormGLSettingsPanel';
 import { useStormGLSettings } from './useStormGLSettings';
@@ -15,7 +17,7 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories };
+type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormCampaign?: (context: StormCampaignContext) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
@@ -25,7 +27,10 @@ export function StormMapsControl(props: Props) {
   const [entitled, setEntitled] = useState(false);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(true);
-  const [tab, setTab] = useState<'overview' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('intelligence');
+  const [selectedEvent, setSelectedEvent] = useState<StormEvent | null>(null);
+  const archiveView = tab === 'intelligence';
+  const recentHailEvent = archiveView && selectedEvent?.hazard === 'hail' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000;
   const [manifest, setManifest] = useState<StormMapsManifest | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -87,7 +92,7 @@ export function StormMapsControl(props: Props) {
 
   const glEnabled = manifest?.providerHealth.xweather.available === true;
   useEffect(() => {
-    if (!open || !map || !mapLoaded || !manifest || !glEnabled) return;
+    if (!open || !map || !mapLoaded || !glEnabled || !workspaceId) return;
     let disposed = false;
     let controller: MapboxMapController | undefined;
     setReady(false); setLoading(true); setError(null); setLayerErrors([]); setPlaying(false);
@@ -104,7 +109,7 @@ export function StormMapsControl(props: Props) {
       }
       if (disposed) return;
       const account = new sdk.Account('wolfgrid', 'session');
-      const server = `${window.location.origin}/api/storm-maps/gl/${manifest.tileToken}`;
+      const server = `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}`;
       account.servers.mapsgl = server;
       account.servers.maps = `${server}/maps`;
       const beforeId = map.getStyle().layers?.find((layer) => layer.type === 'symbol')?.id;
@@ -131,17 +136,17 @@ export function StormMapsControl(props: Props) {
       controller?.dispose();
       try { map.setProjection(projection); } catch { /* map already removed */ }
     };
-  }, [open, map, mapLoaded, manifest, glEnabled, revision]);
+  }, [open, map, mapLoaded, workspaceId, glEnabled, revision]);
 
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
-    const range = stormTimeRange(settings.mode, settings.historyHours);
+    const range = recentHailEvent && selectedEvent ? { start: new Date(selectedEvent.start), end: new Date(selectedEvent.end), current: new Date(selectedEvent.end) } : stormTimeRange(settings.mode, settings.historyHours);
     resetStormTimeline(controller, activeIds.current, range, settings.mode === 'history' ? range.end : range.current);
     setPlaying(false);
     setRangeLabels({ start: settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
     setPosition(controller.timeline.position * 100); setClock(timeLabel(controller.timeline.currentDate));
-  }, [ready, settings.mode, settings.historyHours]);
+  }, [ready, settings.mode, settings.historyHours, recentHailEvent, selectedEvent]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -153,12 +158,12 @@ export function StormMapsControl(props: Props) {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller || !map) return;
-    const inspector = settings.inspector ? controller.addDataInspectorControl({ event: 'click', stream: true, showCoordinates: true }) : undefined;
-    if (!settings.inspector) controller.removeDataInspectorControl();
+    const inspector = settings.inspector && !archiveView ? controller.addDataInspectorControl({ event: 'click', stream: true, showCoordinates: true }) : undefined;
+    if (!settings.inspector || archiveView) controller.removeDataInspectorControl();
     const modeChanged = (event: { mode?: string }) => { if (event.mode?.startsWith('draw_')) inspector?.disable(); else inspector?.enable(); };
     map.on('draw.modechange', modeChanged);
     return () => { map.off('draw.modechange', modeChanged); controller.removeDataInspectorControl(); };
-  }, [ready, settings.inspector, map]);
+  }, [ready, settings.inspector, map, archiveView]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -170,6 +175,7 @@ export function StormMapsControl(props: Props) {
       for (const layer of group.ids) wanted.set(layer === 'radar' && settings.mode === 'forecast' ? 'gfs-radar' : layer, group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
+    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); }
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
@@ -193,7 +199,7 @@ export function StormMapsControl(props: Props) {
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map, zoom]);
+  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent]);
 
   useEffect(() => {
     if (!ready) return;
@@ -206,7 +212,7 @@ export function StormMapsControl(props: Props) {
   }, [ready]);
 
   useEffect(() => {
-    const enabled = settings.alerts || settings.outlook || settings.reports;
+    const enabled = !archiveView && settings.mode !== 'history' && (settings.alerts || settings.outlook || settings.reports);
     if (!map || !mapLoaded || !open || !manifest || !glEnabled || !enabled) {
       if (map && mapLoaded) removeStormFeatures(map);
       setRisk(EMPTY_RISK); setRiskLoaded(false); return;
@@ -235,7 +241,7 @@ export function StormMapsControl(props: Props) {
     void load(); map.on('moveend', moved);
     const interval = window.setInterval(() => void load(), 5 * 60_000);
     return () => { abort.abort(); window.clearInterval(interval); window.clearTimeout(timer); map.off('moveend', moved); cleanup?.(); try { removeStormFeatures(map); } catch { /* map removed */ } };
-  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, revision]);
+  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView]);
 
   const togglePlayback = () => {
     const timeline = controllerRef.current?.timeline;
@@ -274,30 +280,31 @@ export function StormMapsControl(props: Props) {
     </div>
     {open && <>
       <section id="storm-maps-gl-panel" aria-label="Storm command controls" style={{ display: panel ? undefined : 'none' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] max-h-[calc(100%-12rem)] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storm command</h2><p className="mt-1 text-[10px] text-slate-400">Storm priority · {enabledCount} overlays enabled</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
-        <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">{(['overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{value}</button>)}</div>
+        <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storm intelligence</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find an event · inspect · create a campaign' : `Live weather · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
+        <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{value}</button>)}</div>
+        {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onCampaign={props.onStormCampaign ? (context) => { props.onStormCampaign?.(context); setPanel(false); } : undefined} /></div>}
         <div className="mt-4" hidden={tab !== 'settings'}><StormGLSettingsPanel settings={settings} onChange={setSettings} compact /></div>
         <div hidden={tab !== 'overview'} className="mt-4 space-y-4">
           <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setSettings({ ...STRONGEST_STORM_SETTINGS })} className="rounded-xl border border-cyan-300/40 bg-cyan-300/10 py-2 text-xs font-semibold text-cyan-200">Strongest preset</button><button type="button" onClick={() => setSettings({ ...settings, shade: 'none', mode: 'live', radar: true })} className="rounded-xl border border-white/15 py-2 text-xs hover:bg-white/10">Radar focus</button></div>
           <div className="rounded-xl border border-violet-300/20 bg-violet-300/5 p-3"><p className="text-xs font-semibold text-violet-200">Hail intelligence</p><div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={() => setSettings(hailViewSettings(settings, 'live'))} className="rounded-lg border border-white/15 py-2 text-[11px] hover:bg-white/10">Live hail tracks</button><button type="button" onClick={() => setSettings(hailViewSettings(settings, 'history'))} className="rounded-lg border border-white/15 py-2 text-[11px] hover:bg-white/10">Past 24h hail size</button></div><p className="mt-2 text-[10px] leading-relaxed text-slate-400">Live threat areas and tracks include Canada; predictions extend up to 60 minutes. Hail-size maps cover the U.S., Europe, Japan and Australia. Map data does not confirm property damage.</p></div>
           <div className="grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['live', 'history', 'forecast'] as const).map((mode) => <button key={mode} type="button" onClick={() => setSettings({ ...settings, mode })} aria-pressed={settings.mode === mode} className={`rounded-lg py-2 text-xs capitalize ${settings.mode === mode ? 'bg-white/15 font-semibold' : 'text-slate-400'}`}>{mode}</button>)}</div>
           <div><p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Storm intelligence</p><div className="mt-2 flex flex-wrap gap-1.5">{toggled.map((group) => <span key={group.key} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px]">{group.title}</span>)}{settings.alerts && <span className="rounded-md border border-amber-300/20 bg-amber-300/10 px-2 py-1 text-[10px] text-amber-200">Official alerts</span>}{settings.outlook && <span className="rounded-md border border-violet-300/20 bg-violet-300/10 px-2 py-1 text-[10px] text-violet-200">Canadian outlook</span>}{settings.reports && <span className="rounded-md border border-white/10 px-2 py-1 text-[10px]">U.S. reports</span>}</div></div>
-          {settings.impact && <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-semibold">Campaign risk in view</p>{!settings.alerts && !settings.outlook ? <p className="mt-2 text-[11px] text-slate-400">Enable warnings or outlooks to assess mapped territories.</p> : !riskLoaded ? <p className="mt-2 text-[11px] text-slate-400">{riskError ? 'Official risk data unavailable. Retry by reopening Storm.' : 'Checking official risk areas…'}</p> : <><p className={`mt-2 text-sm font-semibold ${impacts.length ? 'text-amber-200' : 'text-cyan-200'}`}>{impacts.length} / {territories?.features.length || 0} mapped territories overlap risk areas</p><p className="mt-1 text-[10px] text-slate-400">{risk.features.filter((feature) => feature.properties.kind === 'alert').length} alerts · {risk.features.filter((feature) => feature.properties.kind === 'outlook').length} outlooks · {risk.features.filter((feature) => feature.properties.kind === 'report').length} reports in view</p>{impacts.slice(0, 4).map((item) => <div key={item.id} className="mt-2 border-t border-white/10 pt-2"><p className="text-[11px] font-medium">{item.name}</p><p className="text-[10px] text-slate-400">{item.events.join(' · ')}</p></div>)}<p className="mt-2 text-[10px] leading-relaxed text-slate-500">Based on loaded official warnings and outlooks. This is not a damage assessment.{riskError ? ' Refresh failed; showing the last loaded data.' : ''}</p></>}</div>}
+          {settings.mode !== 'history' && settings.impact && <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-semibold">Campaign risk in view</p>{!settings.alerts && !settings.outlook ? <p className="mt-2 text-[11px] text-slate-400">Enable warnings or outlooks to assess mapped territories.</p> : !riskLoaded ? <p className="mt-2 text-[11px] text-slate-400">{riskError ? 'Official risk data unavailable. Retry by reopening Storm.' : 'Checking official risk areas…'}</p> : <><p className={`mt-2 text-sm font-semibold ${impacts.length ? 'text-amber-200' : 'text-cyan-200'}`}>{impacts.length} / {territories?.features.length || 0} mapped territories overlap risk areas</p><p className="mt-1 text-[10px] text-slate-400">{risk.features.filter((feature) => feature.properties.kind === 'alert').length} alerts · {risk.features.filter((feature) => feature.properties.kind === 'outlook').length} outlooks · {risk.features.filter((feature) => feature.properties.kind === 'report').length} reports in view</p>{impacts.slice(0, 4).map((item) => <div key={item.id} className="mt-2 border-t border-white/10 pt-2"><p className="text-[11px] font-medium">{item.name}</p><p className="text-[10px] text-slate-400">{item.events.join(' · ')}</p></div>)}<p className="mt-2 text-[10px] leading-relaxed text-slate-500">Based on loaded official warnings and outlooks. This is not a damage assessment.{riskError ? ' Refresh failed; showing the last loaded data.' : ''}</p></>}</div>}
           <p className="text-[10px] leading-relaxed text-slate-400">{settings.shade === 'none' ? 'Storm focus' : WEATHER_SHADES.find((shade) => shade.id === settings.shade)?.label} · {rangeTitle}. {settings.inspector ? 'Click the map to inspect weather.' : ''} Storm-cell tracks cover the U.S.; hail threats include Canada.</p>
         </div>
-        {isHistoricalHailShade(settings.shade) && <p className="mt-3 rounded-lg border border-violet-300/20 bg-violet-300/5 p-2 text-[10px] leading-relaxed text-violet-200">{settings.mode !== 'history' ? 'Hail-size history is hidden in Live and Forecast. Select History to view it.' : 'Hail-size coverage: U.S., Europe, Japan and Australia. Canada is not covered by this map layer; an empty map there does not mean no hail occurred.'}</p>}
+        {!archiveView && isHistoricalHailShade(settings.shade) && <p className="mt-3 rounded-lg border border-violet-300/20 bg-violet-300/5 p-2 text-[10px] leading-relaxed text-violet-200">{settings.mode !== 'history' ? 'Hail-size history is hidden in Live and Forecast. Select History to view it.' : 'Hail-size coverage: U.S., Europe, Japan and Australia. Canada is not covered by this map layer; an empty map there does not mean no hail occurred.'}</p>}
         {settings.mode === 'forecast' && settings.hail && <p className="mt-2 text-[10px] text-slate-400">Hail tracks are short-range nowcasts, up to 60 minutes; they are not a 24-hour hail forecast.</p>}
         <div className="mt-4 grid grid-cols-3 gap-2">{([{ label: 'Overview', zoom: 3 }, { label: 'Regional', zoom: 6 }, { label: 'Local', zoom: 9 }]).map((view) => <button key={view.label} type="button" onClick={() => map.easeTo({ zoom: view.zoom, pitch: 0, duration: 600 })} className="flex items-center justify-center gap-1 rounded-xl border border-white/15 py-2 text-xs hover:bg-white/10"><MapIcon className="h-3 w-3" />{view.label}</button>)}</div>
         {zoom < 4 && <p className="mt-2 text-[10px] text-slate-400">Overview shows radar and broad risk areas. Zoom in for individual lightning strikes and storm tracks.</p>}
-        <details className="mt-4" open><summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-slate-400">Layer legends</summary><div ref={legendRef} className="mt-2 max-h-48 overflow-auto text-xs" /></details>
-        {(loading || !ready) && !error && <p role="status" className="mt-3 flex items-center gap-2 text-[11px] text-cyan-200"><Loader2 className="h-3 w-3 animate-spin" />Loading weather data…</p>}
+        <details className="mt-4" hidden={archiveView && !recentHailEvent}><summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-slate-400">Layer legends</summary><div ref={legendRef} className="mt-2 max-h-48 overflow-auto text-xs" /></details>
+        {(!archiveView || recentHailEvent) && (loading || !ready) && !error && <p role="status" className="mt-3 flex items-center gap-2 text-[11px] text-cyan-200"><Loader2 className="h-3 w-3 animate-spin" />Loading weather data…</p>}
         {(error || layerErrors.length > 0) && <p role="alert" className="mt-3 text-xs text-amber-200">{error || `Unavailable in this renderer: ${layerErrors.join(', ')}. Other layers remain active.`}</p>}
         <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-slate-500">Weather data © <a href="https://www.xweather.com" target="_blank" rel="noreferrer" className="underline">Vaisala Xweather</a> · NOAA/NWS · ECCC. Follow official authorities for safety decisions.</p>
       </section>
-      <div className="absolute bottom-7 left-5 right-20 z-30 flex max-w-3xl items-center gap-4 rounded-2xl border border-white/15 bg-slate-950/95 px-4 py-3 text-white shadow-xl backdrop-blur-xl">
+      {!archiveView && <div className="absolute bottom-7 left-5 right-20 z-30 flex max-w-3xl items-center gap-4 rounded-2xl border border-white/15 bg-slate-950/95 px-4 py-3 text-white shadow-xl backdrop-blur-xl">
         <button type="button" onClick={togglePlayback} disabled={!ready} aria-label={playing ? 'Pause weather animation' : 'Play weather animation'} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyan-300 text-slate-950 disabled:opacity-40">{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</button>
         <div className="min-w-0 flex-1"><div className="mb-2 flex items-center justify-between text-[11px]"><span className="text-slate-400">{rangeTitle}</span><span className="font-semibold">{clock}</span><button type="button" onClick={goNow} className="text-cyan-200">Now</button></div><Slider min={0} max={100} step={1} value={[position]} onValueChange={(v) => scrub(v[0])} aria-label="Weather timeline" /><div className="mt-1 flex justify-between text-[9px] text-slate-500"><span>{rangeLabels.start}</span><span>{rangeLabels.end}</span></div></div>
-      </div>
+      </div>}
     </>}
   </>;
 }

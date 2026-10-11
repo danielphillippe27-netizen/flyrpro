@@ -237,6 +237,7 @@ export type LinkQualityStatus = 'unknown' | 'healthy' | 'degraded' | 'repairing'
 export type CampaignDataQuality = 'strong' | 'usable' | 'weak';
 
 export interface CampaignV2 {
+  storm_context?: import('@/lib/storm-maps/intelligence/model').StormCampaignContext | null;
   id: string;
   owner_id: string;
   workspace_id?: string | null;

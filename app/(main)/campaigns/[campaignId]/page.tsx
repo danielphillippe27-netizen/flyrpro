@@ -1,5 +1,6 @@
 'use client';
 
+import { StormCampaignSummary } from '@/components/storm-maps/intelligence/StormCampaignSummary';
 import { useCampaignCardActivity } from '@/lib/cards/useCampaignCardActivity';
 import { campaignEngagement } from '@/lib/cards/campaign-engagement';
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
@@ -1419,6 +1420,7 @@ export default function CampaignDetailPage() {
             </p>
           </div>
         ) : null}
+        {campaign.storm_context && <StormCampaignSummary context={campaign.storm_context} />}
         <StatsHeader stats={campaignStats}
           engagement={{ scans: totalQrScans, opens: cardActivity.totals?.opens ?? 0, clicks: cardActivity.totals?.clicks ?? 0, downloads: cardActivity.totals?.downloads ?? 0 }}
           engagementState={cardActivityState === 'error' || scanEventsError || addressesError ? 'error' : cardActivityState === 'loading' || scanEventsLoading || addressesLoading ? 'loading' : 'ready'} />

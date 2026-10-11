@@ -148,5 +148,10 @@ export async function GET(request: NextRequest) {
     disclaimer: 'Beta weather visualization—follow official authorities for safety decisions.',
   };
 
-  return NextResponse.json(payload, { headers: { 'Cache-Control': 'private, no-store' } });
+  const response = NextResponse.json(payload, { headers: { 'Cache-Control': 'private, no-store' } });
+  response.cookies.set(`storm-gl-${membership.workspaceId}`, issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token, {
+    httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
+    path: `/api/storm-maps/gl/session-${membership.workspaceId}`, maxAge: 15 * 60,
+  });
+  return response;
 }

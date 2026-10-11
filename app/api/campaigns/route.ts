@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { campaignStormSchema, type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
@@ -63,6 +64,7 @@ function isMissingCampaignAllowanceRpc(error: unknown): boolean {
 }
 
 interface CreateCampaignBody {
+  storm_context?: StormCampaignContext;
   name: string;
   description?: string;
   type: string;
@@ -231,6 +233,8 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const body: CreateCampaignBody = await request.json();
     const { name, description, type, address_source, region, workspace_id, seed_query, tags, bbox, territory_boundary } = body;
+    const stormContext = body.storm_context === undefined ? null : campaignStormSchema.safeParse(body.storm_context);
+    if (stormContext && !stormContext.success) return NextResponse.json({ error: 'Invalid storm selection' }, { status: 400 });
     const normalizedType = typeof type === 'string' ? type.trim() : type;
 
     if (!name || !type || !address_source) {
@@ -374,6 +378,7 @@ export async function POST(request: NextRequest) {
     }
 
     const insertPayload = {
+      ...(stormContext?.success ? { storm_context: stormContext.data } : {}),
       owner_id: requestUser.id,
       workspace_id: targetWorkspaceId,
       name,

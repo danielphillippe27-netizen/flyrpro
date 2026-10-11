@@ -43,6 +43,7 @@ import {
 } from '@/components/campaigns/SelfServeProspectingFunnel';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
+import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { StormMapsControl } from '@/components/storm-maps/StormMapsControl';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
@@ -459,6 +460,8 @@ export default function CreateCampaignPage() {
   const mapTheme = isSelfServeDemo ? 'dark' : theme;
   const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', mapTheme, 'v11'), [mapTheme]);
   const [name, setName] = useState('');
+  const [stormContext, setStormContext] = useState<StormCampaignContext | null>(null);
+  useEffect(() => { setStormContext(null); }, [currentWorkspaceId]);
   const [loading, setLoading] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [provisionProgress, setProvisionProgress] = useState<string>('');
@@ -2058,6 +2061,7 @@ export default function CreateCampaignPage() {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          storm_context: !isSelfServeDemo && stormContext ? stormContext : undefined,
           name: isSelfServeDemo ? name.trim() || DEFAULT_SELF_SERVE_CAMPAIGN_NAME : name,
           type: isSelfServeDemo ? 'prospecting' : 'flyer',
           address_source: 'map',
@@ -2332,8 +2336,14 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
             territories={campaignOverlayFeatureCollection}
+            onStormCampaign={(context) => {
+              setStormContext(context);
+              setName(`${context.event.title} campaign`);
+              startDrawing();
+            }}
           />
         ) : null}
+        {stormContext && !isSelfServeDemo && <div className="absolute bottom-20 right-5 z-30 max-w-sm rounded-xl border border-cyan-300/30 bg-slate-950/95 p-3 text-xs text-white"><p className="font-semibold">Campaign linked to {stormContext.event.title}</p><p className="mt-1 text-slate-400">Draw the area to inspect. Weather exposure does not confirm property damage.</p><button type="button" onClick={() => setStormContext(null)} className="mt-2 text-cyan-200 underline">Remove storm link</button></div>}
         {!isSelfServeDemo && mapLoaded && map.current && (
           <UserLocationLayer
             map={map.current}

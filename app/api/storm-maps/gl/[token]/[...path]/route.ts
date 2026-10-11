@@ -10,7 +10,9 @@ type Context = { params: Promise<{ token: string; path: string[] }> };
 
 async function proxy(request: NextRequest, context: Context) {
   const { token, path } = await context.params;
-  const capability = verifyStormMapsTileToken(token);
+  const sessionWorkspace = token.startsWith('session-') ? token.slice(8) : null;
+  const capability = verifyStormMapsTileToken(sessionWorkspace ? request.cookies.get(`storm-gl-${sessionWorkspace}`)?.value || '' : token);
+  if (sessionWorkspace && capability?.workspaceId !== sessionWorkspace) return NextResponse.json({ error: 'Weather workspace session expired' }, { status: 401 });
   if (!capability || !capability.approvedTiles.some((tile) => tile.startsWith('xweather:'))) {
     return NextResponse.json({ error: 'Storm Maps session expired' }, { status: 401 });
   }
