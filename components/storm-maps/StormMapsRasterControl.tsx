@@ -102,15 +102,18 @@ export function StormMapsRasterControl({
   map,
   mapLoaded,
   workspaceId,
+  onStormModeChange,
 }: {
   map: mapboxgl.Map | null;
   mapLoaded: boolean;
   workspaceId: string | null;
+  onStormModeChange?: (active: boolean) => void;
 }) {
   const panelScrollRef = useStormPanelScroll();
   const initialPreferences = useMemo(loadPreferences, []);
   const [entitled, setEntitled] = useState(false);
   const [open, setOpen] = useState(false);
+  useEffect(() => { onStormModeChange?.(open); }, [open, onStormModeChange]);
   const [manifest, setManifest] = useState<StormMapsManifest | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
   const [manifestError, setManifestError] = useState<string | null>(null);

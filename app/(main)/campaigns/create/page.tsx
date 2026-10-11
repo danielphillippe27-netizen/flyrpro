@@ -461,6 +461,7 @@ export default function CreateCampaignPage() {
   const mapTheme = isSelfServeDemo ? 'dark' : theme;
   const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', mapTheme, 'v11'), [mapTheme]);
   const [name, setName] = useState('');
+  const [stormMode, setStormMode] = useState(false);
   const [stormContext, setStormContext] = useState<StormCampaignContext | null>(null);
   useEffect(() => { setStormContext(null); }, [currentWorkspaceId]);
   const [loading, setLoading] = useState(false);
@@ -2337,7 +2338,9 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
             territories={campaignOverlayFeatureCollection}
+            onStormModeChange={setStormMode}
             onStormCampaign={(context, boundary) => {
+              setStormMode(false);
               setStormContext(context);
               setName(`${context.event.title} campaign`);
               if (context.territoryId) { drawRef.current?.deleteAll(); savedFeaturesRef.current = null; setCampaignBuildingCount(0); }
@@ -2394,7 +2397,7 @@ export default function CreateCampaignPage() {
         ) : null}
 
         {!isSelfServeDemo ? (
-          <div className={`absolute right-5 top-5 z-20 max-h-[calc(100%-2.5rem)] w-[min(22rem,calc(100vw-2.5rem))] overflow-y-auto rounded-2xl border ${selfServeSurfaceClass}`}>
+          <div hidden={stormMode} className={`absolute right-5 top-5 z-20 max-h-[calc(100%-2.5rem)] w-[min(22rem,calc(100vw-2.5rem))] overflow-y-auto rounded-2xl border ${selfServeSurfaceClass}`}>
             <div className="space-y-4 p-4">
               {!mapLoaded ? (
                 <div className={`rounded-xl border px-3 py-3 text-sm font-medium ${selfServeSoftSurfaceClass}`}>
@@ -2614,7 +2617,7 @@ export default function CreateCampaignPage() {
           />
         ) : null}
 
-        <TerritoryDrawHint visible={!isSelfServeDemo && mapLoaded && phase === 'drawing'} />
+        <TerritoryDrawHint visible={!isSelfServeDemo && !stormMode && mapLoaded && phase === 'drawing'} />
       </div>
 
       {(provisioning || generatingAddresses) && (

@@ -1,8 +1,9 @@
 'use client';
+import { feature, featureCollection, pointOnFeature } from '@turf/turf';
 import { useEffect, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
-const SOURCE = 'wolfgrid-saved-storm-territory', FILL = `${SOURCE}-fill`, LINE = `${SOURCE}-line`;
+const SOURCE = 'wolfgrid-saved-storm-territory', FILL = `${SOURCE}-fill`, LINE = `${SOURCE}-line`, LABEL = `${SOURCE}-label`;
 type Props = { map: mapboxgl.Map; workspaceId: string; revision: number; active: SavedStormTerritory | null; onSelect: (territory: SavedStormTerritory | null) => void; onCampaign: (territory: SavedStormTerritory) => void };
 export function SavedStormTerritories({ map, workspaceId, revision, active, onSelect, onCampaign }: Props) {
   const [territories, setTerritories] = useState<SavedStormTerritory[]>([]), [error, setError] = useState(''), [loading, setLoading] = useState(false);
@@ -15,15 +16,19 @@ export function SavedStormTerritories({ map, workspaceId, revision, active, onSe
   }, [workspaceId, revision]);
   useEffect(() => {
     const clear = () => {
+      if (map.getLayer(LABEL)) map.removeLayer(LABEL);
       if (map.getLayer(LINE)) map.removeLayer(LINE);
       if (map.getLayer(FILL)) map.removeLayer(FILL);
       if (map.getSource(SOURCE)) map.removeSource(SOURCE);
     };
     const show = () => {
       clear(); if (!active || !map.isStyleLoaded()) return;
-      map.addSource(SOURCE, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: active.boundary } });
+      const polygon = feature(active.boundary), point = pointOnFeature(polygon);
+      point.properties = { label: `${active.name} · ${active.context.minimumHailMM == null ? 'User-drawn storm territory' : `Hail ${active.context.minimumHailMM.toFixed(1)} mm${active.context.maximumHailMM == null ? '+' : `–<${active.context.maximumHailMM.toFixed(1)} mm`}`}` };
+      map.addSource(SOURCE, { type: 'geojson', data: featureCollection<GeoJSON.Geometry>([polygon, point]) });
       map.addLayer({ id: FILL, type: 'fill', source: SOURCE, paint: { 'fill-color': '#22d3ee', 'fill-opacity': 0.07 } });
       map.addLayer({ id: LINE, type: 'line', source: SOURCE, paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-dasharray': [3, 2] } });
+      map.addLayer({ id: LABEL, type: 'symbol', source: SOURCE, filter: ['==', '$type', 'Point'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-allow-overlap': true }, paint: { 'text-color': '#67e8f9', 'text-halo-color': '#020617', 'text-halo-width': 2 } });
     };
     show(); map.on('style.load', show);
     return () => { map.off('style.load', show); clear(); };

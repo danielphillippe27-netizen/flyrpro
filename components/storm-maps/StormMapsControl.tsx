@@ -2,6 +2,7 @@
 
 import { useStormPanelScroll } from './useStormPanelScroll';
 
+import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
 import { SavedStormTerritories } from './SavedStormTerritories';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
@@ -23,7 +24,7 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
+type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
@@ -34,12 +35,30 @@ export function StormMapsControl(props: Props) {
   const [entitled, setEntitled] = useState(false);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(true);
+  const [selectingTerritory, setSelectingTerritory] = useState(false);
+  const [territoryWindowEnd, setTerritoryWindowEnd] = useState(() => new Date());
+  useEffect(() => { if (open) setTerritoryWindowEnd(new Date()); }, [open, settings.mode, settings.historyHours, settings.shade]);
+  useEffect(() => { props.onStormModeChange?.(open); }, [open, props.onStormModeChange]);
   const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('intelligence');
   const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
   const [territoryRevision, setTerritoryRevision] = useState(0);
+  useEffect(() => { setSavedTerritory(null); }, [workspaceId]);
   const [selectedEvent, setSelectedEvent] = useState<StormEvent | null>(null);
   const archiveView = tab === 'intelligence';
   const recentHailEvent = archiveView && selectedEvent?.hazard === 'hail' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000;
+  const hailSelectionEvent = recentHailEvent && selectedEvent ? {
+    key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source,
+    sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end,
+  } : tab === 'overview' && settings.mode === 'history' && settings.shade === 'hail-size-max' ? {
+    key: `hail-territory:${settings.historyHours}:${territoryWindowEnd.toISOString()}`,
+    title: `Hail exposure · ${settings.historyHours} hours`, hazard: 'hail' as const, source: 'xweather' as const,
+    sourceId: 'hail-size-max', start: new Date(territoryWindowEnd.getTime() - settings.historyHours * 3600_000).toISOString(), end: territoryWindowEnd.toISOString(),
+  } : null;
+  const saveTerritory = async (name: string, boundary: GeoJSON.Polygon, context: StormCampaignContext) => {
+    const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, boundary, context }) });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error);
+    setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
+  };
   const [manifest, setManifest] = useState<StormMapsManifest | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -168,12 +187,12 @@ export function StormMapsControl(props: Props) {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller || !map) return;
-    const inspector = settings.inspector && !archiveView ? controller.addDataInspectorControl({ event: 'click', stream: true, showCoordinates: true }) : undefined;
-    if (!settings.inspector || archiveView) controller.removeDataInspectorControl();
+    const inspector = settings.inspector && !archiveView && !selectingTerritory ? controller.addDataInspectorControl({ event: 'click', stream: true, showCoordinates: true }) : undefined;
+    if (!settings.inspector || archiveView || selectingTerritory) controller.removeDataInspectorControl();
     const modeChanged = (event: { mode?: string }) => { if (event.mode?.startsWith('draw_')) inspector?.disable(); else inspector?.enable(); };
     map.on('draw.modechange', modeChanged);
     return () => { map.off('draw.modechange', modeChanged); controller.removeDataInspectorControl(); };
-  }, [ready, settings.inspector, map, archiveView]);
+  }, [ready, settings.inspector, map, archiveView, selectingTerritory]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -290,21 +309,21 @@ export function StormMapsControl(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   return <>
     <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
-      <button type="button" onClick={() => { if (!open) { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (map.getZoom() < 4) map.easeTo({ zoom: 5, pitch: 0, bearing: 0, duration: 600 }); else if (map.getPitch() !== 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 }); setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
+      <button type="button" onClick={() => { props.onStormModeChange?.(true); if (!open) { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (map.getZoom() < 4) map.easeTo({ zoom: 5, pitch: 0, bearing: 0, duration: 600 }); else if (map.getPitch() !== 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 }); setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
       <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find past storms. Plan your next campaign.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
+        <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find storms. Save a storm territory.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
-        {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onCampaign={props.onStormCampaign ? (context) => { props.onStormCampaign?.(context); setPanel(false); } : undefined} /></div>}
-        {archiveView && ready && controllerRef.current && props.onStormCampaign && recentHailEvent && selectedEvent && !layerErrors.includes('hail-size-max') && <div className="mt-4"><HailZoneSelector map={map} controller={controllerRef.current} windowKey={selectedEvent.key} onApply={async (zone) => {
-          const event = { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end };
-          const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: zone.name, boundary: zone.polygon.geometry, context: { version: 1, event, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' } }) });
-          const data = await response.json(); if (!response.ok) throw new Error(data.error);
-          setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
+        <div className="mt-4 rounded-xl border border-cyan-300/25 p-3 text-[11px]"><p className="font-semibold text-cyan-200">Storm territories</p><p className="mt-1 text-slate-400">Select an intensity zone, review its outline and save the territory. Create campaigns inside a saved territory.</p>{!hailSelectionEvent && <button type="button" onClick={() => { setTab('overview'); setSettings(hailViewSettings(settings, 'history')); }} className="mt-2 w-full rounded-lg border border-cyan-300/40 py-2 text-cyan-200">Select a past hail intensity territory</button>}{!archiveView && settings.mode === 'forecast' && <p className="mt-2 text-amber-200">Forecast shading shows predicted weather. Its colors are not measured hail intensity or a damage boundary.</p>}</div>
+        {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /></div>}
+        {panel && workspaceId && ready && controllerRef.current && hailSelectionEvent && !layerErrors.includes('hail-size-max') && <div className="mt-4"><HailZoneSelector map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async (zone) => {
+          await saveTerritory(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' });
         }} /></div>}
+        {panel && workspaceId && archiveView && selectedEvent && !recentHailEvent && <StormTerritorySketch key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{ version: 1, event: { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end }, selectedAt: new Date().toISOString(), minimumHailMM: null, selection: 'user-drawn', evidenceKind: selectedEvent.hazard === 'hurricane' ? 'track' : 'reports' }} />}
         {workspaceId && props.onStormCampaign && <SavedStormTerritories map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={(territory) => {
+          setPanel(false);
           props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() });
         }} />}
         <div className="mt-4" hidden={tab !== 'settings'}><StormGLSettingsPanel settings={settings} onChange={setSettings} compact /></div>
