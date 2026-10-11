@@ -308,9 +308,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (stormContext?.success && stormContext.data.territoryId) {
-      const { data: parent, error: parentError } = await admin.from('storm_territories').select('boundary,context').eq('workspace_id', targetWorkspaceId).eq('id', stormContext.data.territoryId).maybeSingle();
+      const { data: parent, error: parentError } = await admin.from('storm_territories').select('*').eq('workspace_id', targetWorkspaceId).eq('id', stormContext.data.territoryId).maybeSingle();
       if (parentError) return NextResponse.json({ error: 'Could not verify the storm territory. Please retry.' }, { status: 503 });
       if (!parent) return NextResponse.json({ error: 'Storm territory not found in this workspace.' }, { status: 400 });
+      if(stormContext.data.territoryRevision && stormContext.data.territoryRevision!==parent.revision)return NextResponse.json({error:'Storm territory changed. Reopen it before creating this campaign.'},{status:409});
+      if(parent.zone_id)return NextResponse.json({error:'Validated storm target selection is not enabled for this territory yet.'},{status:409});
       const sourceContext = campaignStormSchema.safeParse({ ...parent.context, territoryId: stormContext.data.territoryId, selectedAt: stormContext.data.selectedAt });
       if (!sourceContext.success) return NextResponse.json({ error: 'Saved storm territory has invalid source details.' }, { status: 400 });
       stormContext.data = sourceContext.data;

@@ -1,0 +1,30 @@
+# Storm Intelligence — implementation and release gates
+
+## Verified on 2026-10-11
+
+- The existing configured Xweather account successfully retrieved a historical hail point query for 2025-03-03. This verifies API access, not regional swaths or export rights.
+- Production REST exposes approximately 5.87 million reference addresses and 4.36 million reference buildings (estimated table counts).
+- Existing PostGIS polygon-address and polygon-building RPCs executed successfully. Empty sample results do not establish regional coverage.
+- Both local and Vercel production DATABASE_URL connections fail with PostgreSQL 28P01. No new migration has been applied.
+- The user confirmed no historical geometry export agreement has been established.
+
+## Implemented in this change
+
+- Automatic report discovery, location search inside Find storm, 7/30/90/year/custom filters and seven-day provider pagination with explicit partial results.
+- Hail filters 25.4 / 44.45 / 63.5 mm, clearly labelled as reported observations when footprints are unavailable.
+- Polygon/MultiPolygon validation, disconnected neighbourhood editing using existing Mapbox Draw, 500 ms address-count debounce, shared saved overlays and legacy context compatibility.
+- Territory rename/duplicate/delete, creator/admin edit permissions, optimistic revisions and revision-aware campaign validation.
+- Spatial migration: normalized event/zone metadata, source resolution, validation/licensing gates, indexed zones, verified address coverage, territory revisions and cumulative unique-address exposure RPC.
+- Workspace capability gates on geometry/exposure APIs. Absent migration or disabled flags returns unavailable, never a zero exposure count.
+
+## Gates remain closed
+
+Apply `20261011210000_storm_intelligence_geometry.sql` only after valid SQL credentials are configured. Verify PostGIS schema/search-path compatibility and the deployed reference address geometry/index definitions before application. Validate migrations against a disposable database first.
+
+Before enabling geometry: obtain the licensed provider export contract, establish a real ingestion adapter, verify source coordinate reference system/time aggregation/resolution and source-event matching, and independently validate historical sample geometries. Point reports must never be joined into fabricated swaths.
+
+Before enabling exposure: establish verified coverage geometries and dataset versions, validate unique source identifiers and residential classifications, independently compare counts and latency, and add aggregate caching/invalidation. Reference-table visibility alone is insufficient evidence of coverage.
+
+Automatic generation, storm-zone boundary intersections, outside-zone opt-in, paginated target review and exact campaign-address selection remain gated/unimplemented until this data contract is available. Do not enable targeting flags with the current interim implementation. Campaigns from custom report territories continue through the existing geographically bounded builder; they do not claim storm-qualified targets or new duplicate prevention.
+
+Native applications are out of the first release. Live browser visual verification remains blocked by the browser tool security check in this session.

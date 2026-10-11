@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 type Count = { count: number; partial: boolean; zoom: number; regions: string[] };
-export function StormTerritoryAddressCount({ workspaceId, boundary }: { workspaceId: string; boundary: GeoJSON.Polygon }) {
+export function StormTerritoryAddressCount({ workspaceId, boundary }: { workspaceId: string; boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon }) {
   const serialized = JSON.stringify(boundary);
   const key = `${workspaceId}:${serialized}`;
   const [result, setResult] = useState<{ key: string; data?: Count; error?: string }>({ key: '' });
@@ -14,7 +14,7 @@ export function StormTerritoryAddressCount({ workspaceId, boundary }: { workspac
         const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Address count unavailable.');
         if (!abort.signal.aborted) setResult({ key, data });
       }).catch(reason => { if (!abort.signal.aborted) setResult({ key, error: reason instanceof Error ? reason.message : 'Address count unavailable.' }); });
-    }, 250);
+    }, 500);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [key, workspaceId, serialized, retry]);
   const current = result.key === key ? result : { key };

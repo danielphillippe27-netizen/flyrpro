@@ -10,8 +10,10 @@ export const eventReferenceSchema = z.object({
 }).strict().refine(v => Date.parse(v.start) <= Date.parse(v.end), 'Invalid event dates');
 export type StormReference = z.infer<typeof eventReferenceSchema>;
 export const campaignStormSchema = z.object({
-  version: z.literal(1), event: eventReferenceSchema,
+  version: z.union([z.literal(1),z.literal(2)]), event: eventReferenceSchema,
   territoryId: z.uuid().optional(),
+  territoryRevision: z.number().int().positive().optional(),
+  zoneId: z.uuid().optional(), includeOutsideZone: z.boolean().optional(),
   selectedAt: z.iso.datetime({ offset: true }),
   minimumHailMM: z.number().min(0).max(150).nullable(),
   maximumHailMM: z.number().min(0).max(150).nullable().optional(),

@@ -10,7 +10,7 @@ import {
 type GoogleCampaign2DMapProps = {
   addresses: CampaignAddress[];
   boundary?: GeoJSON.Polygon | null;
-  stormBoundary?: GeoJSON.Polygon | null;
+  stormBoundary?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null;
   bbox?: [number, number, number, number] | null;
   theme: 'light' | 'dark';
   onReady?: () => void;

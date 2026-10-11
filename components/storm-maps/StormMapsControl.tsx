@@ -4,6 +4,8 @@ import { useStormPanelScroll } from './useStormPanelScroll';
 
 import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
+import { StormTerritoryEditor } from './StormTerritoryEditor';
+import { StormDiscoveryPanel } from './intelligence/StormDiscoveryPanel';
 import { StormWorkbenchView } from './StormWorkbenchView';
 import { StormTerritoryOverlay } from './StormTerritoryOverlay';
 import type { StormDisplaySettings } from '@/lib/storm-maps/display-settings';
@@ -64,7 +66,7 @@ function StormWorkbench(props: Props) {
     title: `Hail exposure · ${settings.historyHours} hours`, hazard: 'hail' as const, source: 'xweather' as const,
     sourceId: 'hail-size-max', start: new Date(territoryWindowEnd.getTime() - settings.historyHours * 3600_000).toISOString(), end: territoryWindowEnd.toISOString(),
   } : null;
-  const saveTerritory = async (name: string, boundary: GeoJSON.Polygon, context: StormCampaignContext) => {
+  const saveTerritory = async (name: string, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon, context: StormCampaignContext) => {
     const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, boundary, context }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error);
     setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
@@ -323,15 +325,14 @@ function StormWorkbench(props: Props) {
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
     <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={active => setTab(active ? 'intelligence' : 'overview')} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
-      renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() })} /> : null}
-      renderArchive={() => workspaceId ? <StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /> : null}
+      renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
+      renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={() => <>
-        <p className="mb-4 text-xs leading-relaxed text-slate-300">Select a measured intensity zone, save its boundary, then create campaigns inside it.</p>
-        {!hailSelectionEvent && <button type="button" onClick={() => { map.setProjection('mercator'); setTab('overview'); setSettings(hailViewSettings(settings, 'history')); }} className="mb-4 w-full rounded-lg bg-[#a9d7d5] py-3 text-xs font-semibold text-[#0c202c]">Select a hail intensity zone</button>}
-        {workspaceId && ready && controllerRef.current && hailSelectionEvent && !layerErrors.includes('hail-size-max') && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => { await saveTerritory(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' }); }} />}
-        {workspaceId && selectedEvent && !recentHailEvent && <StormTerritorySketch workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{ version: 1, event: { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end }, selectedAt: new Date().toISOString(), minimumHailMM: null, selection: 'user-drawn', evidenceKind: selectedEvent.hazard === 'hurricane' ? 'track' : 'reports' }} />}
-        {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() })} />}
+        <p className="mb-4 text-xs leading-relaxed text-slate-300">Custom prospecting boundary. Historical exposure geometry is not yet verified; address counts represent all pins in your boundary.</p>
+        {!selectedEvent && <p className="text-xs">Choose a storm in Find storm first.</p>}
+        {workspaceId && selectedEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:selectedEvent.hazard==='hurricane'?'track':'reports'}} />}
+        {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
       </>} />
   </>;
   return <>
@@ -352,7 +353,7 @@ function StormWorkbench(props: Props) {
         {panel && workspaceId && archiveView && selectedEvent && !recentHailEvent && <StormTerritorySketch workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{ version: 1, event: { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end }, selectedAt: new Date().toISOString(), minimumHailMM: null, selection: 'user-drawn', evidenceKind: selectedEvent.hazard === 'hurricane' ? 'track' : 'reports' }} />}
         {workspaceId && props.onStormCampaign && <SavedStormTerritories map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={(territory) => {
           setPanel(false);
-          props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() });
+          props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() });
         }} />}
         <div className="mt-4" hidden={tab !== 'settings'}><StormGLSettingsPanel settings={settings} onChange={setSettings} compact /></div>
         <div hidden={tab !== 'overview'} className="mt-4 space-y-4">
