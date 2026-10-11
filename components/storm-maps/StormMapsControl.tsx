@@ -215,10 +215,10 @@ function StormWorkbench(props: Props) {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
     const wanted = new Map<string, number>();
-    if (settings.shade !== 'none' && (settings.shade !== 'satellite-infrared-color' || settings.mode !== 'forecast') && (!isHistoricalHailShade(settings.shade) || settings.mode === 'history')) wanted.set(settings.shade, settings.opacity / 100);
+    if (settings.shade !== 'none' && (settings.shade !== 'satellite-infrared-color' || settings.mode !== 'forecast') && (!isHistoricalHailShade(settings.shade) || settings.mode === 'history')) wanted.set(settings.shade, (settings.layerOpacities?.[settings.shade] ?? settings.opacity) / 100);
     for (const group of STORM_LAYER_GROUPS) {
       if (!settings[group.key]) continue;
-      for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
+      for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), settings.layerOpacities?.[group.key] != null ? settings.layerOpacities[group.key] / 100 : group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
     if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); }

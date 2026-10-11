@@ -18,6 +18,7 @@ export type WeatherMode = 'live' | 'history' | 'forecast';
 export type WeatherToggle = 'cyclones' | 'pressure' | 'wind' | 'radar' | 'lightning' | 'lightningThreats' | 'hail' | 'cells' | 'stormCones' | 'alerts' | 'outlook' | 'reports' | 'inspector' | 'impact';
 export type StormGLSettings = Record<WeatherToggle, boolean> & {
   shade: WeatherShade; mode: WeatherMode; opacity: number; radarOpacity: number;
+  layerOpacities?: Record<string, number>;
   speed: number; historyHours: number; units: 'metric' | 'imperial';
 };
 export const STRONGEST_STORM_SETTINGS: StormGLSettings = {
@@ -51,6 +52,10 @@ export function readStormGLSettings(raw: unknown): StormGLSettings {
   if (data.units === 'metric' || data.units === 'imperial') result.units = data.units;
   for (const key of ['opacity', 'radarOpacity'] as const) {
     if (typeof data[key] === 'number' && Number.isFinite(data[key])) result[key] = Math.max(0, Math.min(100, data[key]));
+  }
+  if (data.layerOpacities && typeof data.layerOpacities === 'object' && !Array.isArray(data.layerOpacities)) {
+    const allowed = new Set([...WEATHER_SHADES.map(shade => shade.id), ...STORM_LAYER_GROUPS.map(group => group.key), 'alerts']);
+    result.layerOpacities = Object.fromEntries(Object.entries(data.layerOpacities).filter(([key,value]) => allowed.has(key as never) && typeof value === 'number' && Number.isFinite(value)).map(([key,value]) => [key, Math.max(0,Math.min(100,value as number))]));
   }
   if ([6, 24, 72].includes(Number(data.historyHours))) result.historyHours = Number(data.historyHours);
   if ([6, 12, 24, 48].includes(Number(data.speed))) result.speed = Number(data.speed);
