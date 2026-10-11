@@ -51,6 +51,8 @@ function StormWorkbench(props: Props) {
   const [territoryWindowEnd, setTerritoryWindowEnd] = useState(() => new Date());
   useEffect(() => { if (open) setTerritoryWindowEnd(new Date()); }, [open, settings.mode, settings.historyHours, settings.shade]);
   useEffect(() => { onStormModeChange?.(open); }, [open, onStormModeChange]);
+  const [customTimeline, setCustomTimeline] = useState<{ start: Date; end: Date } | null>(null);
+  const [timelineRange, setTimelineRange] = useState(() => stormTimeRange('live', 6));
   const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('overview');
   const handleWorkbenchArchive = useCallback((active: boolean) => setTab(active ? 'intelligence' : 'overview'), []);
   const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
@@ -184,12 +186,12 @@ function StormWorkbench(props: Props) {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
-    const range = recentHailEvent && selectedEvent ? { start: new Date(selectedEvent.start), end: new Date(selectedEvent.end), current: new Date(selectedEvent.end) } : stormTimeRange(settings.mode, settings.historyHours);
+    const range = recentHailEvent && selectedEvent ? { start: new Date(selectedEvent.start), end: new Date(selectedEvent.end), current: new Date(selectedEvent.end) } : customTimeline ? { ...customTimeline, current: customTimeline.end } : stormTimeRange(settings.mode, settings.historyHours);
     resetStormTimeline(controller, activeIds.current, range, settings.mode === 'history' ? range.end : range.current);
-    setPlaying(false);
-    setRangeLabels({ start: settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
+    setPlaying(false); setTimelineRange(range);
+    setRangeLabels({ start: customTimeline ? range.start.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: customTimeline ? range.end.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
     setPosition(controller.timeline.position * 100); setClock(timeLabel(controller.timeline.currentDate));
-  }, [ready, settings.mode, settings.historyHours, recentHailEvent, selectedEvent]);
+  }, [ready, settings.mode, settings.historyHours, recentHailEvent, selectedEvent, customTimeline]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -326,7 +328,7 @@ function StormWorkbench(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView map={map} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
       renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
@@ -343,7 +345,7 @@ function StormWorkbench(props: Props) {
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
-      {props.standalone && <StormWeatherRail alwaysShowNames={props.displaySettings?.alwaysShowNames} onSettings={props.onDisplaySettings} settings={settings} onChange={value => { if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); setPanel(true); }} />}
+      {props.standalone && <StormWeatherRail alwaysShowNames={props.displaySettings?.alwaysShowNames} onSettings={props.onDisplaySettings} settings={settings} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); setPanel(true); }} />}
       <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find storms. Save a storm territory.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
