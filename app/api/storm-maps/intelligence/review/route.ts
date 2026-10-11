@@ -17,19 +17,18 @@ export async function POST(request: NextRequest) {
   const polygon = parsed.data as Polygon;
   const bounds = bbox(polygon);
   const manager = context.role === 'owner' || context.role === 'admin';
-  let campaignsQuery = context.admin.from('campaigns').select('id,name,status,territory_boundary').eq('workspace_id',context.workspaceId).not('territory_boundary','is',null).order('created_at',{ascending:false}).limit(501);
-  if (!manager) campaignsQuery = campaignsQuery.eq('owner_id',context.user.id);
   const [campaignResult, inspectionResult] = await Promise.all([
-    campaignsQuery,
+    context.admin.rpc('storm_review_boundaries',{p_workspace_id:context.workspaceId,p_owner_id:manager?null:context.user.id}),
     context.admin.from('storm_property_inspections').select('id,event_key,longitude,latitude,property_label,outcome,observed_at').eq('workspace_id',context.workspaceId).gte('longitude',bounds[0]).lte('longitude',bounds[2]).gte('latitude',bounds[1]).lte('latitude',bounds[3]).order('observed_at',{ascending:false}).order('id',{ascending:false}).limit(501),
   ]);
   if (campaignResult.error || inspectionResult.error) return NextResponse.json({error:'Area review unavailable. Existing campaigns and inspections could not both be checked.'},{status:503});
   const warnings: string[] = [];
-  if ((campaignResult.data?.length || 0) > 500) warnings.push('Only the 500 newest campaigns with boundaries were checked.');
+  const campaignRows = (campaignResult.data || []) as Array<{id:string;name:string;status:string;territory_boundary:Polygon|MultiPolygon}>;
+  if (campaignRows.length > 500) warnings.push('Only the 500 newest campaigns with boundaries were checked.');
   if ((inspectionResult.data?.length || 0) > 500) warnings.push('Only the 500 newest inspection records in this region were checked.');
   const totalArea = area(polygon);
   const campaigns: TerritoryReview['campaigns'] = [];
-  for (const row of (campaignResult.data || []).slice(0,500)) {
+  for (const row of campaignRows.slice(0,500)) {
     try {
       const boundary = row.territory_boundary as Polygon | MultiPolygon;
       if (!['Polygon','MultiPolygon'].includes(boundary?.type)) throw new Error('No polygon');
