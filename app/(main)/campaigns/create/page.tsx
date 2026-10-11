@@ -2344,7 +2344,6 @@ export default function CreateCampaignPage() {
             }}
           />
         ) : null}
-        {stormContext && !isSelfServeDemo && <div className="absolute bottom-20 right-5 z-30 max-h-[55vh] w-80 max-w-sm overflow-y-auto rounded-xl border border-cyan-300/30 bg-slate-950/95 p-3 text-xs text-white"><p className="font-semibold">Campaign linked to {stormContext.event.title}</p><p className="mt-1 text-slate-400">Draw the area to inspect. Weather exposure does not confirm property damage.</p><button type="button" onClick={() => setStormContext(null)} className="mt-2 text-cyan-200 underline">Remove storm link</button>{map.current && currentWorkspaceId && <StormTerritoryReview key={currentWorkspaceId} map={map.current} workspaceId={currentWorkspaceId} getBoundary={() => getDrawnPolygon(drawRef.current)} />}</div>}
         {!isSelfServeDemo && mapLoaded && map.current && (
           <UserLocationLayer
             map={map.current}
@@ -2387,7 +2386,7 @@ export default function CreateCampaignPage() {
         ) : null}
 
         {!isSelfServeDemo ? (
-          <div className={`absolute right-5 top-5 z-20 w-[min(22rem,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border ${selfServeSurfaceClass}`}>
+          <div className={`absolute right-5 top-5 z-20 max-h-[calc(100%-2.5rem)] w-[min(22rem,calc(100vw-2.5rem))] overflow-y-auto rounded-2xl border ${selfServeSurfaceClass}`}>
             <div className="space-y-4 p-4">
               {!mapLoaded ? (
                 <div className={`rounded-xl border px-3 py-3 text-sm font-medium ${selfServeSoftSurfaceClass}`}>
@@ -2554,6 +2553,13 @@ export default function CreateCampaignPage() {
                   </p>
                 ) : null}
               </div>
+
+              {stormContext && !isSelfServeDemo && <details className="rounded-xl border border-cyan-300/30 bg-slate-950 p-3 text-xs text-white">
+                <summary className="cursor-pointer font-semibold text-cyan-200">Review storm area · {stormContext.event.title}</summary>
+                <p className="mt-2 text-slate-400">User-drawn inspection area. Weather exposure does not confirm property damage.</p>
+                <button type="button" onClick={() => setStormContext(null)} className="mt-2 text-cyan-200 underline">Remove storm link</button>
+                {map.current && currentWorkspaceId && <StormTerritoryReview key={currentWorkspaceId} map={map.current} workspaceId={currentWorkspaceId} getBoundary={() => getDrawnPolygon(drawRef.current)} />}
+              </details>}
 
               <div className={`border-t pt-4 ${selfServeDividerClass}`}>
                 <button

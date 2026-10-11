@@ -55,3 +55,11 @@ Deploy only the storm-scoped commit; this checkout contains unrelated map/addres
 - Draw campaign handed off the selected storm with a visible provenance banner. No test campaign or invented damage inspection was created; persisted campaign linkage still needs a real campaign verification.
 - Switching back to live overview rendered radar, storm tracks and wind particles through the session endpoint. Ten-minute token rotation and device performance are not yet benchmarked.
 - Database migration checks passed using rollback-only writes. Focused lint and storm tests passed; unrelated existing whole-project type errors remain.
+
+### Campaign review verification
+
+- All four `test:storm-maps` suites passed, including hole-aware spatial checks, edge-only contact, unit labels and latest observation selection.
+- Production worklist fetched successfully; it contained no observations during verification. Append-only update UI is implemented but was not tested by inventing inspection findings.
+- A temporary 3 km² drawn area near University Square returned the existing Tampa campaign as an overlap and exposed the 500-campaign completeness warning. No campaign was created.
+- Database checks verified explicit GeoJSON conversion, workspace/owner scope and revoked direct browser execution of the boundary RPC.
+- Area review is integrated into the scrollable campaign form as a collapsible section, to avoid obstructing creation controls.
