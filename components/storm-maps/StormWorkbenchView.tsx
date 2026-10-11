@@ -3,18 +3,25 @@ import { useEffect, useState, type ReactNode, type RefObject } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { CloudSun, CloudLightning, Tornado, Settings2, MapPin, Bookmark, X, Play, Pause, Maximize, ChevronDown } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
+import { StormListSidebar } from './StormListSidebar';
 import { StormTimelineSettings } from './StormTimelineSettings';
 import { StormWeatherRail } from './StormWeatherRail';
 import { STRONGEST_STORM_SETTINGS, hurricaneViewSettings, type StormGLSettings } from '@/lib/storm-maps/gl-settings';
 type Panel = 'focus' | 'storms' | 'territory' | 'layers' | 'saved' | null;
-type Props = { timelineRange: { start: Date; end: Date }; onTimelineRange: (range: { start: Date; end: Date }) => void; onTimelineSpeed: (duration: number) => void; map: mapboxgl.Map; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; onSettings?: () => void; onArchive: (active: boolean) => void; alwaysShowNames?: boolean; ready: boolean; loading: boolean; error: string | null; playing: boolean; position: number; clock: string; rangeTitle: string; rangeLabels: { start: string; end: string }; onPlay: () => void; onScrub: (value: number) => void; onNow: () => void; legendRef: RefObject<HTMLDivElement | null>; renderSaved: () => ReactNode; renderTerritory: () => ReactNode; renderArchive: (onTerritory: () => void) => ReactNode; renderLayers: () => ReactNode };
+type Props = { onSidebarWidth?: (width: number) => void; timelineRange: { start: Date; end: Date }; onTimelineRange: (range: { start: Date; end: Date }) => void; onTimelineSpeed: (duration: number) => void; map: mapboxgl.Map; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; onSettings?: () => void; onArchive: (active: boolean) => void; alwaysShowNames?: boolean; ready: boolean; loading: boolean; error: string | null; playing: boolean; position: number; clock: string; rangeTitle: string; rangeLabels: { start: string; end: string }; onPlay: () => void; onScrub: (value: number) => void; onNow: () => void; legendRef: RefObject<HTMLDivElement | null>; renderSaved: () => ReactNode; renderTerritory: () => ReactNode; renderArchive: (onTerritory: () => void) => ReactNode; renderLayers: () => ReactNode };
 export function StormWorkbenchView(props: Props) {
   const [panel, setPanel] = useState<Panel>('storms');
+  const [collapsed, setCollapsed] = useState(false);
+  const dashboard = panel === 'storms' || panel === 'saved' || panel === 'territory';
+  const sidebarWidth = dashboard ? collapsed ? 36 : 280 : 0;
+  const { onSidebarWidth } = props;
+  useEffect(() => { onSidebarWidth?.(sidebarWidth); return () => onSidebarWidth?.(0); }, [onSidebarWidth,sidebarWidth]);
+  const collapse = (value: boolean) => { setCollapsed(value); };
   const { onArchive } = props;
   useEffect(() => { onArchive(true); return () => onArchive(false); }, [onArchive]);
   // Discovery is the default workspace; campaign overlays use their own picker.
   const focus = props.settings.cyclones ? 'Tropical' : props.settings.hail || props.settings.cells || props.settings.shade.startsWith('hail-') ? 'Severe' : 'General';
-  const open = (next: Panel) => { const target = panel === next ? null : next; setPanel(target); props.onArchive(target === 'storms'); };
+  const open = (next: Panel) => { const target = panel === next ? null : next; setPanel(target); setCollapsed(false); props.onArchive(target === 'storms'); };
   const apply = (settings: StormGLSettings) => { props.onChange(settings); props.onArchive(false); };
   const focusOptions = [
     { name: 'General', icon: CloudSun, detail: 'Temperatures, radar, wind and current weather.', settings: { ...STRONGEST_STORM_SETTINGS, shade: 'temperatures' as const, hail: false, cells: false, lightning: false, lightningThreats: false, outlook: false, reports: false, radar: true, wind: true, opacity: 100, radarOpacity: 70 } },
@@ -29,15 +36,16 @@ export function StormWorkbenchView(props: Props) {
       <button type="button" title="Map settings" aria-label="Map settings" onClick={props.onSettings} className="rounded p-1 text-[#b5c5cb] hover:text-white"><Settings2 className="h-5 w-5" /></button>
     </header>
     <StormWeatherRail compact settings={props.settings} alwaysShowNames={false} onChange={apply} />
-    <button type="button" aria-label="Find storm" aria-expanded={panel === 'storms'} onClick={() => open('storms')} className="absolute left-4 top-4 z-30 flex h-14 items-center gap-3 rounded-xl bg-[#a9d7d5] px-6 text-base font-semibold text-[#0c202c] shadow-xl"><MapPin className="h-5 w-5" />Find storm</button>
-    {panel && <section aria-label={`${panel} panel`} tabIndex={0} className="dark absolute left-4 top-20 z-30 max-h-[calc(100%-12rem)] w-[min(23rem,calc(100%-7rem))] overflow-y-auto rounded-2xl bg-[#0c202c]/95 p-5 text-white shadow-xl max-lg:top-36" style={{ overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
+    {(!dashboard || collapsed) && <button type="button" aria-label="Find storm" aria-expanded={panel === 'storms' && !collapsed} onClick={() => { if (collapsed && panel === 'storms') setCollapsed(false); else open('storms'); }} className="absolute left-12 top-4 z-30 flex h-14 items-center gap-3 rounded-xl bg-[#a9d7d5] px-6 text-base font-semibold text-[#0c202c] shadow-xl"><MapPin className="h-5 w-5" />Find storm</button>}
+    {dashboard && <StormListSidebar collapsed={collapsed} onCollapse={collapse} tab={panel as 'storms'|'saved'|'territory'} onTab={value=>{setPanel(value);props.onArchive(value==='storms');}} onCreate={()=>{setPanel('territory');props.onArchive(false);}}>
+      {panel === 'storms' && props.renderArchive(() => open('territory'))}
+      {panel === 'saved' && props.renderSaved()}
+      {panel === 'territory' && props.renderTerritory()}
+    </StormListSidebar>}
+    {panel && !dashboard && <section aria-label={`${panel} panel`} tabIndex={0} className="dark absolute left-4 top-20 z-30 max-h-[calc(100%-12rem)] w-[min(23rem,calc(100%-7rem))] overflow-y-auto rounded-2xl bg-[#0c202c]/95 p-5 text-white shadow-xl max-lg:top-36" style={{ overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold">{{focus:'Weather focus',storms:'Find storms',territory:'Storm territories',layers:'Weather layers',saved:'Saved storm maps'}[panel]}</h2><button type="button" aria-label="Close map panel" onClick={() => open(null)} className="rounded-full bg-white/10 p-2"><X className="h-4 w-4" /></button></div>
       {panel === 'focus' && <><p className="mb-4 text-sm leading-relaxed text-[#b5c5cb]">Choose the weather most relevant to your work.</p><div className="grid gap-2">{focusOptions.map(option => <button key={option.name} type="button" aria-pressed={focus === option.name} onClick={() => { apply({ ...option.settings, units: props.settings.units }); setPanel(null); }} className={`rounded-xl border-2 p-4 text-left ${focus === option.name ? 'border-[#a9d7d5] bg-black/20' : 'border-white/15 hover:border-white/40'}`}><span className="flex justify-between text-lg font-semibold">{option.name}<option.icon className="h-6 w-6 text-[#a9d7d5]" /></span><span className="mt-2 block text-sm text-[#b5c5cb]">{option.detail}</span></button>)}</div></>}
-      {(panel === 'storms' || panel === 'saved') && <nav aria-label="Storm lists" className="mb-4 grid grid-cols-2 gap-1 rounded-lg bg-white/10 p-1"><button type="button" aria-pressed={panel === 'storms'} onClick={() => {setPanel('storms');props.onArchive(true);}} className={`rounded-md px-2 py-2 text-xs ${panel === 'storms' ? 'bg-[#a9d7d5] text-[#0c202c]' : ''}`}>Recent storms</button><button type="button" aria-pressed={panel === 'saved'} onClick={() => {setPanel('saved');props.onArchive(false);}} className={`rounded-md px-2 py-2 text-xs ${panel === 'saved' ? 'bg-[#a9d7d5] text-[#0c202c]' : ''}`}>Saved territories</button></nav>}
-      {panel === 'storms' && props.renderArchive(() => open('territory'))}
-      {panel === 'territory' && props.renderTerritory()}
       {panel === 'layers' && props.renderLayers()}
-      {panel === 'saved' && <>{props.renderSaved()}<button type="button" onClick={() => open('territory')} className="mt-4 w-full rounded-lg bg-[#a9d7d5] py-3 text-sm font-semibold text-[#0c202c]">Create storm territory</button></>}
     </section>}
     <aside aria-label="Weather legends" className="absolute bottom-5 right-24 z-20 max-h-[25%] w-[min(21rem,calc(100%-7rem))] overflow-y-auto rounded-lg bg-white p-3 text-slate-800 shadow-xl max-md:bottom-28 max-md:w-48"><div ref={props.legendRef} className="text-xs" /><p className="mt-1 text-[9px] text-slate-500">Weather estimates · Vaisala Xweather</p></aside>
     <div className="absolute bottom-5 left-1/2 z-30 flex w-[min(36rem,calc(100%-10rem))] -translate-x-1/2 items-center gap-3 rounded-2xl bg-[#0c202c]/95 px-4 py-3 text-white shadow-xl max-md:left-4 max-md:w-[calc(100%-7rem)] max-md:translate-x-0">
