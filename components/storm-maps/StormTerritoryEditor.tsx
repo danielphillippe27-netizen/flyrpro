@@ -6,9 +6,9 @@ import type mapboxgl from 'mapbox-gl';
 import { stormGeometrySchema,type StormGeometry } from '@/lib/storm-maps/intelligence/geometry';
 import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { StormTerritoryAddressCount } from './StormTerritoryAddressCount';
-export function StormTerritoryEditor({map,workspaceId,context,onSave,onSelecting,initial}:{map:mapboxgl.Map;workspaceId:string;context:StormCampaignContext;initial?:StormGeometry;onSave:(name:string,boundary:StormGeometry,context:StormCampaignContext)=>Promise<void>;onSelecting:(v:boolean)=>void}){
+export function StormTerritoryEditor({map,workspaceId,context,onSave,onSelecting,initial,initialName}:{map:mapboxgl.Map;workspaceId:string;context:StormCampaignContext;initial?:StormGeometry;initialName?:string;onSave:(name:string,boundary:StormGeometry,context:StormCampaignContext)=>Promise<void>;onSelecting:(v:boolean)=>void}){
  const drawRef=useRef<MapboxDraw|null>(null);
- const [boundary,setBoundary]=useState<StormGeometry|null>(null),[name,setName]=useState(`${context.event.title} territory`.slice(0,160)),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [boundary,setBoundary]=useState<StormGeometry|null>(null),[name,setName]=useState(initialName??`${context.event.title} territory`.slice(0,160)),[busy,setBusy]=useState(false),[error,setError]=useState('');
  useEffect(()=>{
   const draw=new MapboxDraw({displayControlsDefault:false,controls:{polygon:true,trash:true},defaultMode:'simple_select'});drawRef.current=draw;map.addControl(draw,'bottom-left');
   if(initial){const parts=initial.type==='Polygon'?[initial]:initial.coordinates.map(coordinates=>({type:'Polygon' as const,coordinates}));draw.add({type:'FeatureCollection',features:parts.map(geometry=>({type:'Feature',properties:{},geometry}))});}
