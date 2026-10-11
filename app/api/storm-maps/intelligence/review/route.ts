@@ -21,12 +21,12 @@ export async function POST(request: NextRequest) {
   if (!manager) campaignsQuery = campaignsQuery.eq('owner_id',context.user.id);
   const [campaignResult, inspectionResult] = await Promise.all([
     campaignsQuery,
-    context.admin.from('storm_property_inspections').select('id,event_key,longitude,latitude,property_label,outcome,observed_at').eq('workspace_id',context.workspaceId).gte('longitude',bounds[0]).lte('longitude',bounds[2]).gte('latitude',bounds[1]).lte('latitude',bounds[3]).order('observed_at',{ascending:false}).order('id',{ascending:false}).limit(2001),
+    context.admin.from('storm_property_inspections').select('id,event_key,longitude,latitude,property_label,outcome,observed_at').eq('workspace_id',context.workspaceId).gte('longitude',bounds[0]).lte('longitude',bounds[2]).gte('latitude',bounds[1]).lte('latitude',bounds[3]).order('observed_at',{ascending:false}).order('id',{ascending:false}).limit(501),
   ]);
   if (campaignResult.error || inspectionResult.error) return NextResponse.json({error:'Area review unavailable. Existing campaigns and inspections could not both be checked.'},{status:503});
   const warnings: string[] = [];
   if ((campaignResult.data?.length || 0) > 500) warnings.push('Only the 500 newest campaigns with boundaries were checked.');
-  if ((inspectionResult.data?.length || 0) > 2000) warnings.push('Only the 2,000 newest inspection records in this region were checked.');
+  if ((inspectionResult.data?.length || 0) > 500) warnings.push('Only the 500 newest inspection records in this region were checked.');
   const totalArea = area(polygon);
   const campaigns: TerritoryReview['campaigns'] = [];
   for (const row of (campaignResult.data || []).slice(0,500)) {
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   const result: TerritoryReview = {
     areaKM2: totalArea / 1e6,
     campaigns: campaigns.sort((a,b) => b.selectedAreaPercent-a.selectedAreaPercent),
-    inspections: inspectionsWithin((inspectionResult.data || []).slice(0,2000).map(row=>({...row,notes:''})) as InspectionRecord[],polygon),
+    inspections: inspectionsWithin((inspectionResult.data || []).slice(0,500).map(row=>({...row,notes:''})) as InspectionRecord[],polygon),
     scope: manager ? 'Workspace campaigns' : 'Your owned campaigns',
     complete: warnings.length === 0,
     warnings: [...new Set(warnings)],
