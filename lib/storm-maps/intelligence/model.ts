@@ -11,10 +11,12 @@ export const eventReferenceSchema = z.object({
 export type StormReference = z.infer<typeof eventReferenceSchema>;
 export const campaignStormSchema = z.object({
   version: z.literal(1), event: eventReferenceSchema,
+  territoryId: z.uuid().optional(),
   selectedAt: z.iso.datetime({ offset: true }),
   minimumHailMM: z.number().min(0).max(150).nullable(),
-  selection: z.literal('user-drawn'), evidenceKind: z.enum(['reports', 'track', 'hail-size']),
-}).strict();
+  maximumHailMM: z.number().min(0).max(150).nullable().optional(),
+  selection: z.enum(['user-drawn', 'intensity-zone']), evidenceKind: z.enum(['reports', 'track', 'hail-size']),
+}).strict().refine(value => value.maximumHailMM == null || (value.minimumHailMM != null && value.maximumHailMM > value.minimumHailMM), 'Invalid hail intensity band');
 export type StormCampaignContext = z.infer<typeof campaignStormSchema>;
 export type StormMapFeature = GeoJSON.Feature<GeoJSON.Geometry, {
   id: string; label: string; time: string; kind: 'report' | 'track' | 'position' | 'forecast';

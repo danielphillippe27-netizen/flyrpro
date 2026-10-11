@@ -1,0 +1,47 @@
+import { campaignWithinStormTerritory, stormTerritorySchema } from '../intelligence/storm-territories';
+import assert from 'node:assert/strict';
+import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
+import { hailMillimeters, bandForHail, connectedHailCells, hailCellsPolygon } from '../intensity/hail-zone';
+import { campaignStormSchema } from '../intelligence/model';
+assert.equal(hailMillimeters({ value: 1, unit: 'in', nodata: false }), 25.4);
+assert.equal(hailMillimeters({ value: 2.5, unit: 'cm', nodata: false }), 25);
+assert.equal(hailMillimeters({ value: 999, nodata: true }), null);
+assert.equal(hailMillimeters({ value: NaN, nodata: false }), null);
+assert.equal(hailMillimeters({ value: 1, unit: 'unknown', nodata: false }), null);
+assert.deepEqual(bandForHail(44), { minimum: 38.1, maximum: 50.8 });
+const width = 9, height = 9, values: (number | null)[] = Array(width * height).fill(0);
+for (let y = 2; y <= 5; y++) for (let x = 2; x <= 5; x++) values[y * width + x] = 30;
+values[3 * width + 3] = 0; // preserve interior hole
+values[7 * width + 7] = 45; // separate pocket
+const cells = connectedHailCells(values, width, height, 2 * width + 2, 25.4, null);
+assert.equal(cells.size, 15);
+assert.equal(cells.has(7 * width + 7), false);
+const boundary = hailCellsPolygon(cells, width, height, [0,0,9,9]);
+assert.equal(booleanPointInPolygon([2.5,2.5], boundary), true);
+assert.equal(booleanPointInPolygon([3.5,3.5], boundary), false);
+assert.equal(booleanPointInPolygon([7.5,7.5], boundary), false);
+values[2 * width + 3] = 45;
+assert.equal(connectedHailCells(values, width, height, 2 * width + 2, 25.4, 38.1).size, 14);
+assert.throws(() => connectedHailCells(values, width, height, 7 * width + 7, 50.8, null), /outside/);
+const offscreen = Array(25).fill(30);
+assert.throws(() => connectedHailCells(offscreen, 5, 5, 12, 25.4, null), /beyond the map/);
+const diagonal = Array(25).fill(0); diagonal[6] = 30; diagonal[12] = 30;
+assert.equal(connectedHailCells(diagonal, 5, 5, 6, 25.4, null).size, 1);
+const context = { version: 1, event: { key: 'hail-test', title: 'Hail test', hazard: 'hail', source: 'xweather', sourceId: 'hail-size-max', start: '2026-10-09T00:00:00Z', end: '2026-10-10T00:00:00Z' }, selectedAt: '2026-10-10T12:00:00Z', minimumHailMM: 25.4, maximumHailMM: 38.1, selection: 'intensity-zone', evidenceKind: 'hail-size' };
+assert.equal(campaignStormSchema.safeParse(context).success, true);
+assert.equal(campaignStormSchema.safeParse({ ...context, maximumHailMM: 12.7 }).success, false);
+assert.equal(campaignStormSchema.safeParse({ ...context, selection: 'confirmed-damage' }).success, false);
+console.log('Hail zones: units, thresholds, connected pockets, holes, bands, edge rejection and campaign context passed');
+
+
+const parent: GeoJSON.Polygon = { type: 'Polygon', coordinates: [[[0,0],[0.1,0],[0.1,0.1],[0,0.1],[0,0]], [[0.04,0.04],[0.04,0.06],[0.06,0.06],[0.06,0.04],[0.04,0.04]]] };
+const child: GeoJSON.Polygon = { type: 'Polygon', coordinates: [[[0.01,0.01],[0.03,0.01],[0.03,0.03],[0.01,0.03],[0.01,0.01]]] };
+assert.equal(campaignWithinStormTerritory(child, parent), true);
+assert.equal(campaignWithinStormTerritory(parent, parent), true);
+const crossesHole: GeoJSON.Polygon = { type: 'Polygon', coordinates: [[[0.02,0.02],[0.08,0.02],[0.08,0.08],[0.02,0.08],[0.02,0.02]]] };
+assert.equal(campaignWithinStormTerritory(crossesHole, parent), false);
+const outside: GeoJSON.Polygon = { type: 'Polygon', coordinates: [[[0.09,0.01],[0.12,0.01],[0.12,0.03],[0.09,0.03],[0.09,0.01]]] };
+assert.equal(campaignWithinStormTerritory(outside, parent), false);
+assert.equal(stormTerritorySchema.safeParse({ name: 'Iowa hail territory', boundary: parent, context }).success, true);
+assert.equal(stormTerritorySchema.safeParse({ name: '', boundary: parent, context }).success, false);
+console.log('Saved territories: validated boundaries, child containment, hole exclusion and outside rejection passed');

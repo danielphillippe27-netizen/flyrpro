@@ -2337,10 +2337,18 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
             territories={campaignOverlayFeatureCollection}
-            onStormCampaign={(context) => {
+            onStormCampaign={(context, boundary) => {
               setStormContext(context);
               setName(`${context.event.title} campaign`);
+              if (context.territoryId) { drawRef.current?.deleteAll(); savedFeaturesRef.current = null; setCampaignBuildingCount(0); }
               startDrawing();
+              if (context.territoryId) drawRef.current?.changeMode('draw_polygon');
+              if (boundary && drawRef.current) {
+                drawRef.current.set({ type: 'FeatureCollection', features: [boundary] });
+                savedFeaturesRef.current = drawRef.current.getAll();
+                drawRef.current.changeMode('simple_select');
+                window.requestAnimationFrame(refreshBuildingSelection);
+              }
             }}
           />
         ) : null}
@@ -2556,7 +2564,9 @@ export default function CreateCampaignPage() {
 
               {stormContext && !isSelfServeDemo && <details className="rounded-xl border border-cyan-300/30 bg-slate-950 p-3 text-xs text-white">
                 <summary className="cursor-pointer font-semibold text-cyan-200">Review storm area · {stormContext.event.title}</summary>
-                <p className="mt-2 text-slate-400">User-drawn inspection area. Weather exposure does not confirm property damage.</p>
+                <p className="mt-2 text-slate-400">{stormContext.selection === 'intensity-zone' ? 'Estimated hail intensity boundary. Click the boundary to edit it before creating your campaign.' : 'User-drawn inspection area.'} Weather exposure does not confirm property damage.</p>
+                {stormContext.selection === 'intensity-zone' && stormContext.minimumHailMM != null && <p className="mt-2 text-cyan-200">Estimated hail: {(stormContext.minimumHailMM / 25.4).toFixed(1)}″ / {stormContext.minimumHailMM.toFixed(1)} mm{stormContext.maximumHailMM == null ? ' or greater' : ` to under ${(stormContext.maximumHailMM / 25.4).toFixed(1)}″ / ${stormContext.maximumHailMM.toFixed(1)} mm`}</p>}
+                <p className="mt-2 text-[10px] text-slate-400">{stormContext.event.start.slice(0,10)} – {stormContext.event.end.slice(0,10)} · UTC · {stormContext.evidenceKind === 'hail-size' ? 'Xweather estimated hail' : stormContext.event.source.toUpperCase()}</p>
                 <button type="button" onClick={() => setStormContext(null)} className="mt-2 text-cyan-200 underline">Remove storm link</button>
                 {map.current && currentWorkspaceId && <StormTerritoryReview key={currentWorkspaceId} map={map.current} workspaceId={currentWorkspaceId} getBoundary={() => getDrawnPolygon(drawRef.current)} />}
               </details>}

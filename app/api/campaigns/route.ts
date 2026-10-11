@@ -1,3 +1,5 @@
+import { campaignWithinStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
+import { reviewPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
 import { NextRequest, NextResponse } from 'next/server';
 import { campaignStormSchema, type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -303,6 +305,17 @@ export async function POST(request: NextRequest) {
         );
       }
       targetWorkspaceId = fallbackResolution.workspaceId;
+    }
+
+    if (stormContext?.success && stormContext.data.territoryId) {
+      const { data: parent, error: parentError } = await admin.from('storm_territories').select('boundary,context').eq('workspace_id', targetWorkspaceId).eq('id', stormContext.data.territoryId).maybeSingle();
+      if (parentError) return NextResponse.json({ error: 'Could not verify the storm territory. Please retry.' }, { status: 503 });
+      if (!parent) return NextResponse.json({ error: 'Storm territory not found in this workspace.' }, { status: 400 });
+      const sourceContext = campaignStormSchema.safeParse({ ...parent.context, territoryId: stormContext.data.territoryId, selectedAt: stormContext.data.selectedAt });
+      if (!sourceContext.success) return NextResponse.json({ error: 'Saved storm territory has invalid source details.' }, { status: 400 });
+      stormContext.data = sourceContext.data;
+      const child = reviewPolygonSchema.safeParse(territory_boundary);
+      if (!child.success || !campaignWithinStormTerritory(child.data, parent.boundary)) return NextResponse.json({ error: 'Draw this campaign entirely inside the saved storm territory.' }, { status: 400 });
     }
 
     let { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(

@@ -1,5 +1,9 @@
 'use client';
 
+import { HailZoneSelector } from './HailZoneSelector';
+import { SavedStormTerritories } from './SavedStormTerritories';
+import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import type { MapboxMapController } from '@xweather/mapsgl';
@@ -17,7 +21,7 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormCampaign?: (context: StormCampaignContext) => void };
+type Props = { map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
@@ -28,6 +32,8 @@ export function StormMapsControl(props: Props) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(true);
   const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('intelligence');
+  const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
+  const [territoryRevision, setTerritoryRevision] = useState(0);
   const [selectedEvent, setSelectedEvent] = useState<StormEvent | null>(null);
   const archiveView = tab === 'intelligence';
   const recentHailEvent = archiveView && selectedEvent?.hazard === 'hail' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000;
@@ -58,7 +64,7 @@ export function StormMapsControl(props: Props) {
   }, [map]);
 
   useEffect(() => {
-    setEntitled(false); setManifest(null); setOpen(false);
+    setEntitled(false); setManifest(null); setOpen(false); setSavedTerritory(null);
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
@@ -289,6 +295,15 @@ export function StormMapsControl(props: Props) {
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find past storms. Plan your next campaign.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
         {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onCampaign={props.onStormCampaign ? (context) => { props.onStormCampaign?.(context); setPanel(false); } : undefined} /></div>}
+        {archiveView && ready && controllerRef.current && props.onStormCampaign && recentHailEvent && selectedEvent && !layerErrors.includes('hail-size-max') && <div className="mt-4"><HailZoneSelector map={map} controller={controllerRef.current} windowKey={selectedEvent.key} onApply={async (zone) => {
+          const event = { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end };
+          const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: zone.name, boundary: zone.polygon.geometry, context: { version: 1, event, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' } }) });
+          const data = await response.json(); if (!response.ok) throw new Error(data.error);
+          setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
+        }} /></div>}
+        {workspaceId && props.onStormCampaign && <SavedStormTerritories map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={(territory) => {
+          props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, selectedAt: new Date().toISOString() });
+        }} />}
         <div className="mt-4" hidden={tab !== 'settings'}><StormGLSettingsPanel settings={settings} onChange={setSettings} compact /></div>
         <div hidden={tab !== 'overview'} className="mt-4 space-y-4">
           <p className={`rounded-lg border p-2 text-[11px] ${settings.mode === 'history' ? 'border-violet-300/30 text-violet-200' : 'border-amber-300/30 text-amber-200'}`}>{settings.mode === 'history' ? 'PAST · Hail-size shading shows historical estimates. Threat tracks are archived predictions.' : settings.mode === 'forecast' ? 'FORECAST · Predicted weather and threat areas.' : 'LIVE · Current weather with short-range forecast threats.'}</p>
