@@ -13,6 +13,7 @@ export default function StormsPage() {
   const container = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<mapboxgl.Map | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [mapError, setMapError] = useState('');
   const { currentWorkspaceId } = useWorkspace();
   const router = useRouter();
   const [preferences, setPreferences] = useState<{ workspace: string; value: StormDisplaySettings } | null>(null);
@@ -60,14 +61,21 @@ export default function StormsPage() {
     instance.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
     instance.addControl(new mapboxgl.GeolocateControl({ positionOptions: { enableHighAccuracy: true } }), 'bottom-right');
     setMap(instance);
-    const ready = () => setLoaded(true);
+    const resize = () => instance.resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(container.current);
+    const frame = requestAnimationFrame(resize);
+    const error = (event: mapboxgl.ErrorEvent) => { if (!instance.isStyleLoaded()) setMapError(event.error.message || 'Could not load the base map.'); };
+    instance.on('error', error);
+    const ready = () => { instance.resize(); setMapError(''); setLoaded(true); };
     instance.on('load', ready);
-    return () => { instance.off('load', ready); removeMapboxMapWhenSafe(instance); };
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); instance.off('error', error); instance.off('load', ready); removeMapboxMapWhenSafe(instance); };
   }, []);
   return <div className="relative min-h-0 flex-1 overflow-hidden" aria-label="Storm Maps workspace">
-    <div ref={container} className="absolute inset-0" />
+    <div ref={container} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
     <div className={controlsHidden || settingsOpen ? "pointer-events-none opacity-0" : "opacity-100"}><StormMapsControl displaySettings={display} onDisplaySettings={() => setSettingsOpen(true)} standalone map={map} mapLoaded={loaded} workspaceId={currentWorkspaceId} onStormCampaign={context => { if (context.territoryId) router.push(`/campaigns/create?stormTerritory=${encodeURIComponent(context.territoryId)}`); }} /></div>
     {settingsOpen && <section role="dialog" aria-label="Storm map settings" className="absolute left-5 top-5 z-40 max-h-[calc(100%-2.5rem)] w-[min(30rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-5 text-white shadow-2xl"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-semibold">Map settings</h2><button type="button" aria-label="Close map settings" onClick={() => setSettingsOpen(false)} className="rounded-lg border border-white/15 px-3 py-2 text-sm">Close</button></div><StormDisplaySettingsPanel value={display} onChange={saveDisplay} /></section>}
-    {!loaded && <p role="status" className="absolute left-5 top-5 rounded-xl bg-slate-950 p-4 text-white">Loading storm map…</p>}
+    {mapError && <p role="alert" className="absolute bottom-5 left-5 z-40 max-w-md rounded-xl bg-red-950 p-4 text-white">{mapError}</p>}
+    {!loaded && !mapError && <p role="status" className="absolute left-5 top-5 rounded-xl bg-slate-950 p-4 text-white">Loading storm map…</p>}
   </div>;
 }
