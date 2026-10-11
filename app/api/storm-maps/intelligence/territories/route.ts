@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
+import { containedStormArea, effectiveStormArea } from '@/lib/storm-maps/intelligence/geometry';
 import { stormTerritorySchema } from '@/lib/storm-maps/intelligence/storm-territories';
 export async function GET(request: NextRequest) {
   const c = await stormContext(request); if ('response' in c) return c.response;
@@ -19,9 +20,20 @@ export async function POST(request: NextRequest) {
   let raw: unknown; try { raw = JSON.parse(text); } catch { return NextResponse.json({ error: 'Invalid territory.' }, { status: 400 }); }
   const parsed = stormTerritorySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: 'Choose a name and a valid, non-crossing storm territory smaller than 500 km².' }, { status: 400 });
-  if(parsed.data.context.evidenceKind==='hail-size')return NextResponse.json({error:'Automatic historical territories require licensed, validated severity geometry. Draw a custom prospecting territory instead.'},{status:409});
+  let zoneFields = {};
+  if(parsed.data.context.evidenceKind==='hail-size'){
+    const {data:flags}=await c.admin.from('storm_intelligence_rollout').select('geometry_enabled').eq('workspace_id',c.workspaceId).maybeSingle();
+    if(!flags?.geometry_enabled||!parsed.data.context.zoneId)return NextResponse.json({error:'Validated severity geometry is not enabled for this workspace.'},{status:409});
+    const {data:zone,error:zoneError}=await c.admin.from('storm_severity_zones').select('id,event_key,minimum_mm,geometry').eq('id',parsed.data.context.zoneId).eq('event_key',parsed.data.context.event.key).eq('validated',true).eq('license_verified',true).maybeSingle();
+    if(zoneError||!zone)return NextResponse.json({error:'The selected severity zone is unavailable. Reload the storm.'},{status:409});
+    if(!containedStormArea(parsed.data.boundary,zone.geometry))return NextResponse.json({error:'The territory must remain inside the selected severity zone.'},{status:400});
+    parsed.data.context.minimumHailMM=Number(zone.minimum_mm);
+    parsed.data.context.maximumHailMM=undefined;
+    parsed.data.context.includeOutsideZone=false;
+    zoneFields={event_key:zone.event_key,zone_id:zone.id,effective_geometry:effectiveStormArea(parsed.data.boundary,zone.geometry),include_outside_zone:false};
+  }
   const context = { ...parsed.data.context,version:2 as const }; delete context.territoryId;delete context.territoryRevision;
-  const { data, error } = await c.admin.from('storm_territories').insert({ workspace_id: c.workspaceId, created_by: c.user.id, ...parsed.data, context }).select('*').single();
+  const { data, error } = await c.admin.from('storm_territories').insert({ workspace_id: c.workspaceId, created_by: c.user.id, ...parsed.data, context, ...zoneFields }).select('*').single();
   if (error) return NextResponse.json({ error: 'Could not save the territory. Retry after the database migration is applied.' }, { status: 503 });
   return NextResponse.json({ territory: data }, { status: 201 });
 }

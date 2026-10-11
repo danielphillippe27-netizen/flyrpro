@@ -6,7 +6,7 @@
 - Production REST exposes approximately 5.87 million reference addresses and 4.36 million reference buildings (estimated table counts).
 - Existing PostGIS polygon-address and polygon-building RPCs executed successfully. Empty sample results do not establish regional coverage.
 - Both local and Vercel production DATABASE_URL connections fail with PostgreSQL 28P01. No new migration has been applied.
-- The user confirmed no historical geometry export agreement has been established.
+- The user confirmed Xweather permits storing historical swaths. The retrieval endpoint/data format remains unconfirmed; storage permission does not provide the export itself.
 
 ## Implemented in this change
 
@@ -25,6 +25,6 @@ Before enabling geometry: obtain the licensed provider export contract, establis
 
 Before enabling exposure: establish verified coverage geometries and dataset versions, validate unique source identifiers and residential classifications, independently compare counts and latency, and add aggregate caching/invalidation. Reference-table visibility alone is insufficient evidence of coverage.
 
-Automatic generation, storm-zone boundary intersections, outside-zone opt-in, paginated target review and exact campaign-address selection remain gated/unimplemented until this data contract is available. Do not enable targeting flags with the current interim implementation. Campaigns from custom report territories continue through the existing geographically bounded builder; they do not claim storm-qualified targets or new duplicate prevention.
+Validated-zone clicking, connected-area black outlines, selected-boundary cumulative counts, and server-validated territory creation are wired. Production still lacks the geometry tables and real source ingestion, so these remain unavailable. Outside-zone opt-in, paginated target review and exact campaign-address selection remain unimplemented. Do not enable targeting flags with the current interim implementation. Campaigns from custom report territories continue through the existing geographically bounded builder; they do not claim storm-qualified targets or new duplicate prevention.
 
 Native applications are out of the first release. Live browser visual verification remains blocked by the browser tool security check in this session.
