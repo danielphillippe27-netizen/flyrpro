@@ -1,4 +1,3 @@
-import { campaignWithinStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
 import { reviewPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
 import { NextRequest, NextResponse } from 'next/server';
 import { campaignStormSchema, type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
@@ -312,12 +311,13 @@ export async function POST(request: NextRequest) {
       if (parentError) return NextResponse.json({ error: 'Could not verify the storm territory. Please retry.' }, { status: 503 });
       if (!parent) return NextResponse.json({ error: 'Storm territory not found in this workspace.' }, { status: 400 });
       if(stormContext.data.territoryRevision && stormContext.data.territoryRevision!==parent.revision)return NextResponse.json({error:'Storm territory changed. Reopen it before creating this campaign.'},{status:409});
-      if(parent.zone_id)return NextResponse.json({error:'Validated storm target selection is not enabled for this territory yet.'},{status:409});
-      const sourceContext = campaignStormSchema.safeParse({ ...parent.context, territoryId: stormContext.data.territoryId, selectedAt: stormContext.data.selectedAt });
+      // The saved storm is a reference overlay; the user's campaign boundary
+      // controls geographic targeting, including areas outside the storm zone.
+      const sourceContext = campaignStormSchema.safeParse({ ...parent.context, territoryId: stormContext.data.territoryId, selectedAt: stormContext.data.selectedAt, includeOutsideZone: true });
       if (!sourceContext.success) return NextResponse.json({ error: 'Saved storm territory has invalid source details.' }, { status: 400 });
       stormContext.data = sourceContext.data;
       const child = reviewPolygonSchema.safeParse(territory_boundary);
-      if (!child.success || !campaignWithinStormTerritory(child.data, parent.boundary)) return NextResponse.json({ error: 'Draw this campaign entirely inside the saved storm territory.' }, { status: 400 });
+      if (!child.success) return NextResponse.json({ error: 'Select a valid campaign boundary.' }, { status: 400 });
     }
 
     let { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(
