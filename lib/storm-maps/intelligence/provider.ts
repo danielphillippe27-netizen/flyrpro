@@ -34,6 +34,6 @@ export async function loadReportEvents(bbox: number[], start: string, end: strin
 export async function loadCyclones(start:string,end:string,center:[number,number],sourceId?:string,active=false) {
   const path=sourceId?`tropicalcyclones/archive/${sourceId}`:active?'tropicalcyclones':'tropicalcyclones/archive/closest';
   const params:Record<string,string>=sourceId?{}:active?{limit:'100'}:{p:`${center[1]},${center[0]}`,from:start,to:end,limit:'25',radius:'1500miles'};
-  return (await xweatherData<CycloneResponse>(path,params)).map(cycloneEvent);
+  return (await xweatherData<CycloneResponse>(path,{...params,filter:'geo,windfield'})).map(cycloneEvent);
 }
 export type HailArchiveRow={loc:{lat:number;long:number};periods:Array<{dateTimeISO:string;maxSizeMM:number|null;maxSizeIN:number|null;probSevere:number|null}>;profile?:{tz:string}};

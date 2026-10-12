@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { booleanPointInPolygon, point } from '@turf/turf';
+import { cycloneEvent, type CycloneResponse } from '../intelligence/normalize';
+import { hurricaneWindArea } from '../intelligence/hurricane-area';
+import { campaignStormSchema, referenceOf } from '../intelligence/model';
+const polygon:GeoJSON.Polygon={type:'Polygon',coordinates:[[[0,0],[2,0],[2,2],[0,2],[0,0]],[[.5,.5],[.5,1],[1,1],[1,.5],[.5,.5]]]};
+const row:CycloneResponse={id:'2024-AL-14',profile:{name:'Test',year:2024,isActive:false,maxStormCat:'H3',lifespan:{startDateTimeISO:'2024-10-01T00:00:00Z',endDateTimeISO:'2024-10-02T00:00:00Z'}},track:[{dateTimeISO:'2024-10-01T00:00:00Z',loc:{long:0,lat:0},details:{stormCat:'H3',windSpeedKPH:200,gustSpeedKPH:230,pressureMB:950,windRadii:[{windSpeedKTS:34,windField:polygon}]}},{dateTimeISO:'2024-10-02T00:00:00Z',loc:{long:5,lat:5},details:{windRadii:[{windSpeedKTS:34,windField:{type:'Polygon',coordinates:[[[5,5],[6,5],[6,6],[5,6],[5,5]]]}}]}}]};
+const event=cycloneEvent(row),area=hurricaneWindArea(event,34)!;
+assert.equal(area.type,'MultiPolygon');
+assert.equal(booleanPointInPolygon(point([.75,.75]),area),false,'holes preserved');
+assert.equal(booleanPointInPolygon(point([3,3]),area),false,'no invented connecting swath');
+assert.equal(hurricaneWindArea(event,64),null,'no invented hurricane force geometry');
+assert.equal(hurricaneWindArea(event,34,[0,0,.4,.4])?.type,'Polygon');
+const position=event.features.find(f=>f.properties.kind==='position')!;
+assert.equal(position.properties.gustKPH,230);assert.equal(position.properties.pressureMB,950);
+assert.ok(campaignStormSchema.safeParse({version:2,event:referenceOf(event),selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'intensity-zone',evidenceKind:'wind-field',windSelection:{minimumKTS:34,method:'advisory-windfield-union',clippedToMap:true}}).success);
+assert.equal(hurricaneWindArea(cycloneEvent({...row,track:row.track?.map(p=>({...p,details:{}}))}),34),null);
+console.log('Hurricane union, thresholds, holes, disconnected areas, clipping, intensity metadata and context passed');

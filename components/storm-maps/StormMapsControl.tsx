@@ -1,4 +1,5 @@
 'use client';
+import { HurricaneAreaSelector } from './HurricaneAreaSelector';
 
 import { useStormPanelScroll } from './useStormPanelScroll';
 
@@ -183,15 +184,17 @@ function StormWorkbench(props: Props) {
     };
   }, [open, map, mapLoaded, workspaceId, glEnabled, revision, props.standalone]);
 
+  useEffect(()=>{if(selectedEvent?.hazard==='hurricane')setSettings(previous=>hurricaneViewSettings(previous,'satellite'));},[selectedEvent,setSettings]);
+
   useEffect(() => {
     const controller = controllerRef.current;
     if (!ready || !controller) return;
-    const range = recentHailEvent && selectedEvent ? { start: new Date(selectedEvent.start), end: new Date(selectedEvent.end), current: new Date(selectedEvent.end) } : customTimeline ? { ...customTimeline, current: customTimeline.end } : stormTimeRange(settings.mode, settings.historyHours);
+    const range = archiveView && selectedEvent ? { start: new Date(selectedEvent.start), end: new Date(selectedEvent.end), current: new Date(selectedEvent.end) } : customTimeline ? { ...customTimeline, current: customTimeline.end } : stormTimeRange(settings.mode, settings.historyHours);
     resetStormTimeline(controller, activeIds.current, range, settings.mode === 'history' ? range.end : range.current);
     setPlaying(false); setTimelineRange(range);
-    setRangeLabels({ start: customTimeline ? range.start.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: customTimeline ? range.end.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
+    setRangeLabels({ start: customTimeline || (archiveView&&selectedEvent) ? range.start.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'forecast' ? 'Now' : `−${settings.mode === 'history' ? settings.historyHours : 1}h`, end: customTimeline || (archiveView&&selectedEvent) ? range.end.toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : settings.mode === 'history' ? 'Now' : `+${settings.mode === 'forecast' ? 24 : 1}h` });
     setPosition(controller.timeline.position * 100); setClock(timeLabel(controller.timeline.currentDate));
-  }, [ready, settings.mode, settings.historyHours, recentHailEvent, selectedEvent, customTimeline]);
+  }, [ready, settings.mode, settings.historyHours, recentHailEvent, selectedEvent, customTimeline, archiveView]);
 
   useEffect(() => {
     const controller = controllerRef.current;
@@ -221,7 +224,7 @@ function StormWorkbench(props: Props) {
       for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), settings.layerOpacities?.[group.key] != null ? settings.layerOpacities[group.key] / 100 : group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
-    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); }
+    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
@@ -321,7 +324,7 @@ function StormWorkbench(props: Props) {
   const impacts = useMemo(() => stormTerritoryImpact(territories, risk), [territories, risk]);
   const toggled = STORM_LAYER_GROUPS.filter((group) => settings[group.key]);
   const enabledCount = toggled.length + [settings.alerts, settings.outlook, settings.reports].filter(Boolean).length;
-  const rangeTitle = settings.mode === 'forecast' ? 'Forecast · next 24h' : settings.mode === 'history' ? `History · past ${settings.historyHours}h` : 'Live + 1h nowcast';
+  const rangeTitle = archiveView&&selectedEvent ? `${selectedEvent.title} · Historical` : settings.mode === 'forecast' ? 'Forecast · next 24h' : settings.mode === 'history' ? `History · past ${settings.historyHours}h` : 'Live + 1h nowcast';
 
   if (!mapLoaded || !map) return null;
   if (!entitled) return props.standalone ? <div className="absolute left-5 top-5 z-30 rounded-xl bg-slate-950 p-5 text-white">Storm Maps requires an active workspace Storm Maps add-on. <Link className="underline" href="/settings">Open settings</Link></div> : null;
@@ -338,7 +341,8 @@ function StormWorkbench(props: Props) {
         {workspaceId && ready && controllerRef.current && hailSelectionEvent && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => {
           await saveTerritory(zone.name,zone.polygon.geometry,{version:2,event:hailSelectionEvent,selectedAt:new Date().toISOString(),minimumHailMM:zone.minimum,maximumHailMM:zone.maximum,selection:'intensity-zone',evidenceKind:'hail-sampled',sampling:{cellMeters:zone.cellMeters,clickedMM:zone.sampledMM,method:'numerical-map-contour'}});
         }} />}
-        {workspaceId && selectedEvent && !hailSelectionEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:selectedEvent.hazard==='hurricane'?'track':'reports'}} />}
+        {workspaceId && selectedEvent?.hazard==='hurricane'&&<HurricaneAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
+        {workspaceId && selectedEvent && selectedEvent.hazard!=='hurricane' && !hailSelectionEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'reports'}} />}
         {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
       </>} />
   </>;

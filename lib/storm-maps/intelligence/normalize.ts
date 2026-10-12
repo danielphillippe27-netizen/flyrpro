@@ -33,8 +33,8 @@ export function reportEvents(collection: GeoJSON.FeatureCollection, bbox: number
   return [...groups.values()].sort((a,b)=>b.start.localeCompare(a.start));
 }
 
-type CyclonePoint = {loc?:{long:number;lat:number};location?:GeoJSON.Point;dateTimeISO:string;details?:{stormCat?:string;windSpeedKPH?:number}};
-export type CycloneResponse = {id:string;profile:{name:string;year:number;isActive:boolean;maxStormCat:string;windSpeed?:{maxKPH:number};lifespan:{startDateTimeISO:string;endDateTimeISO:string|null}};track?:CyclonePoint[];forecast?:CyclonePoint[];position?:CyclonePoint|null};
+type CyclonePoint = {loc?:{long:number;lat:number};location?:GeoJSON.Point;dateTimeISO:string;details?:{stormCat?:string;windSpeedKPH?:number;gustSpeedKPH?:number|null;pressureMB?:number|null;windRadii?:Array<{windField?:GeoJSON.Polygon|GeoJSON.MultiPolygon;windSpeedKTS:number}>|null}};
+export type CycloneResponse = {id:string;profile:{name:string;year:number;isActive:boolean;maxStormCat:string;windSpeed?:{maxKPH:number};lifespan:{startDateTimeISO:string;endDateTimeISO:string|null}};track?:CyclonePoint[];forecast?:CyclonePoint[];position?:CyclonePoint|null;errorCone?:GeoJSON.Polygon|GeoJSON.MultiPolygon|null};
 export function cycloneEvent(row: CycloneResponse): StormEvent {
   const features:StormMapFeature[]=[];
   for(const [kind,values] of [['track',row.track||[]],['forecast',row.forecast||[]]] as const){
@@ -49,9 +49,11 @@ export function cycloneEvent(row: CycloneResponse): StormEvent {
     for(const {p,coordinates} of points){
       if(segment.length && Math.abs(coordinates[0]-segment[segment.length-1][0])>180)flush();
       segment.push(coordinates);
-      features.push({type:'Feature',geometry:{type:'Point',coordinates},properties:{id:`${row.id}:${kind}:${p.dateTimeISO}`,label:`${row.profile.name} · ${p.details?.stormCat||''}`,time:p.dateTimeISO,kind:kind==='forecast'?'forecast':'position',windKPH:p.details?.windSpeedKPH??null,category:p.details?.stormCat}});
+      if(kind==='track')for(const field of p.details?.windRadii??[]){if(field.windField&&['Polygon','MultiPolygon'].includes(field.windField.type))features.push({type:'Feature',geometry:field.windField,properties:{id:`${row.id}:wind:${p.dateTimeISO}:${field.windSpeedKTS}`,label:`${row.profile.name} · ${field.windSpeedKTS} kt+ wind`,time:p.dateTimeISO,kind:'wind-field',minimumKTS:field.windSpeedKTS}});}
+      features.push({type:'Feature',geometry:{type:'Point',coordinates},properties:{id:`${row.id}:${kind}:${p.dateTimeISO}`,label:`${row.profile.name} · ${p.details?.stormCat||''}`,time:p.dateTimeISO,kind:kind==='forecast'?'forecast':'position',windKPH:p.details?.windSpeedKPH??null,gustKPH:p.details?.gustSpeedKPH??null,pressureMB:p.details?.pressureMB??null,category:p.details?.stormCat}});
     }
     flush();
   }
+  if(row.errorCone&&['Polygon','MultiPolygon'].includes(row.errorCone.type))features.push({type:'Feature',geometry:row.errorCone,properties:{id:`${row.id}:forecast-cone`,label:'Forecast centre uncertainty',time:row.position?.dateTimeISO??row.profile.lifespan.startDateTimeISO,kind:'cone'}});
   return {key:`xweather:${row.id}`,sourceId:row.id,title:`${row.profile.name} · ${row.profile.year}`,source:'xweather',hazard:'hurricane',start:row.profile.lifespan.startDateTimeISO,end:row.profile.lifespan.endDateTimeISO||new Date().toISOString(),features,reportCount:0,maxHailMM:null,maxWindKPH:row.profile.windSpeed?.maxKPH??null,category:row.profile.maxStormCat,active:row.profile.isActive,footprintStatus:'unavailable'};
 }
