@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: 'Choose a name and a valid, non-crossing storm territory smaller than 500 km².' }, { status: 400 });
   if(parsed.data.context.evidenceKind==='hail-sampled' && (parsed.data.context.selection!=='intensity-zone'||!parsed.data.context.sampling||parsed.data.context.minimumHailMM==null))return NextResponse.json({error:'Choose a numerical hail zone first.'},{status:400});
   if(parsed.data.context.evidenceKind==='wind-field'&&(parsed.data.context.event.hazard!=='hurricane'||!parsed.data.context.windSelection||parsed.data.context.selection!=='intensity-zone'))return NextResponse.json({error:'Select a hurricane wind area first.'},{status:400});
+  if(parsed.data.context.reportSelection&&(parsed.data.context.event.hazard!=='tornado'||parsed.data.context.evidenceKind!=='reports'||parsed.data.context.selection!=='user-drawn'))return NextResponse.json({error:'Choose a tornado prospecting area.'},{status:400});
   let zoneFields = {};
   if(parsed.data.context.evidenceKind==='hail-size'){
     const {data:flags}=await c.admin.from('storm_intelligence_rollout').select('geometry_enabled').eq('workspace_id',c.workspaceId).maybeSingle();

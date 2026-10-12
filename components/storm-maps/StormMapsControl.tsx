@@ -1,4 +1,5 @@
 'use client';
+import { TornadoAreaSelector } from './TornadoAreaSelector';
 import { HurricaneAreaSelector } from './HurricaneAreaSelector';
 
 import { useStormPanelScroll } from './useStormPanelScroll';
@@ -336,13 +337,14 @@ function StormWorkbench(props: Props) {
       renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={() => <>
-        <p className="mb-4 text-xs leading-relaxed text-slate-300">Click the hail shading to select a zone. Check its addresses, then save.</p>
+        <p className="mb-4 text-xs leading-relaxed text-slate-300">Select a shaded area, check its addresses, then save.</p>
         {!selectedEvent && <p className="text-xs">Choose a storm in Find storm first.</p>}
         {workspaceId && ready && controllerRef.current && hailSelectionEvent && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => {
           await saveTerritory(zone.name,zone.polygon.geometry,{version:2,event:hailSelectionEvent,selectedAt:new Date().toISOString(),minimumHailMM:zone.minimum,maximumHailMM:zone.maximum,selection:'intensity-zone',evidenceKind:'hail-sampled',sampling:{cellMeters:zone.cellMeters,clickedMM:zone.sampledMM,method:'numerical-map-contour'}});
         }} />}
         {workspaceId && selectedEvent?.hazard==='hurricane'&&<HurricaneAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
-        {workspaceId && selectedEvent && selectedEvent.hazard!=='hurricane' && !hailSelectionEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'reports'}} />}
+        {workspaceId && selectedEvent?.hazard==='tornado'&&<TornadoAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
+        {workspaceId && selectedEvent && selectedEvent.hazard!=='hurricane' && selectedEvent.hazard!=='tornado' && !hailSelectionEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'reports'}} />}
         {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
       </>} />
   </>;

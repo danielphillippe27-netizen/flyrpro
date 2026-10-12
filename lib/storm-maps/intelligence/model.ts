@@ -13,6 +13,7 @@ export const campaignStormSchema = z.object({
   version: z.union([z.literal(1),z.literal(2)]), event: eventReferenceSchema,
   territoryId: z.uuid().optional(),
   territoryRevision: z.number().int().positive().optional(),
+  reportSelection: z.object({method:z.literal('report-proximity'),radiusKM:z.number().min(0.5).max(5),reportIds:z.array(z.string().min(1).max(160)).min(1).max(200)}).strict().optional(),
   windSelection: z.object({minimumKTS:z.number().positive(),method:z.literal('advisory-windfield-union'),clippedToMap:z.boolean()}).strict().optional(),
   sampling: z.object({cellMeters:z.number().positive(),clickedMM:z.number().min(0).max(200),method:z.literal('numerical-map-contour')}).strict().optional(),
   zoneId: z.uuid().optional(), includeOutsideZone: z.boolean().optional(),
