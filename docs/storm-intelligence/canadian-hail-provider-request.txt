@@ -1,0 +1,18 @@
+Subject: WolfGrid — Canadian historical hail footprint sample and archive access
+
+WolfGrid helps roofing teams find past hailstorms, select affected neighbourhoods, count existing address pins, and create field-sales campaigns.
+
+We need one real Alberta historical hail event from October 11, 2025 through October 11, 2026 as an initial sample, followed by the previous 12 months of available Alberta events.
+
+Please provide:
+- A dated event identifier and actual hail-size grid or Polygon/MultiPolygon GeoJSON, not an image, point-location history, or forecast warning area.
+- Numerical estimated hail sizes in millimetres, or cumulative polygons for >=25.4 mm, >=44.45 mm, and >=63.5 mm.
+- Coordinate reference system, native resolution, estimation method, observed period, source update time, coverage/no-data mask, and uncertainty information.
+- A documented event search/export endpoint or downloadable sample, authentication instructions, request costs, historical retention, regional coverage, and update frequency.
+- Written confirmation that WolfGrid may store this data, display it to paying customers, and calculate address exposure from its geometry. Storage permission has already been reported by our team; please confirm the remaining permitted uses and attribution requirements.
+
+The first acceptance test is one real historical severity overlay, independently checked unique address counts, and one territory-to-campaign handoff. We will not represent estimated exposure as confirmed roof damage.
+
+Xweather: Can our existing account access this storm-wide Canadian historical product? The documented /hail/archive location histories and recent MapsGL hail-size layer do not establish that access. If a separate product/export arrangement is required, please specify it.
+
+Alternative supplier: The Weather Company HailVision documents Canadian MESH grids and threshold polygons. Please confirm whether the previous 12 months are exportable, rather than only the current observation products.
