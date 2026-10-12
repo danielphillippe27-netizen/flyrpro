@@ -16,7 +16,7 @@ export async function xweatherData<T>(path: string, params: Record<string,string
   if(!body.success)throw new Error('This Xweather archive request is not available with the current provider access.');
   return Array.isArray(body.response)?body.response:[];
 }
-export async function loadReportEvents(bbox: number[], start: string, end: string, hazard: StormHazard) {
+export async function loadReportCollection(start:string,end:string) {
   const key=`intelligence:reports:${start}:${end}`;
   const cached=await getCachedStormValue<GeoJSON.FeatureCollection>(key);
   let data=cached?.value;
@@ -29,8 +29,10 @@ export async function loadReportEvents(bbox: number[], start: string, end: strin
     if(data?.type!=='FeatureCollection'||!Array.isArray(data.features))throw new Error('Historical report response was invalid');
     await setCachedStormValue(key,data,1800,1800);
   }
-  return reportEvents(data,bbox,start,end,hazard);
+  if(!data)throw Error('Historical report response was empty');
+  return data;
 }
+export async function loadReportEvents(bbox:number[],start:string,end:string,hazard:StormHazard){return reportEvents(await loadReportCollection(start,end),bbox,start,end,hazard);}
 export async function loadCyclones(start:string,end:string,center:[number,number],sourceId?:string,active=false) {
   const path=sourceId?`tropicalcyclones/archive/${sourceId}`:active?'tropicalcyclones':'tropicalcyclones/archive/closest';
   const params:Record<string,string>=sourceId?{}:active?{limit:'100'}:{p:`${center[1]},${center[0]}`,from:start,to:end,limit:'25',radius:'1500miles'};
