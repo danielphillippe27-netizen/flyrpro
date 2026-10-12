@@ -46,6 +46,14 @@
     {
       "path": "/api/cron/storm-collection",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron/storm-country-collection",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/storm-hail-watch",
+      "schedule": "30 2 * * *"
     }
   ]
 }
