@@ -38,6 +38,10 @@
     {
       "path": "/api/cron/kimicoco",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/storm-digest",
+      "schedule": "0 * * * *"
     }
   ]
 }

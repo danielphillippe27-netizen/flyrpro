@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {buildStormDigest,torontoDigestClock} from '../intelligence/digest';
+import {reportEvents} from '../intelligence/normalize';
+assert.deepEqual(torontoDigestClock(new Date('2026-07-01T13:00:00Z')),{date:'2026-07-01',hour:9});
+assert.deepEqual(torontoDigestClock(new Date('2026-12-01T14:00:00Z')),{date:'2026-12-01',hour:9});
+assert.equal(torontoDigestClock(new Date('2026-07-01T14:00:00Z')).hour,10);
+assert.equal(torontoDigestClock(new Date('2026-12-01T13:00:00Z')).hour,8);
+const start=new Date('2026-10-10T13:00:00Z'),end=new Date('2026-10-11T13:00:00Z');
+const hail=reportEvents({type:'FeatureCollection',features:[{type:'Feature',geometry:{type:'Point',coordinates:[-95,40]},properties:{valid:'2026-10-10T14:00:00Z',typetext:'HAIL',state:'IA',magnitude:2}}]},[-180,18,-50,85],start.toISOString(),end.toISOString(),'hail');
+const profile={name:'Test',year:2026,isActive:true,maxStormCat:'H3',lifespan:{startDateTimeISO:start.toISOString(),endDateTimeISO:null}};
+const digest=buildStormDigest(hail,[{id:'one',profile,position:{dateTimeISO:'2026-10-11T12:00:00Z'}},{id:'stale',profile,position:{dateTimeISO:'2026-10-09T12:00:00Z'}}],start,end);
+assert.equal(digest.hailReports,1);assert.equal(digest.hailStates,1);assert.equal(digest.maximumHailMM,50.8);assert.equal(digest.cycloneUpdates?.length,1);assert.ok(digest.text.includes('2.00 in'));
+assert.ok(buildStormDigest(null,null,start,end).text.includes('Hail feed unavailable'));
+assert.equal(buildStormDigest(null,null,start,end).hailReports,null);
+assert.ok(buildStormDigest([],[],start,end).text.includes('0 U.S. hail reports'));
+console.log('Storm digest DST scheduling, counts, stale advisories and unavailable-feed handling passed');
