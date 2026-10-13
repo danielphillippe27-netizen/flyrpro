@@ -16,7 +16,7 @@ export async function GET(request:NextRequest){
   try{
     const b=bbox.data;
     if(hazard.data==='hurricane')await consumeArchiveRequest(context);
-    const events=hazard.data==='hurricane'?await loadCyclones(range.start,range.end,[(b[0]+b[2])/2,(b[1]+b[3])/2],id,q.get('active')==='true'):await loadReportEvents(b,range.start,range.end,hazard.data);
-    return NextResponse.json({events,coverage:hazard.data==='hurricane'?'Cyclone tracks and advisory intensity. A track is not a damage footprint.':'U.S. reported observations grouped by UTC day and state within this map view. These are report points, not complete storm footprints. No reports does not establish no exposure.',footprintsAvailable:false},{headers:{'Cache-Control':'private, no-store'}});
+    const events=hazard.data==='hurricane'?await loadCyclones(range.start,range.end,[b[0],b[1],b[2],b[3]],id,q.get('active')==='true'):await loadReportEvents(b,range.start,range.end,hazard.data);
+    return NextResponse.json({events,coverage:hazard.data==='hurricane'?'Cyclone tracks, advisory intensity, latest-advisory wind extent and forecast cones where available. Wind areas are time-specific; the cone shows centre uncertainty, not a damage footprint.':'U.S. reported observations grouped by UTC day and state within this map view. These are report points, not complete storm footprints. No reports does not establish no exposure.',footprintsAvailable:false},{headers:{'Cache-Control':'private, no-store'}});
   }catch(e){return stormError(e);}
 }

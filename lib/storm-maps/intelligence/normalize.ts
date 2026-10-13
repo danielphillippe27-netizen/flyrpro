@@ -33,8 +33,16 @@ export function reportEvents(collection: GeoJSON.FeatureCollection, bbox: number
   return [...groups.values()].sort((a,b)=>b.start.localeCompare(a.start));
 }
 
-type CyclonePoint = {loc?:{long:number;lat:number};location?:GeoJSON.Point;dateTimeISO:string;details?:{stormCat?:string;windSpeedKPH?:number}};
-export type CycloneResponse = {id:string;profile:{name:string;year:number;isActive:boolean;maxStormCat:string;windSpeed?:{maxKPH:number};lifespan:{startDateTimeISO:string;endDateTimeISO:string|null}};track?:CyclonePoint[];forecast?:CyclonePoint[];position?:CyclonePoint|null};
+type CyclonePoint = {loc?:{long:number;lat:number};location?:GeoJSON.Point;dateTimeISO:string;details?:{stormCat?:string;windSpeedKPH?:number;windRadii?:Array<{windSpeedKTS:number;windField?:GeoJSON.Polygon|GeoJSON.MultiPolygon|null}>}};
+export type CycloneResponse = {id:string;profile:{name:string;year:number;isActive:boolean;maxStormCat:string;windSpeed?:{maxKPH:number};lifespan:{startDateTimeISO:string;endDateTimeISO:string|null}};errorCone?:GeoJSON.Polygon|GeoJSON.MultiPolygon|null;track?:CyclonePoint[];forecast?:CyclonePoint[];position?:CyclonePoint|null};
+function validArea(geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon | null | undefined): geometry is GeoJSON.Polygon | GeoJSON.MultiPolygon {
+  if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.type)) return false;
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  return Array.isArray(polygons) && polygons.length > 0 && polygons.every(polygon => Array.isArray(polygon) && polygon.length > 0 && polygon.every(ring =>
+    Array.isArray(ring) && ring.length >= 4 && ring.every(point => Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]) && Math.abs(point[0]) <= 180 && Math.abs(point[1]) <= 90) &&
+    ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+  ));
+}
 export function cycloneEvent(row: CycloneResponse): StormEvent {
   const features:StormMapFeature[]=[];
   for(const [kind,values] of [['track',row.track||[]],['forecast',row.forecast||[]]] as const){
@@ -53,5 +61,15 @@ export function cycloneEvent(row: CycloneResponse): StormEvent {
     }
     flush();
   }
+  const position = row.position;
+  if (position) {
+    const coordinates = position.location?.coordinates || (position.loc ? [position.loc.long, position.loc.lat] : null);
+    if (coordinates && coordinates.every(Number.isFinite)) features.push({type:'Feature',geometry:{type:'Point',coordinates},properties:{id:`${row.id}:current`,label:`${row.profile.name} · latest advisory`,time:position.dateTimeISO,kind:'position',category:position.details?.stormCat,windKPH:position.details?.windSpeedKPH,advisoryPhase:row.profile.isActive?'current':'historical'}});
+    for (const radii of position.details?.windRadii || []) {
+      if (![34,50,64].includes(radii.windSpeedKTS) || !validArea(radii.windField)) continue;
+      features.push({type:'Feature',geometry:radii.windField,properties:{id:`${row.id}:wind:${radii.windSpeedKTS}`,label:`${radii.windSpeedKTS}-kt wind extent · latest advisory`,time:position.dateTimeISO,kind:'wind-area',windThresholdKTS:radii.windSpeedKTS,advisoryPhase:row.profile.isActive?'current':'historical',description:'Advisory wind extent at this time; not a cumulative damage footprint.'}});
+    }
+  }
+  if (row.profile.isActive && validArea(row.errorCone)) features.push({type:'Feature',geometry:row.errorCone,properties:{id:`${row.id}:cone`,label:'Forecast cone · centre uncertainty',time:position?.dateTimeISO||row.profile.lifespan.startDateTimeISO,kind:'forecast-cone',advisoryPhase:'forecast',description:'Uncertainty in the future centre position. Winds can extend beyond the cone.'}});
   return {key:`xweather:${row.id}`,sourceId:row.id,title:`${row.profile.name} · ${row.profile.year}`,source:'xweather',hazard:'hurricane',start:row.profile.lifespan.startDateTimeISO,end:row.profile.lifespan.endDateTimeISO||new Date().toISOString(),features,reportCount:0,maxHailMM:null,maxWindKPH:row.profile.windSpeed?.maxKPH??null,category:row.profile.maxStormCat,active:row.profile.isActive,footprintStatus:'unavailable'};
 }

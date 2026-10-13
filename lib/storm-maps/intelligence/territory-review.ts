@@ -3,7 +3,7 @@ import { area, booleanPointInPolygon, feature, featureCollection, intersect, kin
 import type { Polygon, MultiPolygon } from 'geojson';
 
 const position = z.tuple([z.number().finite().min(-180).max(180), z.number().finite().min(-85).max(85)]);
-export const reviewPolygonSchema = z.object({
+function polygonSchema(maxAreaKM2: number) { return z.object({
   type: z.literal('Polygon'),
   coordinates: z.array(z.array(position).min(4).max(500)).min(1).max(20),
 }).strict().superRefine((polygon, ctx) => {
@@ -14,9 +14,11 @@ export const reviewPolygonSchema = z.object({
   })) ctx.addIssue({code:'custom', message:'Use a closed local boundary with at most 1,000 vertices.'});
   try {
     const size = area(polygon);
-    if (size <= 0 || size > 500_000_000 || kinks(polygon).features.length) ctx.addIssue({code:'custom',message:'Use a non-crossing boundary smaller than 500 km².'});
+    if (size <= 0 || size > maxAreaKM2 * 1_000_000 || kinks(polygon).features.length) ctx.addIssue({code:'custom',message:`Use a non-crossing boundary smaller than ${maxAreaKM2.toLocaleString()} km².`});
   } catch { ctx.addIssue({code:'custom',message:'Invalid territory boundary.'}); }
-});
+}); }
+export const reviewPolygonSchema = polygonSchema(500);
+export const stormTerritoryPolygonSchema = polygonSchema(5_000);
 
 export type InspectionRecord = {
   id: string; event_key: string; longitude: number; latitude: number;

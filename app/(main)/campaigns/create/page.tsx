@@ -2064,6 +2064,8 @@ export default function CreateCampaignPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           storm_context: !isSelfServeDemo && stormContext ? stormContext : undefined,
+          territory_boundary: polygon,
+          bbox,
           name: isSelfServeDemo ? name.trim() || DEFAULT_SELF_SERVE_CAMPAIGN_NAME : name,
           type: isSelfServeDemo ? 'prospecting' : 'flyer',
           address_source: 'map',
@@ -2250,7 +2252,7 @@ export default function CreateCampaignPage() {
       if (isSelfServeDemo) {
         clearSelfServeCampaignDraft();
       }
-      const campaignParams = new URLSearchParams({ campaignPanel: 'hidden' });
+      const campaignParams = new URLSearchParams();
       if (isSelfServeDemo) campaignParams.set('source', 'self-serve-demo');
       router.push(`/campaigns/${campaign.id}?${campaignParams.toString()}`);
       window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
@@ -2338,6 +2340,7 @@ export default function CreateCampaignPage() {
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
             territories={campaignOverlayFeatureCollection}
+            territoryDrawing={phase === 'drawing'}
             onStormModeChange={setStormMode}
             onStormCampaign={(context, boundary) => {
               setStormMode(false);

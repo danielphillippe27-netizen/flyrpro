@@ -1,6 +1,7 @@
 'use client';
 
 import mapboxgl from 'mapbox-gl';
+import { ATMOSPHERIC_STYLE_URL, createAtmosphericStyle } from './map-atmospheric-themes';
 import type { Theme } from '@/lib/theme-provider';
 export { MAP_STYLE_PRESET_META, type MapStylePreset } from './map-style-presets';
 import type { MapStylePreset } from './map-style-presets';
@@ -91,6 +92,10 @@ export function resolveMapStyle(
   theme: Theme,
   version: MapStyleVersion,
 ): ResolvedMapStyle {
+  if (preset === 'stormIntelligence' || preset === 'cleanLight') {
+    return { key: `atmospheric:${theme}`, style: ATMOSPHERIC_STYLE_URL };
+  }
+
   // White Out is the light-theme treatment. Never allow it to bleed into a
   // dark workspace, including when an older White Out preference is stored in
   // localStorage. Black Out and satellite remain explicit, theme-independent
@@ -175,7 +180,25 @@ function stripBuildingLayersFromStyle(styleObject: Record<string, unknown>) {
   return nextStyle;
 }
 
-async function resolveStylePayload(resolvedStyle: ResolvedMapStyle) {
+async function resolveStylePayload(resolvedStyle: ResolvedMapStyle): Promise<string | Record<string, unknown> | mapboxgl.StyleSpecification> {
+  if (resolvedStyle.key.startsWith('atmospheric:')) {
+    const cached = strippedStyleCache.get(resolvedStyle.key);
+    if (cached) return cloneStyleObject(cached);
+    try {
+      const url = toStylesApiUrl(resolvedStyle.style, mapboxgl.accessToken ?? '');
+      if (!url || !mapboxgl.accessToken) throw new Error('Mapbox token unavailable');
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Streets V10 unavailable: ${response.status}`);
+      const base = await response.json() as mapboxgl.StyleSpecification;
+      const themed = createAtmosphericStyle(base, resolvedStyle.key.endsWith(':dark') ? 'dark' : 'light');
+      strippedStyleCache.set(resolvedStyle.key, themed as unknown as Record<string, unknown>);
+      return cloneStyleObject(themed);
+    } catch (error) {
+      console.warn('Atmospheric map unavailable; using existing WolfGrid style.', error);
+      const fallback = resolveMapStyle('standard', resolvedStyle.key.endsWith(':dark') ? 'dark' : 'light', 'v12');
+      return resolveStylePayload(fallback).catch(() => fallback.style);
+    }
+  }
   if (!shouldStripBuildingsFromPreset(resolvedStyle)) {
     return resolvedStyle.style;
   }
@@ -245,7 +268,17 @@ export function applyResolvedMapStyle(
         return;
       }
 
-      map.setStyle(stylePayload as string | mapboxgl.StyleSpecification);
+      let next = stylePayload as string | mapboxgl.StyleSpecification;
+      const previous = map.getStyle();
+      if (typeof next !== 'string' && isAtmosphericStyle(previous) && isAtmosphericStyle(next)) {
+        // Preserve custom source data and layer order across palette changes.
+        const baseLayers = new Map(next.layers.map((layer) => [layer.id, layer]));
+        const layers = previous.layers.map((layer) => baseLayers.get(layer.id) ?? layer);
+        const existingIds = new Set(layers.map((layer) => layer.id));
+        layers.push(...next.layers.filter((layer) => !existingIds.has(layer.id)));
+        next = { ...next, sources: { ...previous.sources, ...next.sources }, layers };
+      }
+      map.setStyle(next);
     })
     .catch((error) => {
       if (!isCurrentStyleRequest()) return;
@@ -266,6 +299,8 @@ export function applyPresetVisualTweaks(
     preserveLayerPrefixes?: string[];
   },
 ) {
+  if (resolvedStyle.key.startsWith('atmospheric:')) return;
+
   if (resolvedStyle.key.startsWith('standard:')) {
     hideBaseBuildingLayers(map, options);
     hideBaseAddressNumberLayers(map, options);
@@ -541,7 +576,7 @@ export function hideBaseBuildingLayers(
   },
 ) {
   const style = map.getStyle();
-  if (!style?.layers) return;
+  if (!style?.layers || isAtmosphericStyle(style)) return;
 
   for (const layer of style.layers) {
     if (!isBaseBuildingLayer(layer, options)) continue;
@@ -581,4 +616,8 @@ export function hideBaseBuildingLayers(
       // Removing imported/base layers is not always allowed; opacity suppression above is the fallback.
     }
   }
+}
+
+function isAtmosphericStyle(style: mapboxgl.StyleSpecification | undefined) {
+  return Boolean((style?.metadata as Record<string, unknown> | undefined)?.['wolfgrid:atmospheric']);
 }

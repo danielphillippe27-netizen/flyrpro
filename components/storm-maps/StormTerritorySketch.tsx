@@ -39,7 +39,7 @@ export function StormTerritorySketch({ map, workspaceId, context, onSave, onSele
     if (points.length < 3) return;
     const boundary: GeoJSON.Polygon = { type: 'Polygon', coordinates: [[...points, points[0]]] };
     const parsed = stormTerritorySchema.safeParse({ name, boundary, context });
-    if (!parsed.success) { setError('Choose a name and a non-crossing territory smaller than 500 km².'); return; }
+    if (!parsed.success) { setError('Choose a name and a non-crossing territory smaller than 5,000 km².'); return; }
     setBusy(true); setDrawing(false); setError('');
     try { await onSave(parsed.data.name, boundary, context); setPoints([]); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save territory.'); }

@@ -616,20 +616,22 @@ export class BedrockCountryService {
     private readonly scanAddresses = fetchScopedPmtilesAddresses
   ) {}
 
-  async countStormTerritoryPins(polygon: GeoJSON.Polygon, regionCode: string) {
+  async countStormTerritoryPins(polygon: GeoJSON.Polygon, regionCode: string, nativeAddresses = false) {
     const key = usaAddressPmtilesKey(this.config, regionCode);
     if (!key) throw new Error('Address tile coverage is unavailable for this region.');
     const snapshot = this.snapshotForCampaign('storm-territory-count', 0, emptyBedrockScanMetric(this.config), regionCode);
     const result = await this.scanAddresses({
       campaignId: 'storm-territory-count', snapshot: snapshotToCampaignSnapshotRow(snapshot),
       bbox: turf.bbox(polygon) as Bounds, boundary: polygon, queryEngine: 'storm_territory_z10_pins',
-      pmtilesKey: key, sourceLayer: 'addresses', promoteId: 'address_id', preferredZoom: 10, signal: AbortSignal.timeout(120_000),
+      pmtilesKey: key, sourceLayer: 'addresses', promoteId: 'address_id',
+      ...(nativeAddresses ? { minZoom: 10 } : { preferredZoom: 10 }), signal: AbortSignal.timeout(120_000),
       normalizeFeature: ({ campaignId, feature, lon, lat }) => normalizePmtilesAddressFeature({
         campaignId, feature, lon, lat, source: this.config.provisionSource, fallbackRegion: regionCode,
         defaultSource: this.config.defaultSource, idPrefix: this.config.provisionSource,
       }),
     });
     return {
+      addresses: result.addresses,
       ids: result.addresses.map(address => address.gers_id ?? JSON.stringify([address.formatted, address.unit, address.coordinate])),
       tiles: result.metric.touchedTiles,
       tileZoom: Number(result.metric.timings.queryZoom ?? 10),

@@ -19,7 +19,8 @@ export const campaignStormSchema = z.object({
 }).strict().refine(value => value.maximumHailMM == null || (value.minimumHailMM != null && value.maximumHailMM > value.minimumHailMM), 'Invalid hail intensity band');
 export type StormCampaignContext = z.infer<typeof campaignStormSchema>;
 export type StormMapFeature = GeoJSON.Feature<GeoJSON.Geometry, {
-  id: string; label: string; time: string; kind: 'report' | 'track' | 'position' | 'forecast';
+  id: string; label: string; time: string; kind: 'report' | 'track' | 'position' | 'forecast' | 'wind-area' | 'forecast-cone';
+  windThresholdKTS?: number; advisoryPhase?: 'historical' | 'current' | 'forecast';
   hailMM?: number | null; windKPH?: number | null; category?: string; description?: string;
 }>;
 export type StormEvent = StormReference & {
@@ -44,7 +45,7 @@ export function referenceOf(event: StormEvent): StormReference {
   return { key, title, hazard, source, start, end, sourceId };
 }
 export function eventBounds(event: StormEvent): [number,number,number,number] | null {
-  const points = event.features.flatMap(f => f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.type === 'LineString' ? f.geometry.coordinates : []);
+  const points = event.features.flatMap(f => f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.type === 'LineString' ? f.geometry.coordinates : f.geometry.type === 'Polygon' ? f.geometry.coordinates.flat() : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates.flat(2) : []);
   if (!points.length) return null;
   const xs=points.map(p=>p[0]), ys=points.map(p=>p[1]);
   return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];

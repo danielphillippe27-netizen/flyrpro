@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { area, difference, feature, featureCollection } from '@turf/turf';
 import { campaignStormSchema, type StormCampaignContext } from './model';
-import { reviewPolygonSchema } from './territory-review';
+import { stormTerritoryPolygonSchema } from './territory-review';
 export const stormTerritorySchema = z.object({
-  name: z.string().trim().min(1).max(160), boundary: reviewPolygonSchema,
+  name: z.string().trim().min(1).max(160), boundary: stormTerritoryPolygonSchema,
   context: campaignStormSchema,
 }).strict();
 export type SavedStormTerritory = {

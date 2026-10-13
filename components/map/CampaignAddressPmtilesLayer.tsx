@@ -597,7 +597,8 @@ export function CampaignAddressPmtilesLayer({
         minzoom: 10,
         filter: getLayerFilter('Polygon'),
         layout: {
-          'fill-extrusion-edge-radius': 0.2,
+          // Rounded extrusion edges can create long spikes at low zoom.
+          'fill-extrusion-edge-radius': 0,
         },
         paint: {
           'fill-extrusion-color': addressColorExpression,
@@ -606,7 +607,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-base': 0,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
-          'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-rounded-roof': false,
           'fill-extrusion-cast-shadows': false,
         },
       } as mapboxgl.AnyLayer);
@@ -732,7 +733,8 @@ export function CampaignAddressPmtilesLayer({
         minzoom: source.minzoom,
         filter: getLayerFilter('Polygon'),
         layout: {
-          'fill-extrusion-edge-radius': 0.2,
+          // Rounded extrusion edges can create long spikes at low zoom.
+          'fill-extrusion-edge-radius': 0,
         },
         paint: {
           'fill-extrusion-color': addressColorExpression,
@@ -741,7 +743,7 @@ export function CampaignAddressPmtilesLayer({
           'fill-extrusion-base': 0,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
-          'fill-extrusion-rounded-roof': true,
+          'fill-extrusion-rounded-roof': false,
           'fill-extrusion-cast-shadows': false,
         },
       } as mapboxgl.AnyLayer);

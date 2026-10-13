@@ -292,12 +292,13 @@ export function removeStormFeatures(map: mapboxgl.Map) {
   if (map.getSource(STORM_FEATURE_SOURCE_ID)) map.removeSource(STORM_FEATURE_SOURCE_ID);
 }
 
-export function bindStormFeaturePopups(map: mapboxgl.Map) {
+export function bindStormFeaturePopups(map: mapboxgl.Map, isDrawing: () => boolean = () => false) {
   const layerIds = [STORM_OUTLOOK_FILL_LAYER_ID, STORM_ALERT_FILL_LAYER_ID, STORM_REPORT_LAYER_ID].filter((id) => map.getLayer(id));
   if (layerIds.length === 0) return () => {};
   let activePopup: mapboxgl.Popup | null = null;
 
   const handleClick = (event: mapboxgl.MapLayerMouseEvent) => {
+    if (isDrawing()) return;
     const properties = event.features?.[0]?.properties as StormFeatureProperties | undefined;
     if (!properties) return;
     const root = document.createElement('div');
@@ -331,8 +332,8 @@ export function bindStormFeaturePopups(map: mapboxgl.Map) {
       .setDOMContent(root)
       .addTo(map);
   };
-  const handleEnter = () => { map.getCanvas().style.cursor = 'pointer'; };
-  const handleLeave = () => { map.getCanvas().style.cursor = ''; };
+  const handleEnter = () => { if (!isDrawing()) map.getCanvas().style.cursor = 'pointer'; };
+  const handleLeave = () => { if (!isDrawing()) map.getCanvas().style.cursor = ''; };
   map.on('click', layerIds, handleClick);
   map.on('mouseenter', layerIds, handleEnter);
   map.on('mouseleave', layerIds, handleLeave);

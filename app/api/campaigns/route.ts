@@ -1,5 +1,5 @@
 import { campaignWithinStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
-import { reviewPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
+import { stormTerritoryPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
 import { NextRequest, NextResponse } from 'next/server';
 import { campaignStormSchema, type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -314,7 +314,7 @@ export async function POST(request: NextRequest) {
       const sourceContext = campaignStormSchema.safeParse({ ...parent.context, territoryId: stormContext.data.territoryId, selectedAt: stormContext.data.selectedAt });
       if (!sourceContext.success) return NextResponse.json({ error: 'Saved storm territory has invalid source details.' }, { status: 400 });
       stormContext.data = sourceContext.data;
-      const child = reviewPolygonSchema.safeParse(territory_boundary);
+      const child = stormTerritoryPolygonSchema.safeParse(territory_boundary);
       if (!child.success || !campaignWithinStormTerritory(child.data, parent.boundary)) return NextResponse.json({ error: 'Draw this campaign entirely inside the saved storm territory.' }, { status: 400 });
     }
 

@@ -16,6 +16,10 @@ const settings = readStormGLSettings({ hail: false, opacity: 999, radarOpacity: 
 assert.equal(settings.hail, false); assert.equal(settings.opacity,100); assert.equal(settings.radarOpacity,0); assert.equal(settings.shade,'none'); assert.equal(settings.units,'imperial'); assert.equal(settings.speed,12);
 assert.deepEqual(readStormGLSettings(null),STRONGEST_STORM_SETTINGS);
 const now=1791637200545;
+assert.equal(readStormGLSettings({historyHours:12}).historyHours,12);
+const twelveHourRange=stormTimeRange('history',12,now);
+assert.equal(twelveHourRange.end.getTime()-twelveHourRange.start.getTime(),12*3600_000);
+assert.equal(twelveHourRange.current.getTime(),twelveHourRange.end.getTime());
 for(const mode of ['live','history','forecast'] as const) { const range=stormTimeRange(mode,24,now); assert.equal(range.current.getTime()%1000,0); assert.ok(range.start<=range.current&&range.current<=range.end); }
 assert.equal(stormTimeRange('forecast',24,now).end.getTime()-stormTimeRange('forecast',24,now).start.getTime(),24*3600_000);
 assert.equal(resolveGLRequest(['vector','hail-threats-nowcast','2026-10-10T13:00:00.000Z','6','17','23.pbf'],'GET')?.kind,'vector');

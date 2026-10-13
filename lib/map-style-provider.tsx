@@ -1,5 +1,6 @@
 'use client';
 
+import { useTheme } from '@/lib/theme-provider';
 import { createContext, useContext, useEffect, useState } from 'react';
 import {
   MAP_STYLE_PRESET_META,
@@ -17,6 +18,7 @@ const LEGACY_MAP_STYLE_STORAGE_KEY = 'flyr-map-style-preset';
 const MapStyleContext = createContext<MapStyleContextType | undefined>(undefined);
 
 export function MapStyleProvider({ children }: { children: React.ReactNode }) {
+  const { theme, setTheme } = useTheme();
   const [preset, setPresetState] = useState<MapStylePreset>('standard');
   const [mounted, setMounted] = useState(false);
 
@@ -36,11 +38,15 @@ export function MapStyleProvider({ children }: { children: React.ReactNode }) {
   }, [mounted, preset]);
 
   const setPreset = (nextPreset: MapStylePreset) => {
+    if (nextPreset === 'stormIntelligence') setTheme('dark');
+    if (nextPreset === 'cleanLight') setTheme('light');
     setPresetState(nextPreset);
   };
 
+  const appearancePreset = preset === 'stormIntelligence' || preset === 'cleanLight' ? theme === 'dark' ? 'stormIntelligence' : 'cleanLight' : preset;
+
   return (
-    <MapStyleContext.Provider value={{ preset: mounted ? preset : 'standard', setPreset }}>
+    <MapStyleContext.Provider value={{ preset: mounted ? appearancePreset : 'standard', setPreset }}>
       {children}
     </MapStyleContext.Provider>
   );

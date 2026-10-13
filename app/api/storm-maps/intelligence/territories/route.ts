@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   if (text.length > 100_000) return NextResponse.json({ error: 'Territory boundary is too large.' }, { status: 413 });
   let raw: unknown; try { raw = JSON.parse(text); } catch { return NextResponse.json({ error: 'Invalid territory.' }, { status: 400 }); }
   const parsed = stormTerritorySchema.safeParse(raw);
-  if (!parsed.success) return NextResponse.json({ error: 'Choose a name and a valid, non-crossing storm territory smaller than 500 km².' }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: 'Choose a name and a valid, non-crossing storm territory smaller than 5,000 km².' }, { status: 400 });
   const context = { ...parsed.data.context }; delete context.territoryId;
   const { data, error } = await c.admin.from('storm_territories').insert({ workspace_id: c.workspaceId, created_by: c.user.id, ...parsed.data, context }).select('id,name,boundary,context,created_at').single();
   if (error) return NextResponse.json({ error: 'Could not save the territory. Retry after the database migration is applied.' }, { status: 503 });

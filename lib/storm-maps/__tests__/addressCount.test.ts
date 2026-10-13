@@ -18,8 +18,16 @@ async function run() {
   const count = await service.countStormTerritoryPins(boundary, 'MI');
   assert.equal(requested, true); assert.equal(count.ids.length, 2); assert.equal(count.tiles, 1);
   assert.equal(tileRangeForAddressBbox([-86.3,45.9,-86.2,46],10,10)!.z, 10);
+  const native = new BedrockCountryService(BEDROCK_US_CONFIG, async options => {
+    assert.equal(options.preferredZoom, undefined);
+    assert.equal(options.minZoom, 10);
+    assert.equal(options.addressLimit, undefined, 'Campaign planning must scan all addresses without a 1,000-home truncation');
+    return { addresses: [], metric: { touchedTiles: 1, timings: { queryZoom: 14 } } as any };
+  });
+  assert.equal((await native.countStormTerritoryPins(boundary, 'MI', true)).tileZoom, 14);
   const failing = new BedrockCountryService(BEDROCK_US_CONFIG, async () => { throw new Error('Tiles missing'); });
   await assert.rejects(failing.countStormTerritoryPins(boundary,'MI'), /Tiles missing/, 'Missing coverage must not become a zero count');
+  await assert.rejects(failing.countStormTerritoryPins(boundary,'MI',true), /Tiles missing/, 'Planning must fail on incomplete coverage');
   console.log('PASS: storm pin count prefers tile zoom 10, scans the full boundary, preserves address units, and propagates unavailable coverage.');
 }
 run();

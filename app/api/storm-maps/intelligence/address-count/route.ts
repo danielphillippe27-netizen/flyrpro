@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { bbox } from '@turf/turf';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
-import { reviewPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
+import { stormTerritoryPolygonSchema } from '@/lib/storm-maps/intelligence/territory-review';
 import { resolveCampaignRegion, resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 import { BEDROCK_CANADA_CONFIG, BEDROCK_US_CONFIG, BedrockCountryService } from '@/lib/services/BedrockCountryService';
 import { getCachedStormValue, setCachedStormValue } from '@/lib/storm-maps/cache';
@@ -15,8 +15,8 @@ export async function POST(request: NextRequest) {
   const text = await request.text();
   if (text.length > 100_000) return NextResponse.json({ error: 'Boundary is too large.' }, { status: 413 });
   let raw: unknown; try { raw = JSON.parse(text); } catch { return NextResponse.json({ error: 'Invalid boundary.' }, { status: 400 }); }
-  const parsed = reviewPolygonSchema.safeParse(raw);
-  if (!parsed.success) return NextResponse.json({ error: 'Choose a closed, non-crossing territory smaller than 500 km².' }, { status: 400 });
+  const parsed = stormTerritoryPolygonSchema.safeParse(raw);
+  if (!parsed.success) return NextResponse.json({ error: 'Choose a closed, non-crossing territory smaller than 5,000 km².' }, { status: 400 });
   const boundary = parsed.data;
   const key = `territory-address-count:z10:${c.workspaceId}:${createHash('sha256').update(JSON.stringify(boundary)).digest('hex')}`;
   const cached = await getCachedStormValue<Count>(key);

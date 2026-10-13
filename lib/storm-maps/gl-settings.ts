@@ -52,7 +52,7 @@ export function readStormGLSettings(raw: unknown): StormGLSettings {
   for (const key of ['opacity', 'radarOpacity'] as const) {
     if (typeof data[key] === 'number' && Number.isFinite(data[key])) result[key] = Math.max(0, Math.min(100, data[key]));
   }
-  if ([6, 24, 72].includes(Number(data.historyHours))) result.historyHours = Number(data.historyHours);
+  if ([6, 12, 24, 72].includes(Number(data.historyHours))) result.historyHours = Number(data.historyHours);
   if ([6, 12, 24].includes(Number(data.speed))) result.speed = Number(data.speed);
   return result;
 }
