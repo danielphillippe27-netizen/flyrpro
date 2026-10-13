@@ -1,0 +1,33 @@
+Canadian hail launch source audit — October 11, 2026
+
+Scope: Alberta; hail; previous 12 months. No source was imported or approved as a storm footprint by this audit.
+
+Xweather Hail Archive
+https://www.xweather.com/docs/weather-api/endpoints/hail-archive
+Documented Canada history starts February 1, 2025, queried by location in 24-hour increments. Fields are location and hourly hail measurements; this is not storm-wide numerical geometry. A bounded Calgary July 5–6, 2026 account probe returned HTTP 500 api_error (Forecast/Conditions Engine Error). This failure is not evidence that no storm occurred and does not negate earlier successful point-history probes.
+
+Xweather MapsGL hail-size / hail-size-max
+https://www.xweather.com/docs/mapsgl/weather-layers
+Published coverage: US, Europe, Japan, Australia. Seven-day range. Canada appears for hail-threats nowcast polygons, which are not a verified 12-month historical hail-size footprint source.
+
+The Weather Company HailVision — prospective alternative
+https://developer.weather.com/docs/openapi/hailvision-2-0
+Documents US/Canada radar-derived MESH grids and threshold vector polygons at 1-km resolution. Native-resolution /v2/featurizer/feature is particularly relevant. Current observation products are documented; previous-12-month retention and commercial storage/redisplay rights remain unverified. No Weather Company credentials found in the current local application environment. No product purchase or API integration performed.
+
+Northern Hail Project — supplementary research only
+https://services.arcgis.com/rGKxabTU9mcXMw7k/ArcGIS/rest/services/Calgary_Damage_Contours_July_13_2025/FeatureServer
+Public service has polygon damage contours, with Damage_Typ and PopupInfo fields, not numerical hail-size thresholds. July 13, 2025 is outside the launch's current 12-month window.
+https://www.uwo.ca/cssl/index.html
+Non-commercial research use is permitted with credit; commercial use requires contacting CSSL. No commercial permission established by this audit.
+
+Production readiness
+Production query before this audit found zero validated, license-verified severity zones and zero storm address coverage records. These must be populated and independently checked before enabling Canadian exposure. Existing PMTiles address counts alone are not proof of complete Alberta dataset coverage.
+
+Acceptance requirements
+1. Real Canadian historical numerical severity geometry and no-data coverage.
+2. Verified storage, customer display, and exposure-calculation permission.
+3. Correct cumulative >=25.4/44.45/63.5 mm geometry including holes/disconnected areas.
+4. Independent distinct-address spatial count comparison with dataset coverage/version.
+5. Territory save and actual campaign handoff validation; browser access was previously unavailable, so no live browser end-to-end success is claimed.
+
+Broad country warning and location-watch schedules remain paused. Existing archives/daily SMS do not constitute Canadian footprint coverage.

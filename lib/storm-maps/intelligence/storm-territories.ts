@@ -1,17 +1,13 @@
 import { z } from 'zod';
-import { area, difference, feature, featureCollection } from '@turf/turf';
 import { campaignStormSchema, type StormCampaignContext } from './model';
-import { stormTerritoryPolygonSchema } from './territory-review';
+import { stormGeometrySchema, containedStormArea, type StormGeometry } from './geometry';
 export const stormTerritorySchema = z.object({
-  name: z.string().trim().min(1).max(160), boundary: stormTerritoryPolygonSchema,
+  name: z.string().trim().min(1).max(160), boundary: stormGeometrySchema,
   context: campaignStormSchema,
 }).strict();
 export type SavedStormTerritory = {
-  id: string; name: string; boundary: GeoJSON.Polygon; context: StormCampaignContext; created_at: string;
+  id: string; name: string; boundary: StormGeometry; context: StormCampaignContext; created_at: string; revision?: number; updated_at?: string;
 };
-export function campaignWithinStormTerritory(child: GeoJSON.Polygon, parent: GeoJSON.Polygon) {
-  try {
-    const outside = difference(featureCollection([feature(child), feature(parent)]));
-    return !outside || area(outside) <= 1; // one square metre for numeric roundoff only
-  } catch { return false; }
+export function campaignWithinStormTerritory(child: StormGeometry, parent: StormGeometry) {
+  return containedStormArea(child,parent);
 }

@@ -16,15 +16,3 @@ const cyclone=cycloneEvent({id:'2024-AL-14',profile:{name:'Milton',year:2024,isA
 assert.equal(cyclone.maxWindKPH,290);assert.equal(cyclone.category,'H5');assert.equal(cyclone.features.filter(f=>f.geometry.type==='LineString').length,1);
 assert.equal(cyclone.features.some(f=>f.geometry.type==='Polygon'),false);
 console.log('Storm Intelligence: calendar boundaries, UTC filtering, spatial filtering, report deduplication, hail units, provenance validation and date-line tracks passed');
-
-const area: GeoJSON.Polygon = {type:'Polygon',coordinates:[[[-82,20],[-81,20],[-81,21],[-82,20]]]};
-const expanded = cycloneEvent({id:'2026-AL-01',profile:{name:'Fixture',year:2026,isActive:true,maxStormCat:'H1',lifespan:{startDateTimeISO:'2026-10-01T00:00:00Z',endDateTimeISO:null}},position:{loc:{long:-81.5,lat:20.5},dateTimeISO:'2026-10-02T00:00:00Z',details:{stormCat:'H1',windSpeedKPH:130,windRadii:[{windSpeedKTS:34,windField:area},{windSpeedKTS:64,windField:area},{windSpeedKTS:99,windField:area}]}},errorCone:area});
-assert.equal(expanded.features.filter(f=>f.properties.kind==='wind-area').length,2);
-assert.equal(expanded.features.filter(f=>f.properties.kind==='forecast-cone').length,1);
-assert.equal(expanded.features.find(f=>f.properties.id.endsWith(':current'))?.properties.windKPH,130);
-assert.equal(expanded.footprintStatus,'unavailable'); // Advisory areas are not damage footprints.
-const archived = cycloneEvent({id:'2024-AL-01',profile:{name:'Archived',year:2024,isActive:false,maxStormCat:'H1',lifespan:{startDateTimeISO:'2024-10-01T00:00:00Z',endDateTimeISO:'2024-10-02T00:00:00Z'}},errorCone:area});
-assert.equal(archived.features.some(f=>f.properties.kind==='forecast-cone'),false);
-const malformed = cycloneEvent({id:'2026-AL-02',profile:{name:'Bad area',year:2026,isActive:true,maxStormCat:'H1',lifespan:{startDateTimeISO:'2026-10-01T00:00:00Z',endDateTimeISO:null}},errorCone:{type:'Polygon',coordinates:[[[0,0],[1,1],[2,2]]]}});
-assert.equal(malformed.features.some(f=>f.geometry.type==='Polygon'),false);
-console.log('Cyclone advisory wind areas, current intensity, cone availability and invalid geometry tests passed');

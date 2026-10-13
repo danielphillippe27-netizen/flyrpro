@@ -1,3 +1,4 @@
+import { polygonSmooth, kinks, simplify } from '@turf/turf';
 import { featureCollection, polygon } from '@turf/helpers';
 import union from '@turf/union';
 
@@ -50,4 +51,16 @@ export function hailCellsPolygon(cells: Set<number>, width: number, height: numb
   const result = rows.length === 1 ? rows[0] : union(featureCollection(rows));
   if (!result || result.geometry.type !== 'Polygon') throw new Error('Could not form one connected boundary. Zoom in and select a smaller area.');
   return result as GeoJSON.Feature<GeoJSON.Polygon>;
+}
+
+export function smoothHailBoundary(boundary: GeoJSON.Feature<GeoJSON.Polygon>) {
+  let smoothed=polygonSmooth(boundary,{iterations:2}).features[0];
+  if(smoothed?.geometry.type==='Polygon'){
+    let tolerance=0.00005;
+    for(let attempt=0;attempt<12&&smoothed.geometry.coordinates.reduce((total,ring)=>total+ring.length,0)>900;attempt++){
+      smoothed=simplify(smoothed,{tolerance,highQuality:true});tolerance*=1.5;
+    }
+  }
+  if(!smoothed||smoothed.geometry.type!=='Polygon'||kinks(smoothed).features.length)return boundary;
+  return smoothed as GeoJSON.Feature<GeoJSON.Polygon>;
 }

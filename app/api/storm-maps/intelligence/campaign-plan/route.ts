@@ -1,4 +1,4 @@
-import { bbox } from '@turf/turf';
+import { bbox, booleanPointInPolygon, point } from '@turf/turf';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { stormContext, stormError } from '@/lib/storm-maps/intelligence/access';
@@ -28,10 +28,12 @@ export async function POST(request: NextRequest) {
     if (!targets.length || targets.length > 6) throw new Error('Choose a smaller territory to scan its addresses.');
     const service = new BedrockCountryService(country === 'US' ? BEDROCK_US_CONFIG : BEDROCK_CANADA_CONFIG);
     // All regions must succeed: a partial count must never become a campaign plan.
-    const scans = await Promise.all(targets.map(region => service.countStormTerritoryPins(boundary, region, true)));
+    const polygons = boundary.type === 'Polygon' ? [boundary] : boundary.coordinates.map(coordinates => ({ type: 'Polygon' as const, coordinates }));
+    const scans = await Promise.all(targets.flatMap(region => polygons.map(polygon => service.countStormTerritoryPins(polygon, region, true))));
     const pins = scans.flatMap(scan => scan.addresses.map((address, index) => ({ id: scan.ids[index], lon: Number(address.lon), lat: Number(address.lat) })));
     if (pins.some(pin => !Number.isFinite(pin.lon) || !Number.isFinite(pin.lat))) throw new Error('Some addresses have invalid coordinates.');
-    const parts = partitionStormCampaigns(boundary, pins);
+    const parts = polygons.flatMap(polygon => { const contained = pins.filter(pin => booleanPointInPolygon(point([pin.lon, pin.lat]), polygon)); return contained.length ? partitionStormCampaigns(polygon, contained) : []; });
+    if (!parts.length) throw new Error('No campaign addresses were found in this territory.');
     return NextResponse.json({ parts, name: parsed.data.name, context: { ...parsed.data.context, territoryId: body.territoryId, selectedAt: new Date().toISOString() } }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return stormError(error); }
 }

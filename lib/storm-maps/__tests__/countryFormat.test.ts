@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {capFeedItems,capSummary,trustedCapUrl,safeCanadaNext} from '../intelligence/country-format';
+const xml='<alert><identifier>one</identifier><sent>2026-10-12T09:00:00+13:00</sent><status>Actual</status><msgType>Cancel</msgType><info><event>thunderstorm</event><headline>Cancellation</headline><area><polygon>-42,171 -43,171 -43,172 -42,171</polygon></area></info></alert>';
+const cap=capSummary(xml);assert.equal(cap.messageType,'Cancel');assert.equal(cap.evidence,'warning');assert.equal(cap.impactGeometry,false);assert.deepEqual(cap.polygons[0].coordinates[0][0],[171,-42]);
+assert.equal(capFeedItems('<rss><channel><item><title>Warning</title><link>https://alerts.metservice.com/cap/alert?id=one</link><pubDate>Mon, 12 Oct 2026 09:00:00 +1300</pubDate></item></channel></rss>').length,1);
+assert.throws(()=>capSummary('<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><alert/>'));
+assert.throws(()=>capSummary('<html><body>Unavailable</body></html>'));
+assert.equal(trustedCapUrl('https://alerts.metservice.com/cap/alert?id=one','NZ'),true);
+assert.equal(trustedCapUrl('https://alerts.metservice.com.evil.test/cap/alert?id=one','NZ'),false);
+assert.equal(trustedCapUrl('http://127.0.0.1/cap/alert','NZ'),false);
+assert.equal(safeCanadaNext('https://api.weather.gc.ca/collections/weather-alerts/items?offset=1000'),true);
+assert.equal(safeCanadaNext('https://example.com/collections/weather-alerts/items'),false);
+console.log('CAP polygon coordinate order, cancellation evidence, malformed XML and trusted-source checks passed');

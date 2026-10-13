@@ -1,0 +1,27 @@
+'use client';
+import { useEffect,useMemo,useState } from 'react';
+import { booleanPointInPolygon, point, centroid, distance } from '@turf/turf';
+import type mapboxgl from 'mapbox-gl';
+import { tornadoProspectingAreas,selectedTornadoProspectingArea } from '@/lib/storm-maps/intelligence/tornado-area';
+import { stormGeometrySchema,type StormGeometry } from '@/lib/storm-maps/intelligence/geometry';
+import { referenceOf,type StormEvent,type StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
+import { StormEventMap } from './intelligence/StormEventMap';
+import { StormTerritoryAddressCount } from './StormTerritoryAddressCount';
+const ignoreLocation=()=>{};
+export function TornadoAreaSelector({map,event,workspaceId,onSave}:{map:mapboxgl.Map;event:StormEvent;workspaceId:string;onSave:(name:string,boundary:StormGeometry,context:StormCampaignContext)=>Promise<void>}){
+ const [radius,setRadius]=useState(1),[ids,setIds]=useState<string[]>([]),[name,setName]=useState(event.title+' nearby area'),[saving,setSaving]=useState(false),[error,setError]=useState('');
+ const areas=useMemo(()=>tornadoProspectingAreas(event,radius),[event,radius]);
+ const selected=useMemo(()=>selectedTornadoProspectingArea(event,radius,ids),[event,radius,ids]);
+ const valid=selected&&stormGeometrySchema.safeParse(selected).success;
+ useEffect(()=>{setIds([]);setName(event.title+' nearby area');setError('');},[event]);
+ useEffect(()=>{
+  const source='tornado-prospecting-areas',fill=source+'-fill',outline=source+'-outline';
+  const clear=()=>{try{for(const id of [outline,fill])if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);}catch{/* map disposed */}};
+  const show=()=>{clear();if(!map.isStyleLoaded())return;map.addSource(source,{type:'geojson',data:{type:'FeatureCollection',features:[...areas.map(f=>({...f,properties:{...f.properties,selected:false}})),...(selected?[{type:'Feature' as const,geometry:selected,properties:{id:'selected',label:'Selected prospecting areas',time:event.start,selected:true}}]:[])]}});map.addLayer({id:fill,type:'fill',source,paint:{'fill-color':'#c084fc','fill-opacity':['case',['get','selected'],0.3,0.1]}});map.addLayer({id:outline,type:'line',source,paint:{'line-color':'#111111','line-width':['case',['get','selected'],3,1]}});};
+  const recover=()=>{if(!map.getSource(source)&&map.isStyleLoaded())show();};
+  const choose=(e:mapboxgl.MapMouseEvent)=>{const location=point([e.lngLat.lng,e.lngLat.lat]);const hit=areas.filter(f=>booleanPointInPolygon(location,f)).sort((a,b)=>distance(location,centroid(a))-distance(location,centroid(b)))[0];if(hit){setIds(previous=>previous.includes(hit.properties.id)?previous.filter(id=>id!==hit.properties.id):[...previous,hit.properties.id]);setError('');}};
+  show();map.on('style.load',show);map.on('idle',recover);map.on('click',choose);
+  return()=>{map.off('style.load',show);map.off('idle',recover);map.off('click',choose);clear();};
+ },[map,areas,ids,selected,event.start]);
+ return <><StormEventMap map={map} event={event} minimumHailMM={0} onLocation={ignoreLocation}/><div className="space-y-3 rounded-xl border border-cyan-200/30 p-3"><h3 className="text-sm font-semibold text-cyan-200">Select nearby tornado areas</h3><label className="block text-xs">Distance around reports<select aria-label="Tornado prospecting radius" className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={radius} onChange={e=>{setRadius(Number(e.target.value));setError('');}}>{[.5,1,2,5].map(km=><option key={km} value={km}>{km} km radius</option>)}</select></label><p className="text-xs">Click a shaded area to select it. Select more areas to combine them; click again to remove one.</p><p className="text-[10px] text-muted-foreground">Nearby prospecting areas around reported locations. These are not surveyed tornado tracks or damage boundaries.</p><p className="text-xs">{ids.length} {ids.length===1?'area':'areas'} selected</p>{selected&&!valid&&<p role="alert" className="text-xs text-amber-200">Select fewer areas or reduce the radius. Territories currently support up to 500 km².</p>}{selected&&valid&&<><StormTerritoryAddressCount workspaceId={workspaceId} boundary={selected}/><label className="block text-xs">Territory name<input aria-label="Tornado territory name" className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={name} maxLength={160} onChange={e=>setName(e.target.value)}/></label><button disabled={saving||!name.trim()} className="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground" onClick={async()=>{setSaving(true);setError('');try{await onSave(name.trim(),selected,{version:2,event:referenceOf(event),selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'reports',reportSelection:{method:'report-proximity',radiusKM:radius,reportIds:ids}});setError('Storm territory saved.');}catch(e){setError(e instanceof Error?e.message:'Save failed.');}finally{setSaving(false);}}}>{saving?'Saving…':'Save prospecting territory'}</button></>}{!!ids.length&&<button className="text-xs text-cyan-200" onClick={()=>setIds([])}>Clear selection</button>}{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</div></>;
+}

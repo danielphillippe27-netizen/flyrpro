@@ -10,18 +10,22 @@ export const eventReferenceSchema = z.object({
 }).strict().refine(v => Date.parse(v.start) <= Date.parse(v.end), 'Invalid event dates');
 export type StormReference = z.infer<typeof eventReferenceSchema>;
 export const campaignStormSchema = z.object({
-  version: z.literal(1), event: eventReferenceSchema,
+  version: z.union([z.literal(1),z.literal(2)]), event: eventReferenceSchema,
   territoryId: z.uuid().optional(),
+  territoryRevision: z.number().int().positive().optional(),
+  reportSelection: z.object({method:z.literal('report-proximity'),radiusKM:z.number().min(0.5).max(5),reportIds:z.array(z.string().min(1).max(160)).min(1).max(200)}).strict().optional(),
+  windSelection: z.object({minimumKTS:z.number().positive(),method:z.literal('advisory-windfield-union'),clippedToMap:z.boolean()}).strict().optional(),
+  sampling: z.object({cellMeters:z.number().positive(),clickedMM:z.number().min(0).max(200),method:z.literal('numerical-map-contour')}).strict().optional(),
+  zoneId: z.uuid().optional(), includeOutsideZone: z.boolean().optional(),
   selectedAt: z.iso.datetime({ offset: true }),
   minimumHailMM: z.number().min(0).max(150).nullable(),
   maximumHailMM: z.number().min(0).max(150).nullable().optional(),
-  selection: z.enum(['user-drawn', 'intensity-zone']), evidenceKind: z.enum(['reports', 'track', 'hail-size']),
+  selection: z.enum(['user-drawn', 'intensity-zone']), evidenceKind: z.enum(['reports', 'track', 'hail-size', 'hail-sampled', 'wind-field']),
 }).strict().refine(value => value.maximumHailMM == null || (value.minimumHailMM != null && value.maximumHailMM > value.minimumHailMM), 'Invalid hail intensity band');
 export type StormCampaignContext = z.infer<typeof campaignStormSchema>;
 export type StormMapFeature = GeoJSON.Feature<GeoJSON.Geometry, {
-  id: string; label: string; time: string; kind: 'report' | 'track' | 'position' | 'forecast' | 'wind-area' | 'forecast-cone';
-  windThresholdKTS?: number; advisoryPhase?: 'historical' | 'current' | 'forecast';
-  hailMM?: number | null; windKPH?: number | null; category?: string; description?: string;
+  id: string; label: string; time: string; kind: 'report' | 'track' | 'position' | 'forecast' | 'wind-field' | 'cone';
+  hailMM?: number | null; windKPH?: number | null; category?: string; description?: string; gustKPH?:number|null; pressureMB?:number|null; minimumKTS?:number;
 }>;
 export type StormEvent = StormReference & {
   features: StormMapFeature[]; reportCount: number; maxHailMM: number | null;
@@ -45,7 +49,7 @@ export function referenceOf(event: StormEvent): StormReference {
   return { key, title, hazard, source, start, end, sourceId };
 }
 export function eventBounds(event: StormEvent): [number,number,number,number] | null {
-  const points = event.features.flatMap(f => f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.type === 'LineString' ? f.geometry.coordinates : f.geometry.type === 'Polygon' ? f.geometry.coordinates.flat() : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates.flat(2) : []);
+  const points = event.features.flatMap(f => f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.type === 'LineString' ? f.geometry.coordinates : []);
   if (!points.length) return null;
   const xs=points.map(p=>p[0]), ys=points.map(p=>p[1]);
   return [Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)];

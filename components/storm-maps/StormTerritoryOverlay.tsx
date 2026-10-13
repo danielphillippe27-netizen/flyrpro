@@ -42,9 +42,10 @@ export function StormTerritoryOverlay({ map, territory }: { map: mapboxgl.Map; t
       map.addLayer({ id: `${source}-line`, type: 'line', source, paint: { 'line-color': '#111111', 'line-width': 3 } });
       map.addLayer({ id: `${source}-label`, type: 'symbol', source, filter: ['==', '$type', 'Point'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-allow-overlap': true }, paint: { 'text-color': '#111111', 'text-halo-color': '#ffffff', 'text-halo-width': 2 } });
     };
-    show(); map.on('style.load', show);
+    const recover=()=>{if(territory&&!map.getSource(source)&&map.isStyleLoaded())show();};
+    show(); map.on('style.load', show);map.on('idle',recover);
     return () => {
-      map.off('style.load', show);
+      map.off('style.load', show);map.off('idle',recover);
       try { clear(); } catch { /* The parent map has already been disposed. */ }
     };
   }, [map, territory]);
