@@ -1,61 +1,17 @@
 'use client';
 import { StormTerritoryAddressCount } from './StormTerritoryAddressCount';
+import { StormTerritoryCampaignActions } from './StormTerritoryCampaignActions';
 import { StormTerritoryOverlay } from './StormTerritoryOverlay';
 import { bbox,area,intersect,feature,featureCollection } from '@turf/turf';
 import { StormTerritoryEditor } from './StormTerritoryEditor';
 const ignoreSelection=()=>{};
-import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import type { TerritoryCampaignPart } from '@/lib/storm-maps/intelligence/campaign-partitions';
-import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
+import { useEffect, useState } from 'react';
 
 import type mapboxgl from 'mapbox-gl';
 import type { SavedStormTerritory } from '@/lib/storm-maps/intelligence/storm-territories';
 type Props = { initiallyOpen?: boolean; renderOverlay?: boolean; map: mapboxgl.Map; workspaceId: string; revision: number; active: SavedStormTerritory | null; onSelect: (territory: SavedStormTerritory | null) => void; onCampaign: (territory: SavedStormTerritory) => void };
 export function SavedStormTerritories({ map, workspaceId, revision, active, onSelect, onCampaign, renderOverlay = true, initiallyOpen = false }: Props) {
-  const router = useRouter();
-  const creatingRef = useRef(false);
-  const [creating, setCreating] = useState(false), [progress, setProgress] = useState(''), [creationError, setCreationError] = useState('');
-  type Batch = { territoryId: string; name: string; context: StormCampaignContext; parts: TerritoryCampaignPart[]; ids: string[]; completed: number };
-  const [batch, setBatch] = useState<Batch | null>(null);
-  const createCampaigns = async () => {
-    if (!active || creatingRef.current) return;
-    creatingRef.current = true;
-    setCreating(true); setCreationError('');
-    let current = batch?.territoryId === active.id ? batch : null;
-    const post = async (url: string, body: unknown) => {
-      const response = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Campaign creation failed.');
-      return data;
-    };
-    try {
-      if (!current) {
-        setProgress('Finding addresses and splitting into campaigns of up to 1,000…');
-        const plan = await post(`/api/storm-maps/intelligence/campaign-plan?workspaceId=${encodeURIComponent(workspaceId)}`, { territoryId: active.id });
-        current = { territoryId: active.id, ...plan, ids: [], completed: 0 };
-        setBatch(current);
-      }
-      if (!current) throw new Error('Campaign plan unavailable.');
-      for (let index = current.completed; index < current.parts.length; index++) {
-        setProgress(`Creating campaign ${index + 1} of ${current.parts.length}…`);
-        let id: string = current.ids[index];
-        if (!id) {
-          const part = current.parts[index];
-          const campaign = await post('/api/campaigns', { name: current.parts.length === 1 ? current.name : `${current.name} · ${index + 1} of ${current.parts.length}`, type: 'flyer', address_source: 'map', workspace_id: workspaceId, storm_context: current.context, territory_boundary: part.boundary, bbox: bbox(part.boundary) });
-          id = campaign.id;
-          current = { ...current, ids: [...current.ids, id] }; setBatch(current);
-          window.dispatchEvent(new CustomEvent('flyr-campaigns-refresh'));
-        }
-        await post('/api/campaigns/provision', { campaign_id: id });
-        current = { ...current, completed: index + 1 }; setBatch(current);
-      }
-      router.push(`/campaigns/${current.ids[0]}`);
-    } catch (reason) {
-      setCreationError(reason instanceof Error ? reason.message : 'Campaign creation failed.');
-    } finally { creatingRef.current = false; setCreating(false); setProgress(''); }
-  };
+  const [creating, setCreating] = useState(false);
   const [refresh,setRefresh]=useState(0),[editing,setEditing]=useState(false);
   const [territories, setTerritories] = useState<SavedStormTerritory[]>([]), [error, setError] = useState(''), [loading, setLoading] = useState(false);
   useEffect(() => {
@@ -89,6 +45,6 @@ export function SavedStormTerritories({ map, workspaceId, revision, active, onSe
     {error && <p role="alert" className="text-[11px] text-amber-200">{error}</p>}
     {!loading && !error && !territories.length && <p className="text-[11px] text-slate-400">Select a hail intensity zone and save its boundary here.</p>}
     {territories.map(territory => <button key={territory.id} type="button" disabled={creating} aria-pressed={active?.id === territory.id} onClick={() => select(territory)} className={`w-full rounded-lg border p-2 text-left text-xs ${active?.id === territory.id ? 'border-cyan-300' : 'border-white/15'}`}><p className="font-semibold">{territory.name}</p><p className="mt-1 text-[10px] text-slate-400">{territory.context.event.start.slice(0,10)} · {territory.context.minimumHailMM == null ? 'Storm inspection area' : `${territory.context.minimumHailMM === 0 ? '>0' : territory.context.minimumHailMM.toFixed(1)} mm${territory.context.maximumHailMM == null ? '+' : `–${territory.context.maximumHailMM.toFixed(1)} mm`}`}</p></button>)}
-    {active && <div className="space-y-2 border-t border-white/10 pt-3"><StormTerritoryAddressCount workspaceId={workspaceId} boundary={active.boundary} /><p className="text-xs font-semibold">{active.name}</p>{!!overlapping.length&&<p className="text-[11px] text-amber-200">Overlaps {overlapping.map(t=>t.name).join(', ')}. Review existing campaign targets to avoid duplicate canvassing.</p>}{editing&&<StormTerritoryEditor key={active.id} map={map} workspaceId={workspaceId} context={active.context} initial={active.boundary} initialName={active.name} onSelecting={ignoreSelection} onSave={async(name,boundary)=>{const response=await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:active.id,revision:active.revision??1,name,boundary})});const data=await response.json();if(!response.ok)throw Error(data.error);onSelect(data.territory);setEditing(false);setRefresh(v=>v+1);}}/>}<p className="text-[10px] text-slate-400">Up to 1,000 addresses: one campaign. Larger territories automatically split into campaigns of up to 1,000 addresses each.</p><button type="button" disabled={creating} onClick={createCampaigns} className="w-full rounded-lg bg-red-500 py-2 text-xs font-semibold disabled:opacity-50">{creating ? 'Creating campaigns…' : batch?.territoryId === active.id ? 'Continue creating campaigns' : 'Create campaigns from territory'}</button>{progress && <p role="status" className="text-[11px] text-cyan-200">{progress}</p>}{creationError && <p role="alert" className="text-[11px] text-amber-200">{creationError}</p>}{batch?.territoryId === active.id && batch.ids.map((id, index) => <Link key={id} href={`/campaigns/${id}`} className="block text-xs text-cyan-200 underline">Open campaign {index + 1}{index >= batch.completed ? ' (setup pending)' : ''}</Link>)}<button type="button" onClick={() => onCampaign(active)} className="w-full rounded-lg bg-red-500 py-2 text-xs font-semibold">Draw campaign inside territory</button><button type="button" onClick={()=>setEditing(value=>!value)} className="text-[11px] text-cyan-200">{editing?'Cancel boundary edit':'Edit boundary'}</button><div className="flex gap-3">{(['rename','duplicate','delete'] as const).map(action=><button type="button" key={action} onClick={()=>void manage(action)} className="text-[11px] capitalize text-cyan-200">{action}</button>)}</div><button type="button" onClick={() => onSelect(null)} className="text-[11px] text-cyan-200">Hide territory</button></div>}
+    {active && <div className="space-y-2 border-t border-white/10 pt-3"><StormTerritoryAddressCount workspaceId={workspaceId} boundary={active.boundary} /><p className="text-xs font-semibold">{active.name}</p>{!!overlapping.length&&<p className="text-[11px] text-amber-200">Overlaps {overlapping.map(t=>t.name).join(', ')}. Review existing campaign targets to avoid duplicate canvassing.</p>}{editing&&<StormTerritoryEditor key={active.id} map={map} workspaceId={workspaceId} context={active.context} initial={active.boundary} initialName={active.name} onSelecting={ignoreSelection} onSave={async(name,boundary)=>{const response=await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId)}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:active.id,revision:active.revision??1,name,boundary})});const data=await response.json();if(!response.ok)throw Error(data.error);onSelect(data.territory);setEditing(false);setRefresh(v=>v+1);}}/>}<StormTerritoryCampaignActions key={active.id} active={active} workspaceId={workspaceId} onBusyChange={setCreating} /><button type="button" onClick={() => onCampaign(active)} className="w-full rounded-lg bg-red-500 py-2 text-xs font-semibold">Draw campaign inside territory</button><button type="button" onClick={()=>setEditing(value=>!value)} className="text-[11px] text-cyan-200">{editing?'Cancel boundary edit':'Edit boundary'}</button><div className="flex gap-3">{(['rename','duplicate','delete'] as const).map(action=><button type="button" key={action} onClick={()=>void manage(action)} className="text-[11px] capitalize text-cyan-200">{action}</button>)}</div><button type="button" onClick={() => onSelect(null)} className="text-[11px] text-cyan-200">Hide territory</button></div>}
   </div></details></>;
 }

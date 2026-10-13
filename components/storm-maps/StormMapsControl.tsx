@@ -71,11 +71,13 @@ function StormWorkbench(props: Props) {
     title: `Hail exposure · ${settings.historyHours} hours`, hazard: 'hail' as const, source: 'xweather' as const,
     sourceId: 'hail-size-max', start: new Date(territoryWindowEnd.getTime() - settings.historyHours * 3600_000).toISOString(), end: territoryWindowEnd.toISOString(),
   } : null;
-  const saveTerritory = async (name: string, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon, context: StormCampaignContext) => {
+  const saveTerritoryAndReturn = async (name: string, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon, context: StormCampaignContext) => {
     const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, boundary, context }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error);
     setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
+    return data.territory as SavedStormTerritory;
   };
+  const saveTerritory = async (...args: Parameters<typeof saveTerritoryAndReturn>): Promise<void> => { await saveTerritoryAndReturn(...args); };
   const [manifest, setManifest] = useState<StormMapsManifest | null>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -340,7 +342,7 @@ function StormWorkbench(props: Props) {
         <p className="mb-4 text-xs leading-relaxed text-slate-300">Select a shaded area, check its addresses, then save.</p>
         {!selectedEvent && <p className="text-xs">Choose a storm in Find storm first.</p>}
         {workspaceId && ready && controllerRef.current && hailSelectionEvent && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => {
-          await saveTerritory(zone.name,zone.polygon.geometry,{version:2,event:hailSelectionEvent,selectedAt:new Date().toISOString(),minimumHailMM:zone.minimum,maximumHailMM:zone.maximum,selection:'intensity-zone',evidenceKind:'hail-sampled',sampling:{cellMeters:zone.cellMeters,clickedMM:zone.sampledMM,method:'numerical-map-contour'}});
+          return await saveTerritoryAndReturn(zone.name,zone.polygon.geometry,{version:2,event:hailSelectionEvent,selectedAt:new Date().toISOString(),minimumHailMM:zone.minimum,maximumHailMM:zone.maximum,selection:'intensity-zone',evidenceKind:'hail-sampled',sampling:{cellMeters:zone.cellMeters,clickedMM:zone.sampledMM,method:'numerical-map-contour'}});
         }} />}
         {workspaceId && selectedEvent?.hazard==='hurricane'&&<HurricaneAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
         {workspaceId && selectedEvent?.hazard==='tornado'&&<TornadoAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
@@ -361,7 +363,7 @@ function StormWorkbench(props: Props) {
         <div className="mt-4 rounded-xl border border-cyan-300/25 p-3 text-[11px]"><p className="font-semibold text-cyan-200">Storm territories</p><p className="mt-1 text-slate-400">Select an intensity zone, review its outline and save the territory. Create campaigns inside a saved territory.</p>{!hailSelectionEvent && <button type="button" onClick={() => { setTab('overview'); setSettings(hailViewSettings(settings, 'history')); }} className="mt-2 w-full rounded-lg border border-cyan-300/40 py-2 text-cyan-200">Select a past hail intensity territory</button>}{!archiveView && settings.mode === 'forecast' && <p className="mt-2 text-amber-200">Forecast shading shows predicted weather. Its colors are not measured hail intensity or a damage boundary.</p>}</div>
         {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /></div>}
         {panel && workspaceId && ready && controllerRef.current && hailSelectionEvent && !layerErrors.includes('hail-size-max') && <div className="mt-4"><HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async (zone) => {
-          await saveTerritory(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' });
+          return await saveTerritoryAndReturn(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' });
         }} /></div>}
         {panel && workspaceId && archiveView && selectedEvent && !recentHailEvent && <StormTerritorySketch workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{ version: 1, event: { key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source, sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end }, selectedAt: new Date().toISOString(), minimumHailMM: null, selection: 'user-drawn', evidenceKind: selectedEvent.hazard === 'hurricane' ? 'track' : 'reports' }} />}
         {workspaceId && props.onStormCampaign && <SavedStormTerritories map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={(territory) => {
