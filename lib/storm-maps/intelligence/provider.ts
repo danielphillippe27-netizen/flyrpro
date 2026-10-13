@@ -1,3 +1,4 @@
+import { loadTornadoSurveys } from './tornado-surveys';
 import { getCachedStormValue, setCachedStormValue } from '../cache';
 import { cycloneEvent, reportEvents, type CycloneResponse } from './normalize';
 import type { StormHazard } from './model';
@@ -32,7 +33,12 @@ export async function loadReportCollection(start:string,end:string) {
   if(!data)throw Error('Historical report response was empty');
   return data;
 }
-export async function loadReportEvents(bbox:number[],start:string,end:string,hazard:StormHazard){return reportEvents(await loadReportCollection(start,end),bbox,start,end,hazard);}
+export async function loadReportEvents(bbox:number[],start:string,end:string,hazard:StormHazard){
+  const reports=reportEvents(await loadReportCollection(start,end),bbox,start,end,hazard);
+  if(hazard!=='tornado')return reports;
+  try {const surveys=await loadTornadoSurveys(bbox,start,end);return [...surveys,...reports.map(event=>({...event,surveyStatus:'unavailable' as const}))];}
+  catch {return reports.map(event=>({...event,surveyStatus:'error' as const}));}
+}
 export async function loadCyclones(start:string,end:string,center:[number,number],sourceId?:string,active=false) {
   const path=sourceId?`tropicalcyclones/archive/${sourceId}`:active?'tropicalcyclones':'tropicalcyclones/archive/closest';
   const params:Record<string,string>=sourceId?{}:active?{limit:'100'}:{p:`${center[1]},${center[0]}`,from:start,to:end,limit:'25',radius:'1500miles'};
