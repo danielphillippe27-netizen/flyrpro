@@ -624,6 +624,7 @@ export class BedrockCountryService {
       campaignId: 'storm-territory-count', snapshot: snapshotToCampaignSnapshotRow(snapshot),
       bbox: turf.bbox(polygon) as Bounds, boundary: polygon, queryEngine: 'storm_territory_z10_pins',
       pmtilesKey: key, sourceLayer: 'addresses', promoteId: 'address_id',
+      allowEmptyCoverage: true,
       ...(nativeAddresses ? { minZoom: 10 } : { preferredZoom: 10 }), signal: AbortSignal.timeout(120_000),
       normalizeFeature: ({ campaignId, feature, lon, lat }) => normalizePmtilesAddressFeature({
         campaignId, feature, lon, lat, source: this.config.provisionSource, fallbackRegion: regionCode,

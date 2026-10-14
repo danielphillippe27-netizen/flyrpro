@@ -9,7 +9,7 @@ import { getCachedStormValue, setCachedStormValue } from '@/lib/storm-maps/cache
 import regions from '@/scripts/regions.json';
 export const runtime = 'nodejs';
 export const maxDuration = 180;
-type Count = { count: number; zoom: 10; partial: boolean; regions: string[]; tiles: number; tileZooms: number[]; countedAt: string };
+type Count = { count: number; zoom: number; partial: boolean; regions: string[]; tiles: number; tileZooms: number[]; countedAt: string };
 export async function POST(request: NextRequest) {
   const c = await stormContext(request); if ('response' in c) return c.response;
   const text = await request.text();
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   const parsed = stormGeometrySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: 'Choose a closed, non-crossing territory smaller than 5,000 km².' }, { status: 400 });
   const boundary = parsed.data;
-  const key = `territory-address-count:z10:${c.workspaceId}:${createHash('sha256').update(JSON.stringify(boundary)).digest('hex')}`;
+  const key = `territory-address-count:native:v1:${c.workspaceId}:${createHash('sha256').update(JSON.stringify(boundary)).digest('hex')}`;
   const cached = await getCachedStormValue<Count>(key);
   if (cached) return NextResponse.json(cached.value, { headers: { 'Cache-Control': 'private, no-store' } });
   try {
@@ -32,11 +32,11 @@ export async function POST(request: NextRequest) {
     const service = new BedrockCountryService(country === 'US' ? BEDROCK_US_CONFIG : BEDROCK_CANADA_CONFIG);
     const parts=boundary.type==='Polygon'?[boundary]:boundary.coordinates.map(coordinates=>({type:'Polygon' as const,coordinates}));
     if(parts.length*targets.length>12) return NextResponse.json({error:'This territory requires indexed spatial counting. Select fewer neighbourhoods until the spatial migration is enabled.'},{status:422});
-    const results = await Promise.allSettled(targets.flatMap(region=>parts.map(async part => ({ region, ...await service.countStormTerritoryPins(part, region) }))));
+    const results = await Promise.allSettled(targets.flatMap(region=>parts.map(async part => ({ region, ...await service.countStormTerritoryPins(part, region, true) }))));
     const ids = new Set<string>(), covered: string[] = []; let tiles = 0;
     for (const result of results) if (result.status === 'fulfilled') { covered.push(result.value.region); tiles += result.value.tiles; for (const id of result.value.ids) ids.add(id); }
     if (!covered.length) throw new Error('Zoom-10 address data is unavailable here.');
-    const data: Count = { count: ids.size, zoom: 10, tileZooms: [...new Set(results.flatMap(result => result.status === 'fulfilled' ? [result.value.tileZoom] : []))], partial: results.some(result=>result.status==='rejected'), regions: [...new Set(covered)], tiles, countedAt: new Date().toISOString() };
+    const data: Count = { count: ids.size, zoom: Math.min(...results.flatMap(result => result.status === 'fulfilled' ? [result.value.tileZoom] : [])), tileZooms: [...new Set(results.flatMap(result => result.status === 'fulfilled' ? [result.value.tileZoom] : []))], partial: results.some(result=>result.status==='rejected'), regions: [...new Set(covered)], tiles, countedAt: new Date().toISOString() };
     await setCachedStormValue(key, data, 900, 900);
     return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch { return NextResponse.json({ error: 'Address pin count unavailable. Retry or choose a smaller territory.' }, { status: 503 }); }

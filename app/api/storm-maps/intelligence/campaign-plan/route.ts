@@ -29,7 +29,10 @@ export async function POST(request: NextRequest) {
     const service = new BedrockCountryService(country === 'US' ? BEDROCK_US_CONFIG : BEDROCK_CANADA_CONFIG);
     // All regions must succeed: a partial count must never become a campaign plan.
     const polygons = boundary.type === 'Polygon' ? [boundary] : boundary.coordinates.map(coordinates => ({ type: 'Polygon' as const, coordinates }));
-    const scans = await Promise.all(targets.flatMap(region => polygons.map(polygon => service.countStormTerritoryPins(polygon, region, true))));
+    const scans = await Promise.all(targets.flatMap(region => polygons.map(async polygon => {
+      try { return await service.countStormTerritoryPins(polygon, region, true); }
+      catch (error) { console.error('[Storm campaign plan] Regional address scan failed', { region, error: error instanceof Error ? error.message : String(error) }); throw new Error(`Address data for ${region} could not be read. Please retry.`); }
+    })));
     const pins = scans.flatMap(scan => scan.addresses.map((address, index) => ({ id: scan.ids[index], lon: Number(address.lon), lat: Number(address.lat) })));
     if (pins.some(pin => !Number.isFinite(pin.lon) || !Number.isFinite(pin.lat))) throw new Error('Some addresses have invalid coordinates.');
     const parts = polygons.flatMap(polygon => { const contained = pins.filter(pin => booleanPointInPolygon(point([pin.lon, pin.lat]), polygon)); return contained.length ? partitionStormCampaigns(polygon, contained) : []; });

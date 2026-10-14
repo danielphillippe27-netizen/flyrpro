@@ -28,6 +28,12 @@ export type ScopedAddressResult = {
   metric: ScopedAddressMetric;
 };
 
+export function hasUsableAddressCoverage(touchedTiles: number, layerHits: number, scanned: number, allowEmptyCoverage = false): boolean {
+  // A successfully read archive can have no tiles in a neighbouring state's
+  // overlapping bounding box. Existing tiles with missing layers still fail.
+  return (layerHits > 0 && scanned > 0) || (allowEmptyCoverage && (touchedTiles === 0 || layerHits > 0));
+}
+
 export type ScopedAddressNormalizerInput = {
   campaignId: string;
   feature: GeoJSON.Feature;
@@ -295,6 +301,7 @@ export async function fetchScopedPmtilesAddresses(options: {
   maxZoom?: number | null;
   exactZoom?: number;
   preferredZoom?: number;
+  allowEmptyCoverage?: boolean;
   signal?: AbortSignal;
   addressLimit?: number;
   normalizeFeature: (input: ScopedAddressNormalizerInput) => StandardCampaignAddress | null;
@@ -396,7 +403,7 @@ export async function fetchScopedPmtilesAddresses(options: {
     }
   });
 
-  if (layerHits === 0 || scanned === 0) {
+  if (!hasUsableAddressCoverage(touchedTiles, layerHits, scanned, options.allowEmptyCoverage)) {
     throw new Error(`PMTiles layer produced no usable features: ${layerNames.join(', ')}`);
   }
 

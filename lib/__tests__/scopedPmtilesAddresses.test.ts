@@ -4,6 +4,7 @@
 
 import {
   normalizePmtilesAddressFeature,
+  hasUsableAddressCoverage,
   tileRangeForAddressBbox,
 } from '../../app/api/campaigns/_utils/scoped-pmtiles-addresses';
 
@@ -112,3 +113,9 @@ for (const [name, run] of tests) {
 }
 
 console.log(`\n${passed} passed, ${tests.length - passed} failed`);
+
+assertEqual(hasUsableAddressCoverage(0,0,0,true),true,'A neighbouring state with no tiles must count as zero');
+assertEqual(hasUsableAddressCoverage(0,0,0,false),false,'Ordinary campaign scans retain strict coverage checks');
+assertEqual(hasUsableAddressCoverage(1,0,0,true),false,'Wrong layers in existing tiles must remain errors');
+assertEqual(hasUsableAddressCoverage(1,1,0,true),true,'Valid empty address layers count as zero');
+assertEqual(hasUsableAddressCoverage(1,1,5,true),true,'Populated layers are valid');
