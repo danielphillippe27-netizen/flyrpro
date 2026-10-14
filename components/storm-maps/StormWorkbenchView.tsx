@@ -9,7 +9,7 @@ import { StormTimelineSettings } from './StormTimelineSettings';
 import { StormWeatherRail } from './StormWeatherRail';
 import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
 type Panel = 'storms' | 'territory' | 'layers' | 'saved' | null;
-type Props = { onSidebarWidth?: (width: number) => void; timelineRange: { start: Date; end: Date }; onTimelineRange: (range: { start: Date; end: Date }) => void; onTimelineSpeed: (duration: number) => void; map: mapboxgl.Map; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; onSettings?: () => void; onArchive: (active: boolean) => void; alwaysShowNames?: boolean; ready: boolean; loading: boolean; error: string | null; playing: boolean; position: number; clock: string; rangeTitle: string; rangeLabels: { start: string; end: string }; onPlay: () => void; onScrub: (value: number) => void; onNow: () => void; legendRef: RefObject<HTMLDivElement | null>; renderSaved: () => ReactNode; renderTerritory: () => ReactNode; renderArchive: (onTerritory: () => void) => ReactNode; renderLayers: () => ReactNode };
+type Props = { onCreateTerritory?: () => void; onSidebarWidth?: (width: number) => void; timelineRange: { start: Date; end: Date }; onTimelineRange: (range: { start: Date; end: Date }) => void; onTimelineSpeed: (duration: number) => void; map: mapboxgl.Map; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; onSettings?: () => void; onArchive: (active: boolean) => void; alwaysShowNames?: boolean; ready: boolean; loading: boolean; error: string | null; playing: boolean; position: number; clock: string; rangeTitle: string; rangeLabels: { start: string; end: string }; onPlay: () => void; onScrub: (value: number) => void; onNow: () => void; legendRef: RefObject<HTMLDivElement | null>; renderSaved: () => ReactNode; renderTerritory: () => ReactNode; renderArchive: (onTerritory: () => void) => ReactNode; renderLayers: () => ReactNode };
 export function StormWorkbenchView(props: Props) {
   const [panel, setPanel] = useState<Panel>('storms');
   const [collapsed, setCollapsed] = useState(false);
@@ -22,6 +22,7 @@ export function StormWorkbenchView(props: Props) {
   useEffect(() => { onArchive(true); return () => onArchive(false); }, [onArchive]);
   // Discovery is the default workspace; campaign overlays use their own picker.
   const open = (next: Panel) => { const target = panel === next ? null : next; setPanel(target); setCollapsed(false); props.onArchive(target === 'storms' || target === 'territory'); };
+  const createTerritory = () => { props.onCreateTerritory?.(); setPanel('territory'); setCollapsed(false); props.onArchive(true); };
   const apply = (settings: StormGLSettings) => { props.onChange(settings); props.onArchive(false); };
   return <>
     <header className="absolute right-4 top-4 z-30 flex h-14 flex-row-reverse items-center gap-3 rounded-xl bg-[#0c202c]/95 px-4 text-white shadow-xl max-sm:top-20 max-sm:gap-2 max-sm:px-3">
@@ -31,8 +32,8 @@ export function StormWorkbenchView(props: Props) {
     </header>
     <StormWeatherRail compact settings={props.settings} alwaysShowNames={false} onChange={apply} />
     {(!dashboard || collapsed) && <button type="button" aria-label="Find storm" aria-expanded={panel === 'storms' && !collapsed} onClick={() => { if (collapsed && panel === 'storms') setCollapsed(false); else open('storms'); }} className="absolute left-12 top-4 z-30 flex h-14 items-center gap-3 rounded-xl bg-[#a9d7d5] px-6 text-base font-semibold text-[#0c202c] shadow-xl"><MapPin className="h-5 w-5" />Find storm</button>}
-    {dashboard && <StormListSidebar collapsed={collapsed} onCollapse={collapse} tab={panel as 'storms'|'saved'|'territory'} onTab={value=>{setPanel(value);props.onArchive(value==='storms');}} onCreate={()=>{setPanel('territory');props.onArchive(true);}}>
-      {panel === 'storms' && props.renderArchive(() => open('territory'))}
+    {dashboard && <StormListSidebar collapsed={collapsed} onCollapse={collapse} tab={panel as 'storms'|'saved'|'territory'} onTab={value=>{setPanel(value);props.onArchive(value==='storms');}} onCreate={createTerritory}>
+      {panel === 'storms' && props.renderArchive(createTerritory)}
       {panel === 'saved' && props.renderSaved()}
       {panel === 'territory' && props.renderTerritory()}
     </StormListSidebar>}
