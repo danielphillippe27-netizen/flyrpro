@@ -69,9 +69,15 @@ function StormWorkbench(props: Props) {
     setCustomTimeline(null);
     if (event) {
       setTab('intelligence');
-      setSettings(previous => ({ ...previous, mode: 'history' }));
+      if (event.hazard === 'hail' && map?.getProjection().name !== 'mercator') map?.setProjection('mercator');
+      setSettings(previous => event.hazard === 'hail' ? {
+        ...previous, mode: 'history', shade: 'hail-size-max', historyHours: 24,
+        radar: false, wind: false, pressure: false, cyclones: false,
+        hail: false, cells: false, stormCones: false, lightning: false,
+        lightningThreats: false, alerts: false, outlook: false, reports: false,
+      } : { ...previous, mode: 'history' });
     }
-  }, [setSettings]);
+  }, [map, setSettings]);
   const recentHailEvent = archiveView && selectedEvent?.hazard === 'hail' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000;
   const hailSelectionEvent = recentHailEvent && selectedEvent ? {
     key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source,
@@ -237,7 +243,7 @@ function StormWorkbench(props: Props) {
       for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), settings.layerOpacities?.[group.key] != null ? settings.layerOpacities[group.key] / 100 : group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
-    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.85); if (selectedEvent && selectedEvent.hazard !== 'hurricane' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000) wanted.set('radar', 0.55); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
+    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.85); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
@@ -344,7 +350,7 @@ function StormWorkbench(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView onCreateTerritory={() => setTerritorySelection('draw')} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView onCreateTerritory={setTerritorySelection} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
       renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}

@@ -10,6 +10,7 @@ async function main() {
   const dom = new JSDOM('<div id="root"></div>');
   Object.assign(globalThis, { React, window: dom.window, document: dom.window.document, HTMLElement: dom.window.document.createElement('div').constructor, IS_REACT_ACT_ENVIRONMENT: true });
   let mounts = 0, unmounts = 0;
+  let selection: 'draw' | 'weather' | undefined;
   function Archive() {
     useEffect(() => { mounts++; return () => { unmounts++; }; }, []);
     return <p>Selected storm geometry</p>;
@@ -17,22 +18,25 @@ async function main() {
   const root = createRoot(document.getElementById('root')!);
   const range = { start: new Date('2026-10-13T00:00:00Z'), end: new Date('2026-10-13T23:59:59Z') };
   await act(async () => {
-    root.render(<StormWorkbenchView map={{} as never} settings={{ ...STRONGEST_STORM_SETTINGS, mode: 'history' }} selectedStorm
+    root.render(<StormWorkbenchView map={{} as never} settings={{ ...STRONGEST_STORM_SETTINGS, mode: 'history' }} selectedStorm onCreateTerritory={value => { selection = value; }}
       timelineRange={range} onTimelineRange={() => {}} onTimelineSpeed={() => {}} onChange={() => {}} onArchive={() => {}}
       ready={false} loading={false} error={null} playing={false} position={100} clock="7:59 PM" rangeTitle="Selected storm · Historical"
       rangeLabels={{ start: 'Oct 13', end: 'Oct 13' }} onPlay={() => {}} onScrub={() => {}} onNow={() => {}} legendRef={{ current: null }}
-      renderArchive={() => <Archive />} renderSaved={() => <p>Saved territories</p>} renderTerritory={() => <p>Select zone</p>} renderLayers={() => null} />);
+      renderArchive={onTerritory => <><Archive /><button onClick={onTerritory}>Select hail zone</button></>} renderSaved={() => <p>Saved territories</p>} renderTerritory={() => <p>Select zone</p>} renderLayers={() => null} />);
   });
   const click = async (label: string) => {
     const button = Array.from(document.querySelectorAll('button')).find(node => node.textContent === label);
     assert.ok(button, `Missing button: ${label}`);
     await act(async () => { const event = document.createEvent('MouseEvents'); event.initEvent('click', true, true); button.dispatchEvent(event); });
   };
-  await click('Create storm territory');
+  await click('Select hail zone');
+  assert.equal(selection, 'weather', 'Select hail zone must open weather selection, not drawing');
   assert.equal(mounts, 1); assert.equal(unmounts, 0, 'Selecting a territory must keep historical geometry mounted');
   await click('Saved territories');
   await click('Recent storms');
   assert.equal(mounts, 1); assert.equal(unmounts, 0, 'Returning to the storm must preserve the selected event');
+  await click('Create storm territory');
+  assert.equal(selection, 'draw', 'Create storm territory still supports drawing');
   assert.ok(document.body.textContent?.includes('Selected storm · Historical'));
   assert.ok(document.body.textContent?.includes('Storm end'));
   assert.equal(Array.from(document.querySelectorAll('button')).some(node => node.textContent === 'Now'), false);
