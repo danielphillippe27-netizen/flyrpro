@@ -62,7 +62,16 @@ function StormWorkbench(props: Props) {
   const [territoryRevision, setTerritoryRevision] = useState(0);
   useEffect(() => { setSavedTerritory(null); }, [workspaceId]);
   const [selectedEvent, setSelectedEvent] = useState<StormEvent | null>(null);
-  const archiveView = tab === 'intelligence';
+  // A selected storm owns the map even when another sidebar or layer control opens.
+  const archiveView = tab === 'intelligence' || selectedEvent !== null;
+  const selectEvent = useCallback((event: StormEvent | null) => {
+    setSelectedEvent(event);
+    setCustomTimeline(null);
+    if (event) {
+      setTab('intelligence');
+      setSettings(previous => ({ ...previous, mode: 'history' }));
+    }
+  }, [setSettings]);
   const recentHailEvent = archiveView && selectedEvent?.hazard === 'hail' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000;
   const hailSelectionEvent = recentHailEvent && selectedEvent ? {
     key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source,
@@ -106,7 +115,7 @@ function StormWorkbench(props: Props) {
   }, [map]);
 
   useEffect(() => {
-    setEntitled(false); setManifest(null); setOpen(false); setSavedTerritory(null);
+    setEntitled(false); setManifest(null); setOpen(false); setSavedTerritory(null); setSelectedEvent(null); setCustomTimeline(null);
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
@@ -228,7 +237,7 @@ function StormWorkbench(props: Props) {
       for (const layer of group.ids) wanted.set(stormLayerForMode(layer, settings.mode), settings.layerOpacities?.[group.key] != null ? settings.layerOpacities[group.key] / 100 : group.key === 'radar' ? settings.radarOpacity / 100 : group.key === 'wind' ? 0.35 : layer.endsWith('-polygons') ? 0.4 : layer.endsWith('-tracks') ? 0.65 : 1);
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
-    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.65); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
+    if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.85); if (selectedEvent && selectedEvent.hazard !== 'hurricane' && Date.parse(selectedEvent.start) >= Date.now() - 7 * 86400000) wanted.set('radar', 0.55); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
@@ -258,7 +267,7 @@ function StormWorkbench(props: Props) {
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, workspaceId, props.standalone]);
+  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, customTimeline, settings.mode, settings.historyHours, workspaceId, props.standalone]);
 
   useEffect(() => {
     if (!ready) return;
@@ -322,7 +331,7 @@ function StormWorkbench(props: Props) {
   const goNow = () => {
     const timeline = controllerRef.current?.timeline;
     if (!timeline) return;
-    const value = (Date.now() - timeline.startDate.getTime()) / timeline.deltaTime * 100;
+    const value = ((selectedEvent ? Date.parse(selectedEvent.end) : Date.now()) - timeline.startDate.getTime()) / timeline.deltaTime * 100;
     scrub(Math.max(0, Math.min(100, value)));
   };
   const impacts = useMemo(() => stormTerritoryImpact(territories, risk), [territories, risk]);
@@ -335,9 +344,9 @@ function StormWorkbench(props: Props) {
   if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
   if (props.standalone) return <>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView onCreateTerritory={() => setTerritorySelection('draw')} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView onCreateTerritory={() => setTerritorySelection('draw')} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
-      renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
+      renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={() => <>
         <div className="mb-3 flex gap-2" role="group" aria-label="Storm territory selection">
@@ -363,12 +372,12 @@ function StormWorkbench(props: Props) {
       {open && <button type="button" aria-label="Turn off Storm" onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-slate-950/90 text-white"><X className="h-4 w-4" /></button>}
     </div>
     {open && <>
-      {props.standalone && <StormWeatherRail alwaysShowNames={props.displaySettings?.alwaysShowNames} onSettings={props.onDisplaySettings} settings={settings} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(value); setTab('overview'); setPanel(true); }} />}
+      {props.standalone && <StormWeatherRail alwaysShowNames={props.displaySettings?.alwaysShowNames} onSettings={props.onDisplaySettings} settings={settings} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); setPanel(true); }} />}
       <section ref={panelScrollRef} id="storm-maps-gl-panel" aria-label="Storm command controls" tabIndex={0} style={{ display: panel ? undefined : 'none', maxHeight: 'calc(100% - 7rem)', overscrollBehavior: 'contain', touchAction: 'pan-y', scrollbarGutter: 'stable' }} className="dark absolute left-5 top-20 z-30 w-[min(20rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-white shadow-2xl backdrop-blur-xl">
         <div className="flex items-center justify-between"><div><h2 className="text-base font-semibold">Storms</h2><p className="mt-1 text-[10px] text-slate-400">{archiveView ? 'Find storms. Save a storm territory.' : `${settings.mode === 'history' ? 'Past observations' : settings.mode === 'forecast' ? 'Forecast' : 'Live & short-range threats'} · ${enabledCount} overlays enabled`}</p></div><button aria-label="Hide Storm controls" onClick={() => setPanel(false)} className="rounded-lg p-2 hover:bg-white/10"><ChevronDown className="h-4 w-4" /></button></div>
         <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">{(['intelligence', 'overview', 'settings'] as const).map((value) => <button key={value} type="button" onClick={() => setTab(value)} aria-pressed={tab === value} className={`flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-semibold capitalize ${tab === value ? 'bg-cyan-300 text-slate-950' : 'text-slate-300 hover:bg-white/10'}`}>{value === 'settings' && <Settings2 className="h-3 w-3" />}{{intelligence:'Find storms',overview:'Weather map',settings:'Layers'}[value]}</button>)}</div>
         <div className="mt-4 rounded-xl border border-cyan-300/25 p-3 text-[11px]"><p className="font-semibold text-cyan-200">Storm territories</p><p className="mt-1 text-slate-400">Select an intensity zone, review its outline and save the territory. Create campaigns inside a saved territory.</p>{!hailSelectionEvent && <button type="button" onClick={() => { setTab('overview'); setSettings(hailViewSettings(settings, 'history')); }} className="mt-2 w-full rounded-lg border border-cyan-300/40 py-2 text-cyan-200">Select a past hail intensity territory</button>}{!archiveView && settings.mode === 'forecast' && <p className="mt-2 text-amber-200">Forecast shading shows predicted weather. Its colors are not measured hail intensity or a damage boundary.</p>}</div>
-        {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={setSelectedEvent} /></div>}
+        {archiveView && workspaceId && <div className="mt-4"><StormIntelligencePanel map={map} workspaceId={workspaceId} onSelect={selectEvent} /></div>}
         {panel && workspaceId && ready && controllerRef.current && hailSelectionEvent && !layerErrors.includes('hail-size-max') && <div className="mt-4"><HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async (zone) => {
           return await saveTerritoryAndReturn(zone.name, zone.polygon.geometry, { version: 1, event: hailSelectionEvent, selectedAt: new Date().toISOString(), minimumHailMM: zone.minimum, maximumHailMM: zone.maximum, selection: 'intensity-zone', evidenceKind: 'hail-size' });
         }} /></div>}
