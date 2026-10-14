@@ -246,7 +246,12 @@ function StormWorkbench(props: Props) {
     if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.85); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
     const errors: string[] = [];
     for (const id of activeIds.current) {
-      if (!wanted.has(id)) controller.setWeatherLayerVisibility(id, false);
+      if (!wanted.has(id)) {
+        // Hiding a weather layer retains its sources and legend. Remove it so
+        // a selected report has only its own overlay and legend.
+        controller.removeWeatherLayer(id);
+        activeIds.current.delete(id);
+      }
     }
     for (const [id, opacity] of wanted) {
       // Keep broad risk areas at every zoom; individual strikes and tracks need a regional view.
