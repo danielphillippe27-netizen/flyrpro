@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
 import { containedStormArea, effectiveStormArea } from '@/lib/storm-maps/intelligence/geometry';
-import { stormTerritorySchema } from '@/lib/storm-maps/intelligence/storm-territories';
+import { stormTerritorySchema, normalizeStormDrawingContext } from '@/lib/storm-maps/intelligence/storm-territories';
 export async function GET(request: NextRequest) {
   const c = await stormContext(request); if ('response' in c) return c.response;
   const id = request.nextUrl.searchParams.get('id');
@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
   let raw: unknown; try { raw = JSON.parse(text); } catch { return NextResponse.json({ error: 'Invalid territory.' }, { status: 400 }); }
   const parsed = stormTerritorySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: 'Choose a name and a valid, non-crossing storm territory smaller than 5,000 km².' }, { status: 400 });
+  parsed.data.context = normalizeStormDrawingContext(parsed.data.context);
   if(parsed.data.context.evidenceKind==='hail-sampled' && (parsed.data.context.selection!=='intensity-zone'||!parsed.data.context.sampling||parsed.data.context.minimumHailMM==null))return NextResponse.json({error:'Choose a numerical hail zone first.'},{status:400});
   if(parsed.data.context.evidenceKind==='wind-field'&&(parsed.data.context.event.hazard!=='hurricane'||!parsed.data.context.windSelection||parsed.data.context.selection!=='intensity-zone'))return NextResponse.json({error:'Select a hurricane wind area first.'},{status:400});
   if(parsed.data.context.reportSelection&&(parsed.data.context.event.hazard!=='tornado'||parsed.data.context.evidenceKind!=='reports'||parsed.data.context.selection!=='user-drawn'))return NextResponse.json({error:'Choose a tornado prospecting area.'},{status:400});
