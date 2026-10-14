@@ -8,17 +8,13 @@ type Props = {
 };
 
 export function StormTimelineRange({ settings, onChange }: Props) {
-  const selectClass = 'min-w-0 rounded-md border border-white/20 bg-[#0c202c] px-2 py-1 text-[11px] text-white focus-visible:outline focus-visible:outline-[#a9d7d5]';
-  return <div className="mb-2 flex flex-wrap items-center gap-2">
-    <select aria-label="Weather timeline mode" className={selectClass} value={settings.mode} onChange={event => {
-      const mode = event.target.value as StormGLSettings['mode'];
-      onChange({ ...settings, mode, ...(mode === 'live' && settings.shade.startsWith('hail-') ? { shade: 'none' as const, hail: true } : {}) });
-    }}>
-      <option value="live">Live</option>
-      <option value="history">Past</option>
-      <option value="forecast">Forecast</option>
-    </select>
-    {settings.mode === 'history' && <select aria-label="Weather timeline history range" className={selectClass} value={settings.historyHours} onChange={event => onChange({ ...settings, historyHours: Number(event.target.value) })}>
+  return <div className="mb-4 space-y-2">
+    <div role="group" aria-label="Weather timeline mode" className="grid grid-cols-3 gap-2">
+      {(['live', 'history', 'forecast'] as const).map(mode => <button key={mode} type="button" aria-pressed={settings.mode === mode} onClick={() => onChange({ ...settings, mode, ...(mode === 'live' && settings.shade.startsWith('hail-') ? { shade: 'none' as const, hail: true } : {}) })} className={`rounded-lg border py-2 text-sm ${settings.mode === mode ? 'border-[#0c202c] bg-[#0c202c] text-white' : 'border-slate-300 bg-white text-slate-900'}`}>
+        {mode === 'live' ? 'Live' : mode === 'history' ? 'Past' : 'Forecast'}
+      </button>)}
+    </div>
+    {settings.mode === 'history' && <select aria-label="Weather timeline history range" className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900" value={settings.historyHours} onChange={event => onChange({ ...settings, historyHours: Number(event.target.value) })}>
       {[6, 12, 24, 72].map(hours => <option key={hours} value={hours}>Past {hours} hours</option>)}
     </select>}
   </div>;

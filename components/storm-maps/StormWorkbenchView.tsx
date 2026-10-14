@@ -4,7 +4,6 @@ import type mapboxgl from 'mapbox-gl';
 import { Settings2, MapPin, Bookmark, X, Play, Pause, Maximize } from 'lucide-react';
 import { Slider } from '@/components/ui/slider';
 import { StormListSidebar } from './StormListSidebar';
-import { StormTimelineRange } from './StormTimelineRange';
 import { StormTimelineSettings } from './StormTimelineSettings';
 import { StormWeatherRail } from './StormWeatherRail';
 import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
@@ -44,8 +43,8 @@ export function StormWorkbenchView(props: Props) {
     <aside aria-label="Weather legends" className="absolute bottom-5 right-24 z-20 max-h-[25%] w-[min(21rem,calc(100%-7rem))] overflow-y-auto rounded-lg bg-white p-3 text-slate-800 shadow-xl max-md:bottom-28 max-md:w-48"><div ref={props.legendRef} className="text-xs" /><p className="mt-1 text-[9px] text-slate-500">Weather estimates · Vaisala Xweather</p></aside>
     <div className="absolute bottom-5 left-1/2 z-30 flex w-[min(36rem,calc(100%-10rem))] -translate-x-1/2 items-center gap-3 rounded-2xl bg-[#0c202c]/95 px-4 py-3 text-white shadow-xl max-md:left-4 max-md:w-[calc(100%-7rem)] max-md:translate-x-0">
       <button type="button" aria-label={props.playing ? 'Pause weather animation' : 'Play weather animation'} disabled={!props.ready} onClick={props.onPlay} className="rounded-full bg-white p-2 text-[#0c202c] disabled:opacity-40">{props.playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}</button>
-      <StormTimelineSettings range={props.timelineRange} duration={props.settings.speed} mode={props.settings.mode} onRange={props.onTimelineRange} onSpeed={props.onTimelineSpeed} />
-      <div className="min-w-0 flex-1"><StormTimelineRange settings={props.settings} onChange={props.onChange} /><div className="mb-2 flex items-center justify-between text-xs"><span>{props.clock}</span><span className="truncate px-2 text-[10px] text-[#b5c5cb]">{props.rangeTitle}</span><button onClick={props.onNow} className="text-[#a9d7d5]">Now</button></div><Slider aria-label="Weather timeline" min={0} max={100} step={1} value={[props.position]} onValueChange={value => props.onScrub(value[0])} /><div className="mt-1 flex justify-between text-[9px] text-[#b5c5cb]"><span>{props.rangeLabels.start}</span><span>{props.rangeLabels.end}</span></div></div>
+      <StormTimelineSettings range={props.timelineRange} duration={props.settings.speed} settings={props.settings} onChange={props.onChange} onRange={props.onTimelineRange} onSpeed={props.onTimelineSpeed} />
+      <div className="min-w-0 flex-1"><div className="mb-2 flex items-center justify-between text-xs"><span>{props.clock}</span><span className="truncate px-2 text-[10px] text-[#b5c5cb]">{props.rangeTitle}</span><button onClick={props.onNow} className="text-[#a9d7d5]">Now</button></div><Slider aria-label="Weather timeline" min={0} max={100} step={1} value={[props.position]} onValueChange={value => props.onScrub(value[0])} /><div className="mt-1 flex justify-between text-[9px] text-[#b5c5cb]"><span>{props.rangeLabels.start}</span><span>{props.rangeLabels.end}</span></div></div>
       <button type="button" aria-label="Toggle fullscreen map" onClick={() => { const node = props.map.getContainer().parentElement; if (document.fullscreenElement) void document.exitFullscreen().catch(() => {}); else void node?.requestFullscreen().catch(() => {}); }} className="rounded-full bg-white/10 p-2"><Maximize className="h-4 w-4" /></button>
     </div>
     {(props.error || props.loading) && <p role={props.error ? 'alert' : 'status'} className="absolute bottom-28 left-1/2 z-40 -translate-x-1/2 rounded-lg bg-[#0c202c]/95 px-4 py-2 text-xs text-white">{props.error || 'Loading weather…'}</p>}

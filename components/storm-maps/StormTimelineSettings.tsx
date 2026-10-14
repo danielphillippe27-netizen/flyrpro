@@ -1,17 +1,21 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Settings2, X } from 'lucide-react';
+import { StormTimelineRange } from './StormTimelineRange';
+import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
 type Range = { start: Date; end: Date };
 const localDate = (date: Date) => {
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return shifted.toISOString().slice(0,16);
 };
-export function StormTimelineSettings({ range, duration, mode, onRange, onSpeed }: {
-  range: Range; duration: number; mode: 'live' | 'history' | 'forecast';
+export function StormTimelineSettings({ range, duration, settings, onChange, onRange, onSpeed }: {
+  range: Range; duration: number; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void;
   onRange: (range: Range) => void; onSpeed: (duration: number) => void;
 }) {
+  const mode = settings.mode;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({start: localDate(range.start), end: localDate(range.end)});
+  useEffect(() => { setDraft({start: localDate(range.start), end: localDate(range.end)}); }, [range.start, range.end]);
   const [error, setError] = useState('');
   const show = () => { setDraft({start: localDate(range.start), end: localDate(range.end)}); setError(''); setOpen(value => !value); };
   const shift = (key: 'start' | 'end', hours: number) => {
@@ -32,6 +36,8 @@ export function StormTimelineSettings({ range, duration, mode, onRange, onSpeed 
     <button type="button" aria-label="Timeline settings" aria-expanded={open} onClick={show} className="rounded-full p-2 hover:bg-white/10"><Settings2 className="h-5 w-5" /></button>
     {open && <section aria-label="Timeline settings" className="absolute bottom-14 -left-12 z-50 max-h-[65vh] w-[min(24rem,calc(100vw-7rem))] overflow-y-auto rounded-2xl bg-white p-5 text-slate-900 shadow-2xl" style={{overscrollBehavior:'contain'}}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">Timeline</h2><button type="button" aria-label="Close timeline settings" onClick={()=>setOpen(false)} className="rounded-full bg-slate-100 p-2"><X className="h-4 w-4" /></button></div>
+      <h3 className="mb-2 text-base font-semibold">Weather mode</h3>
+      <StormTimelineRange settings={settings} onChange={onChange} />
       <h3 className="mb-3 text-base font-semibold">Date range</h3>
       {(['start','end'] as const).map(key=><div key={key} className="mb-4">
         <label className="block text-sm font-semibold capitalize">{key}<input aria-label={key==='start'?'Timeline start':'Timeline end'} type="datetime-local" value={draft[key]} onChange={event=>{setDraft(previous=>({...previous,[key]:event.target.value}));setError('');}} className="mt-1 block w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900" /></label>
