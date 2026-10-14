@@ -2868,11 +2868,13 @@ export function CampaignDetailMapView({
               SELECTED_PARCEL_COLOR,
               parcelStrokeColor,
             ],
+            // Camera expressions must interpolate zoom at the top level.
             'line-width': [
-              'case',
-              ['boolean', ['get', 'is_selected'], false],
-              ['interpolate', ['linear'], ['zoom'], 12, 1.4, 14, 2.1, 16, 2.8, 18, 3.4],
-              ['interpolate', ['linear'], ['zoom'], 12, 0.75, 14, 1.05, 16, 1.25, 18, parcelLineWidth],
+              'interpolate', ['linear'], ['zoom'],
+              12, ['case', ['boolean', ['get', 'is_selected'], false], 1.4, 0.75],
+              14, ['case', ['boolean', ['get', 'is_selected'], false], 2.1, 1.05],
+              16, ['case', ['boolean', ['get', 'is_selected'], false], 2.8, 1.25],
+              18, ['case', ['boolean', ['get', 'is_selected'], false], 3.4, parcelLineWidth],
             ],
             'line-opacity': ['case', ['boolean', ['get', 'is_selected'], false], 1, parcelLineOpacity],
           },
