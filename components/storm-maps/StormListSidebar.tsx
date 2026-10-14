@@ -8,7 +8,7 @@ export function StormListSidebar({collapsed,onCollapse,tab,onTab,children,onCrea
 }){
  const scroll=useRef<HTMLDivElement>(null);
  useEffect(()=>{const node=scroll.current;if(!node)return;const wheel=(event:WheelEvent)=>handleWheelScrollContainer(event,node);node.addEventListener('wheel',wheel,{passive:false});return()=>node.removeEventListener('wheel',wheel);},[]);
- return <aside aria-label="Storm list" className="absolute inset-y-0 left-0 z-30 flex min-h-0 flex-col overflow-hidden border-r border-border bg-white text-foreground transition-[width] duration-200 ease-out dark:bg-sidebar" style={{width:collapsed?36:280}}>
+ return <aside aria-label="Storm list" className="absolute inset-y-0 left-0 z-30 flex min-h-0 flex-col overflow-hidden border-r border-border bg-white text-foreground transition-[width] duration-200 ease-out dark:bg-sidebar" style={{position:'absolute',zIndex:30,width:collapsed?36:280}}>
    {collapsed && <button type="button" onClick={()=>onCollapse(false)} aria-label="Show storm list" title="Show storm list" className="absolute left-0 top-0 z-10 flex h-[49px] w-9 items-center justify-center border-b border-border bg-white text-muted-foreground hover:text-foreground dark:bg-[#0f0f10]"><ChevronsRight className="h-3.5 w-3.5" /></button>}
    <div className={'flex h-full min-h-0 w-[280px] flex-col overflow-hidden transition-opacity duration-200 '+(collapsed?'pointer-events-none opacity-0':'opacity-100')} inert={collapsed}>
     <header className="relative shrink-0 border-b border-border p-3">
