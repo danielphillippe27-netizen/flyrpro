@@ -906,6 +906,7 @@ export function CampaignDetailMapView({
   const resolvedInitialParcelOverlay = SHOW_PARCEL_VIEW && initialMapViewMode === 'parcels';
   // Map view: residential buildings by default, with address points available as a focused base layer.
   const [mapViewMode, setMapViewMode] = useState<MapViewMode>(resolvedInitialMapViewMode);
+  const [showStormOverlay, setShowStormOverlay] = useState(true);
   const [showParcelsOverlay, setShowParcelsOverlay] = useState(resolvedInitialParcelOverlay);
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
@@ -3611,8 +3612,8 @@ export function CampaignDetailMapView({
           </div>
         </div>
       ) : null}
-      {map.current && mapLoaded && !useGoogle2D && <StormTerritoryOverlay map={map.current} territory={stormTerritory} />}
-      {stormTerritoryError && <p role="alert" className="absolute bottom-4 left-4 z-30 rounded-lg bg-background p-2 text-xs text-foreground">Storm territory overlay: {stormTerritoryError}</p>}
+      {map.current && mapLoaded && !useGoogle2D && <StormTerritoryOverlay map={map.current} territory={showStormOverlay ? stormTerritory : null} />}
+      {showStormOverlay && stormTerritoryError && <p role="alert" className="absolute bottom-4 left-4 z-30 rounded-lg bg-background p-2 text-xs text-foreground">Storm territory overlay: {stormTerritoryError}</p>}
       {map.current && mapLoaded && (
         <>
           <MapInfoButton
@@ -3620,8 +3621,19 @@ export function CampaignDetailMapView({
             statusFilters={statusFilters}
             onStatusFiltersChange={setStatusFilters}
             portalContainer={mapShellRef.current}
-            extraContent={
-              multiSelectedTargets.length > 0 ? (
+            besideContent={campaign?.storm_context ? (
+              <button type="button" role="switch" aria-label="Storm overlay" aria-checked={showStormOverlay} onClick={() => setShowStormOverlay(value => !value)} className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm backdrop-blur-sm ${showStormOverlay ? 'border-cyan-300/40 bg-cyan-950/90 text-cyan-100' : 'border-border bg-background/90 text-muted-foreground'}`}>
+                Storm <span className="text-[10px]">{showStormOverlay ? 'On' : 'Off'}</span>
+              </button>
+            ) : undefined}
+            extraContent={<>
+              <div className="mb-3 space-y-2 border-b border-border pb-3">
+                <button type="button" role="switch" aria-label="Parcel overlay" aria-checked={showParcelsOverlay} disabled={!parcelsReady} onClick={() => setShowParcelsOverlay(value => !value)} className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
+                  <span>Parcels</span><span>{showParcelsOverlay ? 'On' : 'Off'}</span>
+                </button>
+                {!parcelsReady && <p className="text-[11px] text-muted-foreground">{parcelsProcessing ? 'Parcel data is processing.' : 'Parcel data is unavailable for this campaign.'}</p>}
+              </div>
+              {multiSelectedTargets.length > 0 ? (
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground">
                     {multiSelectedTargets.length} house
@@ -3653,8 +3665,8 @@ export function CampaignDetailMapView({
                 <p className="text-[11px] text-muted-foreground">
                   Hold Command and click houses on the map to multi-select them for deletion.
                 </p>
-              )
-            }
+              )}
+            </>}
           />
           {multiSelectedTargets.length > 0 ? (
             <div className="pointer-events-none absolute top-14 left-3 z-20">

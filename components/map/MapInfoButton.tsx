@@ -12,6 +12,7 @@ interface MapInfoButtonProps {
   onStatusFiltersChange?: (filters: StatusFilters) => void;
   portalContainer?: HTMLElement | null;
   extraContent?: ReactNode;
+  besideContent?: ReactNode;
 }
 
 /**
@@ -24,6 +25,7 @@ export function MapInfoButton({
   onStatusFiltersChange,
   portalContainer,
   extraContent,
+  besideContent,
 }: MapInfoButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -31,7 +33,7 @@ export function MapInfoButton({
 
   return (
     <>
-      <div className="pointer-events-none absolute top-3 left-3 z-20">
+      <div className="pointer-events-none absolute top-3 left-3 z-20 flex items-center gap-2">
         <Button
           variant="secondary"
           className="pointer-events-auto h-9 rounded-full border border-red-300/30 bg-red-500/80 px-4 text-xs font-semibold text-white shadow-sm hover:bg-red-500/90"
@@ -40,6 +42,7 @@ export function MapInfoButton({
         >
           Tools
         </Button>
+        <div className="pointer-events-auto">{besideContent}</div>
       </div>
       <MapInfoSheet
         open={open}
