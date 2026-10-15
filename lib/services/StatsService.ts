@@ -275,16 +275,26 @@ export class StatsService {
     const rows: DialerCallStatsRow[] = [];
     const chunkSize = 250;
 
+    const chunks: string[][] = [];
     for (let index = 0; index < uniqueContactIds.length; index += chunkSize) {
-      const chunk = uniqueContactIds.slice(index, index + chunkSize);
-      const { data, error } = await this.client
-        .from('dialer_calls')
-        .select('contact_id, status, disposition, answered_at, created_at')
-        .eq('workspace_id', workspaceId)
-        .in('contact_id', chunk);
+      chunks.push(uniqueContactIds.slice(index, index + chunkSize));
+    }
 
-      if (error) throw new Error(error.message || 'Failed to load dialer call stats');
-      rows.push(...((data ?? []) as DialerCallStatsRow[]));
+    // Independent reads overlap without flooding Supabase for large contact lists.
+    const concurrency = 4;
+    for (let index = 0; index < chunks.length; index += concurrency) {
+      const batches = await Promise.all(chunks.slice(index, index + concurrency).map(async (chunk) => {
+        const { data, error } = await this.client
+          .from('dialer_calls')
+          .select('contact_id, status, disposition, answered_at, created_at')
+          .eq('workspace_id', workspaceId)
+          .in('contact_id', chunk);
+
+        if (error) throw new Error(error.message || 'Failed to load dialer call stats');
+        return (data ?? []) as DialerCallStatsRow[];
+      }));
+      // Keep reduction order stable even when reads finish out of order.
+      for (const batch of batches) rows.push(...batch);
     }
 
     return rows.reduce<DialerCallListStats>((acc, call) => {
