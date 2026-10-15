@@ -65,6 +65,12 @@ export async function POST(request: NextRequest) {
     requestUser.id,
     requestedWorkspaceId
   );
+  if (workspace.error || !workspace.workspaceId) {
+    return NextResponse.json(
+      { error: workspace.error ?? 'Workspace not found' },
+      { status: workspace.status ?? 400 }
+    );
+  }
   const payload: Record<string, unknown> = {
     user_id: requestUser.id,
     workspace_id: workspace.workspaceId,
