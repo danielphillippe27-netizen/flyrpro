@@ -120,6 +120,45 @@ function isConnectedDialerCall(call: DialerCallStatsRow): boolean {
   );
 }
 
+function emptyDialerCallStats(): DialerCallListStats {
+  return {
+    totalCalls: 0,
+    newCallsThisWeek: 0,
+    connectedCalls: 0,
+    connectedCallsThisWeek: 0,
+    lastStatusByContactId: {},
+  };
+}
+
+function accumulateDialerCallStats(
+  acc: DialerCallListStats,
+  call: DialerCallStatsRow,
+  weekStartMs: number
+): DialerCallListStats {
+  const createdAtMs = call.created_at ? new Date(call.created_at).getTime() : 0;
+  const isThisWeek = Number.isFinite(createdAtMs) && createdAtMs >= weekStartMs;
+  const isConnected = isConnectedDialerCall(call);
+
+  acc.totalCalls += 1;
+  if (isThisWeek) acc.newCallsThisWeek += 1;
+  if (isConnected) acc.connectedCalls += 1;
+  if (isConnected && isThisWeek) acc.connectedCallsThisWeek += 1;
+
+  if (call.contact_id) {
+    const current = acc.lastStatusByContactId[call.contact_id];
+    const currentMs = current?.createdAt ? new Date(current.createdAt).getTime() : 0;
+    if (!current || createdAtMs >= currentMs) {
+      acc.lastStatusByContactId[call.contact_id] = {
+        status: call.status ?? null,
+        disposition: call.disposition ?? null,
+        answeredAt: call.answered_at ?? null,
+        createdAt: call.created_at ?? null,
+      };
+    }
+  }
+  return acc;
+}
+
 async function fetchLeadCandidateRows(
   client: ReturnType<typeof createClient>,
   userId: string
@@ -262,18 +301,12 @@ export class StatsService {
     contactIds: string[]
   ): Promise<DialerCallListStats> {
     const uniqueContactIds = Array.from(new Set(contactIds.filter(Boolean)));
-    const emptyStats: DialerCallListStats = {
-      totalCalls: 0,
-      newCallsThisWeek: 0,
-      connectedCalls: 0,
-      connectedCallsThisWeek: 0,
-      lastStatusByContactId: {},
-    };
+    const emptyStats = emptyDialerCallStats();
     if (!workspaceId || uniqueContactIds.length === 0) return emptyStats;
 
     const weekStartMs = startOfWeek(new Date()).getTime();
-    const rows: DialerCallStatsRow[] = [];
     const chunkSize = 250;
+    const pageSize = 1000;
 
     const chunks: string[][] = [];
     for (let index = 0; index < uniqueContactIds.length; index += chunkSize) {
@@ -283,44 +316,46 @@ export class StatsService {
     // Independent reads overlap without flooding Supabase for large contact lists.
     const concurrency = 4;
     for (let index = 0; index < chunks.length; index += concurrency) {
-      const batches = await Promise.all(chunks.slice(index, index + concurrency).map(async (chunk) => {
-        const { data, error } = await this.client
-          .from('dialer_calls')
-          .select('contact_id, status, disposition, answered_at, created_at')
-          .eq('workspace_id', workspaceId)
-          .in('contact_id', chunk);
+      let batchFailed = false;
+      const batches = await Promise.allSettled(chunks.slice(index, index + concurrency).map(async (chunk) => {
+        const stats = emptyDialerCallStats();
+        try {
+          for (let from = 0; !batchFailed;) {
+            const { data, error } = await this.client
+              .from('dialer_calls')
+              .select('contact_id, status, disposition, answered_at, created_at')
+              .eq('workspace_id', workspaceId)
+              .in('contact_id', chunk)
+              .order('id', { ascending: true })
+              .range(from, from + pageSize - 1);
 
-        if (error) throw new Error(error.message || 'Failed to load dialer call stats');
-        return (data ?? []) as DialerCallStatsRow[];
+            if (error) throw new Error(error.message || 'Failed to load dialer call stats');
+            if (batchFailed) break;
+            const page = (data ?? []) as DialerCallStatsRow[];
+            for (const call of page) accumulateDialerCallStats(stats, call, weekStartMs);
+            // A configured API cap can make a non-final page shorter than requested.
+            if (page.length === 0) break;
+            from += page.length;
+          }
+        } catch (error) {
+          batchFailed = true;
+          throw error;
+        }
+        return stats;
       }));
-      // Keep reduction order stable even when reads finish out of order.
-      for (const batch of batches) rows.push(...batch);
+      // Merge in contact-chunk order without retaining every historical call row.
+      for (const result of batches) {
+        if (result.status === 'rejected') throw result.reason;
+        const batch = result.value;
+        emptyStats.totalCalls += batch.totalCalls;
+        emptyStats.newCallsThisWeek += batch.newCallsThisWeek;
+        emptyStats.connectedCalls += batch.connectedCalls;
+        emptyStats.connectedCallsThisWeek += batch.connectedCallsThisWeek;
+        Object.assign(emptyStats.lastStatusByContactId, batch.lastStatusByContactId);
+      }
     }
 
-    return rows.reduce<DialerCallListStats>((acc, call) => {
-      const createdAtMs = call.created_at ? new Date(call.created_at).getTime() : 0;
-      const isThisWeek = Number.isFinite(createdAtMs) && createdAtMs >= weekStartMs;
-      const isConnected = isConnectedDialerCall(call);
-
-      acc.totalCalls += 1;
-      if (isThisWeek) acc.newCallsThisWeek += 1;
-      if (isConnected) acc.connectedCalls += 1;
-      if (isConnected && isThisWeek) acc.connectedCallsThisWeek += 1;
-
-      if (call.contact_id) {
-        const current = acc.lastStatusByContactId[call.contact_id];
-        const currentMs = current?.createdAt ? new Date(current.createdAt).getTime() : 0;
-        if (!current || createdAtMs >= currentMs) {
-          acc.lastStatusByContactId[call.contact_id] = {
-            status: call.status ?? null,
-            disposition: call.disposition ?? null,
-            answeredAt: call.answered_at ?? null,
-            createdAt: call.created_at ?? null,
-          };
-        }
-      }
-      return acc;
-    }, emptyStats);
+    return emptyStats;
   }
 
   static async fetchAppointmentCount(userId: string): Promise<number> {
