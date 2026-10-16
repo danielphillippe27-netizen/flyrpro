@@ -32,16 +32,26 @@ const workspaceHelper = loadSource(path.resolve(__dirname, '../../../_utils/work
 const owner = { id: 'synthetic-owner' };
 const validWorkspace = { workspaceId: 'synthetic-workspace' };
 
-async function request({ workspace = validWorkspace, user = owner, body = {} } = {}) {
-  const effects = { writes: [], crm: [], resolver: [] };
+async function request({ workspace = validWorkspace, user = owner, body = {}, campaign = { id: "fixture-campaign", workspace_id: "synthetic-workspace" }, campaignError = null, insertErrors = [] } = {}) {
+  const effects = { writes: [], crm: [], resolver: [], reads: [] };
   const admin = {
     from(table) {
+      if (table === 'campaigns') {
+        const read = { table, filters: {} };
+        effects.reads.push(read);
+        return {
+          select(columns) { read.columns = columns; return this; },
+          eq(column, value) { read.filters[column] = value; return this; },
+          async maybeSingle() { return { data: campaign, error: campaignError }; },
+        };
+      }
       return {
         insert(payload) {
-          effects.writes.push({ table, payload });
+          effects.writes.push({ table, payload: { ...payload } });
+          const error = insertErrors[effects.writes.length - 1] || null;
           return {
             select() { return this; },
-            async single() { return { data: { id: 'synthetic-contact', full_name: payload.full_name, status: payload.status }, error: null }; },
+            async single() { return { data: { id: 'synthetic-contact', full_name: payload.full_name, status: payload.status }, error }; },
           };
         },
       };
@@ -116,4 +126,53 @@ test('real resolver denies foreign workspace membership', async () => {
   assert.equal(response.status, 403);
   assert.equal(effects.writes.length, 0);
   assert.equal(effects.crm.length, 0);
+});
+
+for (const [name, campaign, campaignError, status] of [
+  ['foreign campaign', { id: 'fixture-campaign', workspace_id: 'foreign-workspace' }, null, 403],
+  ['missing campaign', null, null, 403],
+  ['campaign with no workspace', { id: 'fixture-campaign', workspace_id: null }, null, 403],
+  ['campaign query failure', null, { message: 'database unavailable' }, 500],
+]) {
+  test(name + ' rejects before any contact/activity write or CRM delivery', async () => {
+    const { response, effects } = await request({ body: { campaignId: 'fixture-campaign' }, campaign, campaignError });
+    assert.equal(response.status, status);
+    assert.equal(effects.writes.length, 0);
+    assert.equal(effects.crm.length, 0);
+  });
+}
+
+test('valid campaign preserves the workspace predicate and successful response', async () => {
+  const { response, effects } = await request({ body: { campaignId: 'fixture-campaign' } });
+  assert.equal(response.status, 201);
+  assert.equal(effects.reads.length, 1);
+  assert.equal(effects.reads[0].filters.id, 'fixture-campaign');
+  assert.equal(effects.reads[0].filters.workspace_id, 'synthetic-workspace');
+  assert.equal(effects.writes[0].payload.campaign_id, 'fixture-campaign');
+  assert.equal(effects.writes[0].payload.workspace_id, 'synthetic-workspace');
+});
+
+for (const column of ['user_id', 'workspace_id', 'full_name']) {
+  test('missing ' + column + ' fails without retrying an ownership/name downgrade', async () => {
+    const { response, effects } = await request({
+      insertErrors: [{ message: "Could not find the '" + column + "' column of 'contacts' in the schema cache" }],
+    });
+    assert.equal(response.status, 500);
+    assert.equal(effects.writes.length, 1);
+    assert.equal(effects.crm.length, 0);
+    assert.ok(effects.writes[0].payload[column]);
+  });
+}
+
+test('optional-column compatibility retry retains ownership and required name', async () => {
+  const { response, effects } = await request({
+    body: { email: 'fixture@example.invalid' },
+    insertErrors: [{ message: "Could not find the 'email' column of 'contacts' in the schema cache" }],
+  });
+  assert.equal(response.status, 201);
+  assert.equal(effects.writes.length, 2);
+  assert.equal(effects.writes[1].payload.email, undefined);
+  for (const key of ['user_id', 'workspace_id', 'full_name']) {
+    assert.equal(effects.writes[1].payload[key], effects.writes[0].payload[key]);
+  }
 });

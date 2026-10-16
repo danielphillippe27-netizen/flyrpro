@@ -23,8 +23,11 @@ function cleanedStringList(value: unknown): string[] {
   return Array.from(new Set(value.map(cleanedString).filter(Boolean) as string[]));
 }
 
+const REQUIRED_CONTACT_COLUMNS = new Set(['user_id', 'workspace_id', 'full_name']);
+
 function removeMissingColumn(payload: Record<string, unknown>, error: unknown): boolean {
   for (const column of Object.keys(payload)) {
+    if (REQUIRED_CONTACT_COLUMNS.has(column)) continue;
     if (isMissingColumn(error, column)) {
       delete payload[column];
       return true;
@@ -70,6 +73,23 @@ export async function POST(request: NextRequest) {
       { error: workspace.error ?? 'Workspace not found' },
       { status: workspace.status ?? 400 }
     );
+  }
+  if (campaignId) {
+    const { data: campaign, error: campaignError } = await admin
+      .from('campaigns')
+      .select('id, workspace_id')
+      .eq('id', campaignId)
+      .eq('workspace_id', workspace.workspaceId)
+      .maybeSingle();
+    if (campaignError) {
+      return NextResponse.json({ error: 'Unable to validate campaign access' }, { status: 500 });
+    }
+    if (!campaign || campaign.workspace_id !== workspace.workspaceId) {
+      return NextResponse.json(
+        { error: 'Campaign is not available in the selected workspace' },
+        { status: 403 }
+      );
+    }
   }
   const payload: Record<string, unknown> = {
     user_id: requestUser.id,
