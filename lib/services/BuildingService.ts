@@ -113,7 +113,7 @@ export class BuildingService {
 
   /**
    * Find nearest neighbor buildings within a specified radius
-   * Performs spatial search to find the N nearest neighbor footprints.
+   * Filters campaign candidates by exact distance, returning the nearest loaded footprints.
    * 
    * @param building - Building to find neighbors for
    * @param radiusMeters - Search radius (default: 50m)
@@ -126,6 +126,9 @@ export class BuildingService {
     count: number = this.NEIGHBOR_COUNT,
     campaignId?: string
   ): Promise<NeighborInfo[]> {
+    const scopedCampaignId = campaignId?.trim() || building.campaign_id?.trim();
+    if (!scopedCampaignId) return [];
+
     // Parse building geometry
     const buildingGeoJSON = typeof building.geom === 'string'
       ? JSON.parse(building.geom)
@@ -150,19 +153,15 @@ export class BuildingService {
 
     const buildingCentroid = turf.point(centroid.coordinates);
 
-    // Query for buildings within radius using PostGIS
-    // Using ST_DWithin for efficient spatial search
-    // Filter by campaign_id if provided (mission-based exclusivity)
-    let query = this.client
+    // Load campaign candidates, then filter exact distances below.
+    // The row cap is not a guarantee that all nearby buildings are loaded.
+    // Restrict candidate rows to the requested or owning campaign.
+    const query = this.client
       .from('buildings')
       .select('id, gers_id, geom, centroid, latest_status, is_hidden, campaign_id')
       .eq('is_hidden', false)
-      .neq('id', building.id);
-    
-    // Filter by campaign_id if provided (mission-based exclusivity)
-    if (campaignId) {
-      query = query.eq('campaign_id', campaignId);
-    }
+      .neq('id', building.id)
+      .eq('campaign_id', scopedCampaignId);
     
     const { data: nearbyBuildings, error } = await query.limit(100); // Get more than needed, then filter and sort
 
