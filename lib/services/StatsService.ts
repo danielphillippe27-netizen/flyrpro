@@ -320,7 +320,7 @@ export class StatsService {
       const batches = await Promise.allSettled(chunks.slice(index, index + concurrency).map(async (chunk) => {
         const stats = emptyDialerCallStats();
         try {
-          for (let from = 0; !batchFailed; from += pageSize) {
+          for (let from = 0; !batchFailed;) {
             const { data, error } = await this.client
               .from('dialer_calls')
               .select('contact_id, status, disposition, answered_at, created_at')
@@ -333,7 +333,9 @@ export class StatsService {
             if (batchFailed) break;
             const page = (data ?? []) as DialerCallStatsRow[];
             for (const call of page) accumulateDialerCallStats(stats, call, weekStartMs);
-            if (page.length < pageSize) break;
+            // A configured API cap can make a non-final page shorter than requested.
+            if (page.length === 0) break;
+            from += page.length;
           }
         } catch (error) {
           batchFailed = true;
