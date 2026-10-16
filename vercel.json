@@ -8,10 +8,6 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/field-recordings",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/cron/team-reports",
       "schedule": "0 12 * * *"
     },

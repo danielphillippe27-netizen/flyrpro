@@ -1,21 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { timingSafeEqual } from 'node:crypto';
-import { dispatchFieldRecordings } from '@/lib/field-recordings/worker';
-import { expireFieldRecordings } from '@/lib/field-recordings/retention-worker';
-import { retentionEnabled } from '@/lib/field-recordings/retention';
-import { cleanupFieldRecordingStorage } from '@/lib/field-recordings/deletion-worker';
+import { NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
-export async function GET(request: NextRequest) {
-  const expected = process.env.CRON_SECRET ? Buffer.from(`Bearer ${process.env.CRON_SECRET}`) : null;
-  const received = Buffer.from(request.headers.get('authorization') || '');
-  if (!expected || received.length !== expected.length || !timingSafeEqual(received, expected)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  try {
-    const retention = retentionEnabled(process.env.FIELD_RECORDING_RETENTION_ENABLED, process.env.FIELD_RECORDING_DELETION_ENABLED) ? await expireFieldRecordings() : { recordingsExpired: 0, retentionPaused: true };
-    const cleanup = process.env.FIELD_RECORDING_STORAGE_CLEANUP_ENABLED === 'true' ? await cleanupFieldRecordingStorage() : { storageCleaned: 0, cleanupPaused: true };
-    return NextResponse.json({ ...await dispatchFieldRecordings(), ...cleanup, ...retention });
-  }
-  catch { return NextResponse.json({ error: 'Recording queue unavailable' }, { status: 503 }); }
+// Permanently retired. Never authenticate with a provider or accept queued uploads.
+function retired() {
+  return NextResponse.json({ error: 'Recording integration has been removed', code: 'INTEGRATION_RETIRED' }, { status: 410, headers: { 'Cache-Control': 'no-store' } });
 }
+export { retired as GET, retired as POST, retired as PUT, retired as PATCH, retired as DELETE };
