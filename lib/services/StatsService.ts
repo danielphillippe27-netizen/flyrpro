@@ -316,26 +316,35 @@ export class StatsService {
     // Independent reads overlap without flooding Supabase for large contact lists.
     const concurrency = 4;
     for (let index = 0; index < chunks.length; index += concurrency) {
-      const batches = await Promise.all(chunks.slice(index, index + concurrency).map(async (chunk) => {
+      let batchFailed = false;
+      const batches = await Promise.allSettled(chunks.slice(index, index + concurrency).map(async (chunk) => {
         const stats = emptyDialerCallStats();
-        for (let from = 0; ; from += pageSize) {
-          const { data, error } = await this.client
-            .from('dialer_calls')
-            .select('contact_id, status, disposition, answered_at, created_at')
-            .eq('workspace_id', workspaceId)
-            .in('contact_id', chunk)
-            .order('id', { ascending: true })
-            .range(from, from + pageSize - 1);
+        try {
+          for (let from = 0; !batchFailed; from += pageSize) {
+            const { data, error } = await this.client
+              .from('dialer_calls')
+              .select('contact_id, status, disposition, answered_at, created_at')
+              .eq('workspace_id', workspaceId)
+              .in('contact_id', chunk)
+              .order('id', { ascending: true })
+              .range(from, from + pageSize - 1);
 
-          if (error) throw new Error(error.message || 'Failed to load dialer call stats');
-          const page = (data ?? []) as DialerCallStatsRow[];
-          for (const call of page) accumulateDialerCallStats(stats, call, weekStartMs);
-          if (page.length < pageSize) break;
+            if (error) throw new Error(error.message || 'Failed to load dialer call stats');
+            if (batchFailed) break;
+            const page = (data ?? []) as DialerCallStatsRow[];
+            for (const call of page) accumulateDialerCallStats(stats, call, weekStartMs);
+            if (page.length < pageSize) break;
+          }
+        } catch (error) {
+          batchFailed = true;
+          throw error;
         }
         return stats;
       }));
       // Merge in contact-chunk order without retaining every historical call row.
-      for (const batch of batches) {
+      for (const result of batches) {
+        if (result.status === 'rejected') throw result.reason;
+        const batch = result.value;
         emptyStats.totalCalls += batch.totalCalls;
         emptyStats.newCallsThisWeek += batch.newCallsThisWeek;
         emptyStats.connectedCalls += batch.connectedCalls;
