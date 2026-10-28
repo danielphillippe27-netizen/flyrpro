@@ -66,7 +66,7 @@ export async function loadLivePresence(
 
   const validPresence = ((presenceRows ?? []) as Array<{
     campaign_id: string;
-    campaigns: { workspace_id: string; title: string | null; name: string | null };
+    campaigns: { workspace_id: string; title: string | null; name: string | null } | Array<{ workspace_id: string; title: string | null; name: string | null }>;
     user_id: string;
     session_id: string | null;
     lat: number | null;
@@ -113,7 +113,7 @@ export async function loadLivePresence(
     members,
     livePresence: presenceWithActiveSession.map((row) => {
       const member = memberByUserId.get(row.user_id);
-      const campaign = row.campaigns;
+      const campaign = Array.isArray(row.campaigns) ? row.campaigns[0] : row.campaigns;
       const session = row.session_id ? sessionById.get(row.session_id) : null;
       return {
         user_id: row.user_id,

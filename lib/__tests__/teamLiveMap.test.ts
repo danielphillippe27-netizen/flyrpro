@@ -13,7 +13,7 @@ function fixture(): Record<string, Row[]> {
   };
 }
 // Generic query transport only; all live-map business logic comes from production.
-function client(tables: Record<string, Row[]>, failTable?: string) {
+function client(tables: Record<string, Row[]>, failTable?: string, arrayRelation = false) {
   return { from(table: string) {
     let rows = [...(tables[table] ?? [])];
     const query = {
@@ -22,12 +22,12 @@ function client(tables: Record<string, Row[]>, failTable?: string) {
           assert.ok(columns.includes('campaigns!inner('));
           rows = rows.flatMap(row => {
             const campaign = tables.campaigns.find(campaign => campaign.id === row.campaign_id);
-            return campaign ? [{ ...row, campaigns: campaign }] : [];
+            return campaign ? [{ ...row, campaigns: arrayRelation ? [campaign] : campaign }] : [];
           });
         }
         return query;
       },
-      eq(key: string, value: unknown) { rows = rows.filter(row => key === 'campaigns.workspace_id' ? (row.campaigns as Row)?.workspace_id === value : row[key] === value); return query; },
+      eq(key: string, value: unknown) { rows = rows.filter(row => key === 'campaigns.workspace_id' ? (Array.isArray(row.campaigns) ? row.campaigns[0] : row.campaigns as Row)?.workspace_id === value : row[key] === value); return query; },
       neq(key: string, value: unknown) { rows = rows.filter(row => row[key] !== value); return query; },
       is(key: string, value: unknown) { return query.eq(key, value); },
       in(key: string, values: unknown[]) { assert.notEqual(key, 'campaign_id', 'presence must not enumerate campaign history in the URL'); rows = rows.filter(row => values.includes(row[key])); return query; },
@@ -120,5 +120,10 @@ test('large campaign history does not create an oversized presence request', asy
   }
   const result = await load(tables);
   assert.equal(result.livePresence.length, 1);
+  assert.equal(result.livePresence[0].campaign_name, 'North Oshawa');
+});
+
+test('accepts a joined campaign represented as an array', async () => {
+  const result = await loadLivePresence(client(fixture(), undefined, true) as never, 'team');
   assert.equal(result.livePresence[0].campaign_name, 'North Oshawa');
 });
