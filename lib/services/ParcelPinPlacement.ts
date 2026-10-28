@@ -9,6 +9,7 @@ export type ParcelPinPlacement = {
   buildingId: string | null;
   coordinate: [number, number];
   method: 'parcel_center' | 'building_centroid' | 'building_parcel_centroid';
+  preservedSource?: boolean;
 };
 const text = (value: unknown): string => typeof value === 'string' ? value.trim().toLowerCase() : '';
 export function buildingIdentifiers(feature: Feature): string[] {
@@ -80,6 +81,13 @@ export function planParcelPinPlacements(input: {
         placements.push({ addressId, parcelId, buildingId: null, coordinate: interiorCentroid(parcel), method: 'parcel_center' });
         continue;
       }
+      // An existing civic point within its single-address parcel is stronger
+      // evidence than a calculated roof/parcel centroid. Still resolve the
+      // building below so keeping the point does not discard its association.
+      const coordinates = address.geometry?.type === 'Point' ? address.geometry.coordinates : null;
+      const preservePoint = coordinates && coordinates.length >= 2 &&
+        Number.isFinite(coordinates[0]) && Number.isFinite(coordinates[1]) &&
+        turf.booleanPointInPolygon(turf.point(coordinates), parcel);
       const [minX, minY, maxX, maxY] = turf.bbox(parcel);
       const candidates = tree.search({ minX, minY, maxX, maxY }).flatMap(({ feature }) => {
         const intersection = turf.intersect(turf.featureCollection([parcel, feature]));
@@ -94,6 +102,14 @@ export function planParcelPinPlacements(input: {
       // missing footprint can still use parcel-only placement when no eligible
       // replacement exists; the original building link remains untouched.
       const winner = linkedId ? candidates.find(c => c.feature === linked) : candidates.length === 1 ? candidates[0] : null;
+      if (preservePoint && coordinates) {
+        placements.push({ addressId, parcelId,
+          buildingId: winner ? buildingIdentifiers(winner.feature)[0] ?? null : null,
+          coordinate: [coordinates[0], coordinates[1]],
+          // Existing mobile clients recognize these canonical placement values.
+          method: winner ? 'building_parcel_centroid' : 'parcel_center', preservedSource: true });
+        continue;
+      }
       if (linkedId && !winner && (linked || candidates.length > 0)) continue;
       if (!winner && candidates.length > 0) continue;
       if (winner) {
@@ -123,6 +139,7 @@ export function applyParcelPinPlacements(collection: GeoJSON.FeatureCollection, 
       ...p,
       source_geometry: p.source_geometry ?? feature.geometry,
       pin_placement: placement.method,
+      pin_coordinate_preserved: placement.preservedSource === true,
       pin_building_id: placement.buildingId,
       label_anchor_lon: placement.coordinate[0], label_anchor_lat: placement.coordinate[1],
       coordinate: { longitude: placement.coordinate[0], latitude: placement.coordinate[1], lon: placement.coordinate[0], lat: placement.coordinate[1] },

@@ -1,4 +1,4 @@
-import type { CanonicalTileBundle, CanonicalMapRecord } from './canonicalTileBundle';
+import type { CanonicalClientTileBundle, CanonicalMapRecord } from './canonicalTileBundle';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import type { CampaignAddress } from '@/types/database';
 import { DEFAULT_STATUS_FILTERS, MAP_STATUS_CONFIG, MAP_STATUS_PRIORITY, normalizeAddressStatus,
@@ -22,7 +22,7 @@ const strings = (value: unknown): string[] => Array.isArray(value) ? value.map(S
   : typeof value === 'string' && value ? [value] : [];
 
 /** This joins state to canonical IDs, never to currently loaded tile fragments. */
-export function canonicalTileStates(bundle: CanonicalTileBundle, addresses: CampaignAddress[], options: {
+export function canonicalTileStates(bundle: CanonicalClientTileBundle, addresses: CampaignAddress[], options: {
   selectedIds?: string[]; hiddenBuildingIds?: string[]; deletedAddressIds?: string[];
   visibleAddressIds?: string[]; filters?: StatusFilters; dark?: boolean;
   colorOverrides?: Record<string, string>;
@@ -43,7 +43,7 @@ export function canonicalTileStates(bundle: CanonicalTileBundle, addresses: Camp
   const filters = options.filters ?? DEFAULT_STATUS_FILTERS;
   const stateFor = (record: CanonicalMapRecord, kind: 'address' | 'building' | 'parcel'): CanonicalRenderState => {
     const linked = kind === 'address' ? [record.id] : [...new Set([
-      ...strings(record.properties.linked_address_ids), ...strings(record.properties.address_id),
+      ...strings(record.properties.linked_address_ids), ...strings(record.properties.address_ids), ...strings(record.properties.address_id),
       ...(kind === 'building' ? [...(byBuilding.get(record.id) ?? [])] : []),
     ])];
     const active = linked.filter((id) => !deleted.has(id.toLowerCase()));

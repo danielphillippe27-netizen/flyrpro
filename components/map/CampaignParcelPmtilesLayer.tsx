@@ -380,7 +380,7 @@ export function CampaignParcelPmtilesLayer({
             'case',
             selectedParcelExpression,
             ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.3, 18, 0.42],
-            ['interpolate', ['linear'], ['zoom'], 10, 0.14, 14, 0.2, 18, 0.3],
+            ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.25, 18, 0.3],
           ],
         },
       });
@@ -403,13 +403,13 @@ export function CampaignParcelPmtilesLayer({
             'case',
             selectedParcelExpression,
             ['interpolate', ['linear'], ['zoom'], 10, 0.9, 14, 1.5, 18, 2.6],
-            ['interpolate', ['linear'], ['zoom'], 10, 0.15, 14, 0.3, 18, 0.75],
+            ['interpolate', ['linear'], ['zoom'], 10, 0.7, 14, 0.8, 18, 0.75],
           ],
           'line-opacity': [
             'case',
             selectedParcelExpression,
             1,
-            ['interpolate', ['linear'], ['zoom'], 10, 0.55, 14, 0.75, 18, 0.95],
+            ['interpolate', ['linear'], ['zoom'], 10, 0.8, 14, 0.85, 18, 0.95],
           ],
         },
       });

@@ -12,6 +12,7 @@ export type OutreachSettings = {
   holidayRegion?: string;
   publicHolidays?: string[];
   extraDaysOff?: string[];
+  extraDaysOffCount?: number;
 };
 export const defaultOutreachSettings = (): OutreachSettings => ({ doorsPerDay: 50, workingDays: [1, 2, 3, 4, 5, 6], doorPasses: 1, callPasses: 0, callsPerDay: 50, holidays: [] });
 export function outreachDate(date: string, days: number) {
@@ -32,12 +33,13 @@ export function validateOutreachSettings(raw: unknown): OutreachSettings {
   for (const dates of [value.publicHolidays, value.extraDaysOff]) {
     if (dates !== undefined && (!Array.isArray(dates) || dates.length > 366 || dates.some(date => typeof date !== 'string' || !validPlanDate(date)))) throw Error('Choose valid days off.');
   }
+  if (value.extraDaysOffCount !== undefined && (!Number.isInteger(value.extraDaysOffCount) || value.extraDaysOffCount < 0 || value.extraDaysOffCount > 366)) throw Error('Extra days off must be a whole number from 0 to 366.');
   if (value.holidaysEnabled !== undefined && typeof value.holidaysEnabled !== 'boolean') throw Error('Choose a valid holiday setting.');
   for (const code of [value.holidayCountry, value.holidayRegion]) if (code !== undefined && (typeof code !== 'string' || !/^[A-Z]{2,3}$/.test(code))) throw Error('Choose a valid holiday region.');
   const extraDaysOff = value.extraDaysOff === undefined ? undefined : [...new Set(value.extraDaysOff)].sort();
   const publicHolidays = value.publicHolidays === undefined ? undefined : [...new Set(value.publicHolidays)].sort();
   const holidays = extraDaysOff === undefined ? [...new Set(value.holidays)].sort() : [...new Set([...extraDaysOff, ...(value.holidaysEnabled ? publicHolidays ?? [] : [])])].sort();
-  return { doorsPerDay: value.doorsPerDay, callsPerDay: value.callsPerDay, doorPasses: value.doorPasses, callPasses: value.callPasses, workingDays: [...new Set(value.workingDays)].sort(), holidays, ...(extraDaysOff === undefined ? {} : { extraDaysOff }), ...(publicHolidays === undefined ? {} : { publicHolidays }), ...(value.holidaysEnabled === undefined ? {} : { holidaysEnabled: value.holidaysEnabled }), ...(value.holidayCountry ? { holidayCountry: value.holidayCountry } : {}), ...(value.holidayRegion ? { holidayRegion: value.holidayRegion } : {}) };
+  return { doorsPerDay: value.doorsPerDay, callsPerDay: value.callsPerDay, doorPasses: value.doorPasses, callPasses: value.callPasses, workingDays: [...new Set(value.workingDays)].sort(), holidays, ...(extraDaysOff === undefined ? {} : { extraDaysOff }), ...(value.extraDaysOffCount === undefined ? {} : { extraDaysOffCount: value.extraDaysOffCount }), ...(publicHolidays === undefined ? {} : { publicHolidays }), ...(value.holidaysEnabled === undefined ? {} : { holidaysEnabled: value.holidaysEnabled }), ...(value.holidayCountry ? { holidayCountry: value.holidayCountry } : {}), ...(value.holidayRegion ? { holidayRegion: value.holidayRegion } : {}) };
 }
 export function forecastOutreach(totalHomes: number, startDate: string, weeks: number, raw: OutreachSettings, weeksOff: string[] = []) {
   const settings = validateOutreachSettings(raw);
@@ -50,7 +52,7 @@ export function forecastOutreach(totalHomes: number, startDate: string, weeks: n
   const doorDays = Math.ceil(doorAttempts / settings.doorsPerDay);
   const callDays = Math.ceil(callAttempts / settings.callsPerDay);
   const daysNeeded = Math.max(doorDays, callDays);
-  const workingDates: string[] = [];
+  let workingDates: string[] = [];
   let availableDays = 0, holidaysExcluded = 0;
   // Bounded projection includes finish dates beyond the chosen horizon.
   for (let i = 0; i < 3660; i++) {
@@ -61,12 +63,26 @@ export function forecastOutreach(totalHomes: number, startDate: string, weeks: n
       if (i < weeks * 7) availableDays++;
       workingDates.push(date);
     }
-    if (i >= weeks * 7 - 1 && workingDates.length >= daysNeeded) break;
+    if (i >= weeks * 7 - 1 && workingDates.length >= daysNeeded + (settings.extraDaysOffCount ?? 0)) break;
   }
-  const within = workingDates.filter(date => date <= outreachDate(startDate, weeks * 7 - 1));
+  const planEnd = outreachDate(startDate, weeks * 7 - 1);
+  // Spread personal days across the work needed, so even a short plan includes them.
+  const extraCount = settings.extraDaysOffCount ?? 0;
+  const projectionDays = daysNeeded + extraCount;
+  const estimatedOff = new Set(workingDates.slice(0, projectionDays).filter((_, i) =>
+    Math.ceil((i + 1) * extraCount / projectionDays) > Math.ceil(i * extraCount / projectionDays)));
+  workingDates = workingDates.filter(date => !estimatedOff.has(date));
+  const extraDaysOffInPlan = [...estimatedOff].filter(date => date <= planEnd).length;
+  availableDays -= extraDaysOffInPlan;
+  const finishDate = daysNeeded ? workingDates[daysNeeded - 1] ?? null : null;
+  const calendarDays = finishDate ? Math.round((Date.parse(finishDate) - Date.parse(startDate)) / 86400000) + 1 : 0;
+  const timeOffDays = finishDate ? [...new Set([...holidays, ...off, ...estimatedOff])].filter(date =>
+    date >= startDate && date <= finishDate && settings.workingDays.includes(new Date(`${date}T12:00:00Z`).getUTCDay())).length : 0;
+  const nonWorkingWeekdays = finishDate ? calendarDays - daysNeeded - timeOffDays : 0;
+  const within = workingDates.filter(date => date <= planEnd);
   return { ...settings, totalHomes, doorAttempts, callAttempts, doorDays, callDays, daysNeeded, availableDays, holidaysExcluded,
     spareDays: availableDays - daysNeeded, fits: daysNeeded <= availableDays,
-    finishDate: daysNeeded ? workingDates[daysNeeded - 1] ?? null : null,
+    finishDate, calendarDays, timeOffDays, nonWorkingWeekdays, extraDaysOffInPlan, estimatedDaysOff: [...estimatedOff],
     minimumDoorsPerDay: availableDays ? Math.ceil(doorAttempts / availableDays) : null,
     minimumCallsPerDay: availableDays ? Math.ceil(callAttempts / availableDays) : null,
     workingDates: within,

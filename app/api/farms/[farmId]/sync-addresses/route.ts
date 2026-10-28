@@ -91,10 +91,17 @@ export async function POST(
     const campaignIds = new Set(existing.map(row => row.campaign_address_id).filter(Boolean));
     const externalIds = new Set(existing.map(row => row.gers_id).filter(Boolean));
     const formatted = new Set(existing.map(row => row.formatted.trim().toLowerCase()));
+    const exclusions = await fetchAllInPages<{ address_data: { gers_id?: string | null; formatted?: string | null } }>(async (from, to) =>
+      await admin.from('farm_commercial_exclusions').select('address_data').eq('farm_id', farm.id)
+        .is('restored_at', null).order('address_id').range(from, to));
+    const excludedIds = new Set(exclusions.map(row => row.address_data.gers_id).filter(Boolean));
+    const excludedFormatted = new Set(exclusions.map(row => row.address_data.formatted?.trim().toLowerCase()).filter(Boolean));
     const newRows = rows.filter(row =>
       !campaignIds.has(row.campaign_address_id) &&
       !(row.gers_id && externalIds.has(row.gers_id)) &&
-      !formatted.has(row.formatted.trim().toLowerCase()));
+      !formatted.has(row.formatted.trim().toLowerCase()) &&
+      !(row.gers_id && excludedIds.has(row.gers_id)) &&
+      !excludedFormatted.has(row.formatted.trim().toLowerCase()));
 
     const batchSize = 500;
     for (let index = 0; index < newRows.length; index += batchSize) {

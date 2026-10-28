@@ -1,5 +1,5 @@
 import { buildFarmDoorPlan } from '@/lib/farms/door-plan';
-import { outreachDate } from '@/lib/farms/outreach-schedule';
+import { forecastOutreach, outreachDate } from '@/lib/farms/outreach-schedule';
 import { NextRequest, NextResponse } from "next/server";
 import { resolveUserFromRequest } from "@/app/api/_utils/request-user";
 import { createAdminClient } from "@/lib/supabase/server";
@@ -88,9 +88,10 @@ export async function PUT(request: NextRequest, context: Context) {
         },
         { status: 422 },
       );
+    const forecast = settings.outreach ? forecastOutreach(plan.totalHomes, settings.startDate, settings.weeksInPlan, settings.outreach, settings.weeksOff) : null;
     const doorPlan = settings.outreach?.doorPasses ? buildFarmDoorPlan(homes, settings.startDate, settings.outreach.doorsPerDay, {
       workingDays: settings.outreach.workingDays,
-      holidays: [...new Set([...settings.outreach.holidays, ...settings.weeksOff.flatMap(date => Array.from({ length: 7 }, (_, i) => outreachDate(date, i)))])],
+      holidays: [...new Set([...settings.outreach.holidays, ...(forecast?.estimatedDaysOff ?? []), ...settings.weeksOff.flatMap(date => Array.from({ length: 7 }, (_, i) => outreachDate(date, i)))])],
       rounds: settings.outreach.doorPasses,
     }) : null;
     const { error } = await result.admin

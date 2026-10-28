@@ -18,9 +18,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ cam
   try {
     const artifact = await readCanonicalTileArtifact(db, campaignId, revision);
     if (!artifact) return NextResponse.json({ error: 'Geometry revision not found' }, { status: 404 });
-    if (tile.length === 1 && tile[0] === 'archive') {
+    if (tile.length === 1 && (tile[0] === 'archive' || tile[0] === 'geometry')) {
+      const key = tile[0] === 'geometry' ? artifact.geometry_key : artifact.archive_key;
+      if (!key) return NextResponse.json({ error: 'Geometry package unavailable' }, { status: 404 });
       const client = new S3Client({ region: process.env.AWS_REGION || 'us-east-2' });
-      const url = await getSignedUrl(client, new GetObjectCommand({ Bucket: artifact.bucket, Key: artifact.archive_key }), { expiresIn: 900 });
+      const url = await getSignedUrl(client, new GetObjectCommand({ Bucket: artifact.bucket, Key: key }), { expiresIn: 900 });
       return NextResponse.redirect(url, { status: 307, headers: { 'Cache-Control': 'no-store' } });
     }
     const [z, x, y] = tile.map((part) => Number(part.replace(/\.mvt$/, '')));

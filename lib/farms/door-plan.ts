@@ -36,7 +36,7 @@ export function buildFarmDoorPlan(
   if (!Number.isInteger(doorsPerDay) || doorsPerDay < 1 || doorsPerDay > 1000) {
     throw new Error("Doors per day must be a whole number from 1 to 1,000.");
   }
-  if (calendar && (!Array.isArray(calendar.workingDays) || !calendar.workingDays.length || calendar.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6) || !Array.isArray(calendar.holidays) || calendar.holidays.length > 732 || calendar.holidays.some(date => !validPlanDate(date)) || !Number.isInteger(calendar.rounds ?? 1) || (calendar.rounds ?? 1) < 1 || (calendar.rounds ?? 1) > 12)) throw Error('Choose valid working days, holiday dates and 1–12 door rounds.');
+  if (calendar && (!Array.isArray(calendar.workingDays) || !calendar.workingDays.length || calendar.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6) || !Array.isArray(calendar.holidays) || calendar.holidays.length > 1464 || calendar.holidays.some(date => !validPlanDate(date)) || !Number.isInteger(calendar.rounds ?? 1) || (calendar.rounds ?? 1) < 1 || (calendar.rounds ?? 1) > 12)) throw Error('Choose valid working days, holiday dates and 1–12 door rounds.');
   const { eligible, excludedDoNotKnock } = eligibleFarmDoorHomes(homes);
   const days: FarmDoorDay[] = [];
   const date = new Date(`${startDate}T12:00:00Z`);

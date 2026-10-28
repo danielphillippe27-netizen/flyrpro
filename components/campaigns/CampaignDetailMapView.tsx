@@ -30,7 +30,7 @@ import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/databa
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
 import { CanonicalCampaignTilesLayer } from '@/components/map/CanonicalCampaignTilesLayer';
-import { isCanonicalTileBundle, type CanonicalTileBundle } from '@/lib/map/canonicalTileBundle';
+import { isCanonicalTileBundle, type CanonicalClientTileBundle } from '@/lib/map/canonicalTileBundle';
 import type { BuildingFeatureCollection } from '@/types/map-buildings';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { LocationCard } from '@/components/map/LocationCard';
@@ -214,7 +214,7 @@ type GenericFeatureCollection<G extends GeoJSON.Geometry = GeoJSON.Geometry> = G
 >;
 
 type CampaignMapBundle = {
-  canonicalTiles?: CanonicalTileBundle;
+  canonicalTiles?: CanonicalClientTileBundle;
   campaign_id?: string;
   asset_signature?: string;
   source_version?: string;
@@ -1358,7 +1358,7 @@ export function CampaignDetailMapView({
         if (signature) {
           url.searchParams.set('signature', signature);
         }
-        url.searchParams.set('format', 'tiles-v2');
+        url.searchParams.set('format', 'tiles-v3');
         url.searchParams.set('platform', 'web');
         const requestOptions: RequestInit = {
           credentials: 'include',
@@ -1369,9 +1369,20 @@ export function CampaignDetailMapView({
           },
         };
         let response = await fetch(url.toString(), requestOptions);
-        if (response.status === 409) {
-          url.searchParams.delete('format');
-          url.searchParams.delete('platform');
+        for (let attempt = 0; response.status === 409; attempt++) {
+          const status = (await response.json().catch(() => ({}))).status;
+          if (status === 'disabled') {
+            // Campaigns created before the cutover remain on their existing bundle.
+            url.searchParams.delete('format');
+            url.searchParams.delete('platform');
+            response = await fetch(url.toString(), requestOptions);
+            break;
+          }
+          if (status !== 'preparing' || attempt >= 89) {
+            throw new Error(status === 'failed' ? 'Campaign map preparation failed' : 'Campaign map is not ready');
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+          if (cancelled) return;
           response = await fetch(url.toString(), requestOptions);
         }
         if (response.status === 304) {
@@ -3556,8 +3567,9 @@ export function CampaignDetailMapView({
       className={`relative h-full w-full ${isMapFullscreen ? 'bg-background' : ''}`}
     >
       {!mapBundleResolved ? (
-        <div className="flex h-full w-full items-center justify-center bg-background">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+        <div role="status" className="flex h-full w-full flex-col items-center justify-center gap-3 bg-background">
+          <div aria-hidden="true" className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+          <p className="text-sm text-muted-foreground">Preparing map tiles…</p>
         </div>
       ) : useGoogle2D ? (
         <GoogleCampaign2DMap

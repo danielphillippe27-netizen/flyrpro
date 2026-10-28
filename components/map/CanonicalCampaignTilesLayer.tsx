@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { CampaignAddress } from '@/types/database';
 import type { StatusFilters } from '@/lib/constants/mapStatus';
-import { canonicalRecordForHit, type CanonicalTileBundle } from '@/lib/map/canonicalTileBundle';
+import { canonicalRecordForHit, type CanonicalClientTileBundle } from '@/lib/map/canonicalTileBundle';
 import { canonicalTileStates, CanonicalTileStateDiff } from '@/lib/map/canonicalTileState';
 import { useCardEngagement } from '@/lib/cards/useCardEngagement';
 import { getBuildingExtrusionHeightExpression } from '@/lib/map/buildingHeight';
@@ -11,7 +11,7 @@ import { getBuildingExtrusionHeightExpression } from '@/lib/map/buildingHeight';
 export const CANONICAL_TILE_SOURCE = 'campaign-canonical-tiles';
 const IDS = ['canonical-parcels', 'canonical-buildings', 'canonical-address-circles', 'canonical-addresses', 'canonical-selection', 'canonical-labels', 'canonical-units', 'canonical-address-selection'];
 type Props = {
-  map: mapboxgl.Map; bundle: CanonicalTileBundle; mapLoaded: boolean; styleKey: string;
+  map: mapboxgl.Map; bundle: CanonicalClientTileBundle; mapLoaded: boolean; styleKey: string;
   mode: 'buildings' | 'addresses'; addresses: CampaignAddress[]; dark: boolean;
   showParcels: boolean; statusFilters: StatusFilters; selectedIds?: string[];
   hiddenBuildingIds?: string[]; deletedAddressIds?: string[]; visibleAddressIds?: string[];
@@ -53,13 +53,13 @@ export function CanonicalCampaignTilesLayer(props: Props) {
       const common = { source: CANONICAL_TILE_SOURCE };
       const paintColor = color(latest.current.statusFilters.QR_SCANNED);
       map.addLayer({ ...common, id: IDS[0], type: 'fill', 'source-layer': 'parcels', minzoom: 10,
-        paint: { 'fill-color': paintColor, 'fill-opacity': opacity(0.25) } });
+        paint: { 'fill-color': paintColor, 'fill-outline-color': paintColor, 'fill-opacity': opacity(0.32) } });
       map.addLayer({ ...common, id: IDS[1], type: 'fill-extrusion', 'source-layer': 'buildings', minzoom: 10,
         paint: { 'fill-extrusion-color': paintColor, 'fill-extrusion-height': getBuildingExtrusionHeightExpression(), 'fill-extrusion-opacity': 1, 'fill-extrusion-rounded-roof': false } });
       map.addLayer({ ...common, id: IDS[2], type: 'fill-extrusion', 'source-layer': 'address_circles', minzoom: 13,
         paint: { 'fill-extrusion-color': paintColor, 'fill-extrusion-height': ['case', ['boolean', ['feature-state', 'hidden'], false], 0, 12], 'fill-extrusion-opacity': 1, 'fill-extrusion-rounded-roof': false } });
       map.addLayer({ ...common, id: IDS[3], type: 'circle', 'source-layer': 'addresses', minzoom: 10, maxzoom: 13,
-        paint: { 'circle-color': paintColor, 'circle-radius': 3.5, 'circle-opacity': opacity(1) } });
+        paint: { 'circle-color': paintColor, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 13, 5], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 0.8, 'circle-opacity': opacity(1) } });
       map.addLayer({ ...common, id: IDS[4], type: 'line', 'source-layer': 'buildings', minzoom: 10,
         paint: { 'line-color': '#60a5fa', 'line-width': 2,
           'line-opacity': ['case', ['boolean', ['feature-state', 'selected'], false], 1, 0] } });

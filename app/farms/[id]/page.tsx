@@ -73,6 +73,7 @@ import { localPlanDate, saveTouchPlan } from '@/lib/farms/touch-plan';
 import { FarmTouchPlan, type PlannerTouchDraft } from '@/components/farms/FarmTouchPlan';
 import { FarmDoorPlanner } from '@/components/farms/FarmDoorPlanner';
 import { FarmPlanModes } from '@/components/farms/FarmPlanModes';
+import { DurhamCommercialReview } from '@/components/farms/DurhamCommercialReview';
 import settingsStyles from '@/components/farms/FarmSettings.module.css';
 import { formatDateInput } from '@/lib/farms/plan';
 import {
@@ -300,9 +301,9 @@ export default function FarmPage() {
       if (resolvedLinkedCampaignId) {
         try {
           const supabase = createClient();
-          const [campaignData, campaignAddressData, scanEventsRes] = await Promise.all([
+          const campaignAddressesPromise = CampaignsService.fetchAddresses(resolvedLinkedCampaignId);
+          const [campaignData, scanEventsRes] = await Promise.all([
             CampaignsService.fetchCampaign(resolvedLinkedCampaignId),
-            CampaignsService.fetchAddresses(resolvedLinkedCampaignId),
             supabase
               .from('scan_events')
               .select('id', { count: 'exact', head: true })
@@ -310,8 +311,11 @@ export default function FarmPage() {
           ]);
 
           setLinkedCampaign(campaignData);
-          setLinkedCampaignAddresses(campaignAddressData);
           setQrScanEventsCount(scanEventsRes.error ? null : (scanEventsRes.count ?? 0));
+          // Farm map rendering already has the imported homes. QR scan details
+          // must not hold the whole page behind a second bulk address download.
+          setLoading(false);
+          setLinkedCampaignAddresses(await campaignAddressesPromise);
         } catch (campaignError) {
           console.error('Error loading linked campaign:', campaignError);
           setLinkedCampaign(null);
@@ -1253,6 +1257,7 @@ export default function FarmPage() {
             scope={overviewScope}
             onScopeChange={setOverviewScope}
           />
+          <DurhamCommercialReview farmId={farm.id} />
           <FarmPlanModes farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan
             drafts={planDrafts}
