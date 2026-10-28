@@ -15,7 +15,7 @@ export function campaignWithinStormTerritory(child: StormGeometry, parent: Storm
 /** A pointer-drawn inspection area makes no measured severity claim. */
 export function normalizeStormDrawingContext(context: StormCampaignContext): StormCampaignContext {
   const manual = context.selection === 'user-drawn' && context.minimumHailMM == null && context.maximumHailMM == null &&
-    !context.zoneId && !context.sampling && !context.windSelection && !context.reportSelection && !context.surveySelection;
+    !context.gustSelection && !context.zoneId && !context.sampling && !context.windSelection && !context.reportSelection && !context.surveySelection;
   if (manual && (context.evidenceKind === 'hail-size' || context.evidenceKind === 'user-drawn')) {
     return { ...context, evidenceKind: 'user-drawn' };
   }

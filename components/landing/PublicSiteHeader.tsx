@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import { PublicFeaturesMenu } from './PublicFeaturesMenu';
 
 type PublicSiteHeaderProps = {
-  active?: 'ambassador' | 'pricing' | 'download';
+  active?: 'ambassador' | 'pricing' | 'download' | 'storms';
   showAmbassador?: boolean;
   primaryAction?: { href: string; label: string };
 };
@@ -16,7 +17,7 @@ function getNavLinkClass(isActive: boolean) {
 export function PublicSiteHeader({ active, showAmbassador = false, primaryAction = { href: "/login", label: "Start free" } }: PublicSiteHeaderProps) {
   return (
     <header className="sticky top-0 z-50 border-b border-zinc-200/80 bg-[#f7f5f2]/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-[72px] w-full max-w-[1440px] items-center justify-between px-5 md:px-8">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center justify-between gap-y-3 px-5 py-4 md:h-[72px] md:flex-nowrap md:px-8 md:py-0">
         <Link href="/" className="flex items-center overflow-hidden" aria-label="WolfGrid home">
           <Image
             src="/brand/wolfgrid-header-light.svg"
@@ -28,10 +29,11 @@ export function PublicSiteHeader({ active, showAmbassador = false, primaryAction
           />
         </Link>
 
-        <nav className="hidden items-center gap-7 md:flex" aria-label="Public navigation">
+        <nav className="order-3 flex w-full flex-wrap items-center justify-center gap-x-6 gap-y-3 md:order-none md:w-auto md:gap-7" aria-label="Public navigation">
           <Link href="/#product" className="text-sm font-medium text-zinc-600 transition hover:text-zinc-950">
             Product
           </Link>
+          <PublicFeaturesMenu active={active === 'storms'} />
           {showAmbassador && (
             <Link href="/ambassador" className={getNavLinkClass(active === 'ambassador')}>
               Ambassador

@@ -26,7 +26,7 @@ export function StormCampaignHailOverlay({map,workspaceId,territory,enabled}:{ma
    controller=new sdk.MapboxMapController(map,{account,animation:{preloadData:false},slots:{slots:{underlay:{beforeId},inlay:{beforeId}}}});
    controller.on('load',()=>{
     if(disposed||!controller)return;
-    controller.timeline.clear();controller.timeline.endDate=end;controller.timeline.startDate=start;controller.timeline.goToDate(end);
+    controller.timeline.clear();controller.timeline.endDate=end;controller.timeline.startDate=start;controller.timeline.goToDate(controller.timeline.endDate);
     controller.addWeatherLayer('hail-size-max',{paint:{opacity:0.55},timing:{clamp:'past'},legend:false});
    });
    controller.on('load:complete',()=>{if(!disposed)setStatus('');});

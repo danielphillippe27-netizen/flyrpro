@@ -25,24 +25,27 @@ export function StormTerritoryOverlay({ map, territory }: { map: mapboxgl.Map; t
   useEffect(() => {
     const source = 'campaign-storm-territory', ids = [`${source}-label`, `${source}-line`, `${source}-casing`, `${source}-fill`];
     const clear = () => {
-      // Parent map effects can dispose the map before child overlay cleanup.
-      if (!map.getStyle()) return;
-      for (const id of ids) if (map.getLayer(id)) map.removeLayer(id);
-      if (map.getSource(source)) map.removeSource(source);
+      // A basemap replacement or parent teardown can remove the style first.
+      try {
+        for (const id of ids) if (map.getLayer(id)) map.removeLayer(id);
+        if (map.getSource(source)) map.removeSource(source);
+      } catch { /* Layers have already gone with the old style/map. */ }
     };
     const show = () => {
-      clear(); if (!territory || !map.isStyleLoaded()) return;
+      if (!map.isStyleLoaded()) return;
+      clear(); if (!territory) return;
       const polygon = feature(territory.boundary), point = pointOnFeature(polygon);
       const { minimumHailMM: min, maximumHailMM: max } = territory.context;
-      const intensity = min == null ? 'User-drawn storm territory' : min === 0 ? `Hail >0 to <${max ?? 12.7} mm` : `Hail ${min.toFixed(1)} mm${max == null ? '+' : `–<${max.toFixed(1)} mm`}`;
+      const gust=territory.context.gustSelection;
+      const intensity = gust ? `Estimated wind ${Math.round(gust.minimumKPH)}${gust.maximumKPH==null?'+':`–${Math.round(gust.maximumKPH)}`} km/h · ${gust.time.slice(11,16)} UTC` : min == null ? 'User-drawn storm territory' : min === 0 ? `Hail >0 to <${max ?? 12.7} mm` : `Hail ${min.toFixed(1)} mm${max == null ? '+' : `–<${max.toFixed(1)} mm`}`;
       point.properties = { label: `${territory.name} · ${intensity}` };
       map.addSource(source, { type: 'geojson', data: featureCollection<GeoJSON.Geometry>([polygon, point]) });
-      map.addLayer({ id: `${source}-fill`, type: 'fill', source, paint: { 'fill-color': '#8b5cf6', 'fill-opacity': 0.08 } });
+      map.addLayer({ id: `${source}-fill`, type: 'fill', source, paint: { 'fill-color': '#a78bfa', 'fill-opacity': 0.1 } });
       map.addLayer({ id: `${source}-casing`, type: 'line', source, paint: { 'line-color': '#ffffff', 'line-width': 6 } });
       map.addLayer({ id: `${source}-line`, type: 'line', source, paint: { 'line-color': '#111111', 'line-width': 3 } });
       map.addLayer({ id: `${source}-label`, type: 'symbol', source, filter: ['==', '$type', 'Point'], layout: { 'text-field': ['get', 'label'], 'text-size': 13, 'text-allow-overlap': true }, paint: { 'text-color': '#111111', 'text-halo-color': '#ffffff', 'text-halo-width': 2 } });
     };
-    const recover=()=>{if(territory&&!map.getSource(source)&&map.isStyleLoaded())show();};
+    const recover=()=>{if(!map.isStyleLoaded())return;const exists=!!map.getSource(source);if(territory?!exists:exists)show();};
     show(); map.on('style.load', show);map.on('idle',recover);
     return () => {
       map.off('style.load', show);map.off('idle',recover);

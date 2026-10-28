@@ -1173,6 +1173,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
           eyebrow={video.eyebrow}
           showChapterHeader={variant !== 'demo1'}
           autoPlayWithSound={stage !== 'intro_video'}
+          startLabel={variant === 'demo1' && stage === 'intro_video' ? 'Continue for the full demo' : undefined}
           holdAtEnd={variant === 'demo1' && stage === 'post_create_video'}
           stopAtSeconds={variant === 'demo1' && stage === 'post_create_video' ? 22 : undefined}
           completionOverlay={demo1ChoiceVisible && variant === 'demo1' && stage === 'post_create_video' ? (

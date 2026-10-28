@@ -1,3 +1,4 @@
+import { archivedWindZone } from '@/lib/storm-maps/intelligence/wind-zone';
 import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
@@ -24,6 +25,14 @@ export async function POST(request: NextRequest) {
   if(parsed.data.context.evidenceKind==='hail-sampled' && (parsed.data.context.selection!=='intensity-zone'||!parsed.data.context.sampling||parsed.data.context.minimumHailMM==null))return NextResponse.json({error:'Choose a numerical hail zone first.'},{status:400});
   if(parsed.data.context.evidenceKind==='wind-field'&&(parsed.data.context.event.hazard!=='hurricane'||!parsed.data.context.windSelection||parsed.data.context.selection!=='intensity-zone'))return NextResponse.json({error:'Select a hurricane wind area first.'},{status:400});
   if(parsed.data.context.reportSelection&&(parsed.data.context.event.hazard!=='tornado'||parsed.data.context.evidenceKind!=='reports'||parsed.data.context.selection!=='user-drawn'))return NextResponse.json({error:'Choose a tornado prospecting area.'},{status:400});
+  if(parsed.data.context.gustSelection){
+    const gust=parsed.data.context.gustSelection;
+    try {
+      const verified=await archivedWindZone(gust.country,gust.time,gust.longitude,gust.latitude,gust.minimumKPH,gust.maximumKPH!=null);
+      if(JSON.stringify(parsed.data.boundary)!==JSON.stringify(verified.boundary)||gust.maximumKPH!==verified.maximumKPH||parsed.data.context.event.key!==verified.context.event.key)return NextResponse.json({error:'Reselect the saved gust area before saving.'},{status:400});
+      parsed.data.context=verified.context;
+    }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Saved gust area unavailable.'},{status:422});}
+  }
   let zoneFields = {};
   if(parsed.data.context.evidenceKind==='hail-size'){
     const {data:flags}=await c.admin.from('storm_intelligence_rollout').select('geometry_enabled').eq('workspace_id',c.workspaceId).maybeSingle();
@@ -51,6 +60,7 @@ export async function PATCH(request:NextRequest){
  if(readError)return NextResponse.json({error:'Territory editing requires the new database migration.'},{status:503});
  if(!existing)return NextResponse.json({error:'Territory not found.'},{status:404});
  if(existing.created_by!==c.user.id&&!['owner','admin'].includes(c.role??''))return NextResponse.json({error:'Only the creator or workspace administrators can edit this territory.'},{status:403});
+ if(existing.context?.gustSelection&&parsed.data.boundary)return NextResponse.json({error:'Select another saved gust area to change this wind boundary.'},{status:409});
  if(existing.zone_id&&parsed.data.boundary)return NextResponse.json({error:'Validated storm-zone boundary editing is not enabled yet.'},{status:409});
  const {id,revision,...changes}=parsed.data;
  const {data,error}=await c.admin.from('storm_territories').update(changes).eq('workspace_id',c.workspaceId).eq('id',id).eq('revision',revision).select('*').maybeSingle();

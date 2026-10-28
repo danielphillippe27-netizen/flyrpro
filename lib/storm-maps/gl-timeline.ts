@@ -14,5 +14,8 @@ export function resetStormTimeline(
   controller.timeline.clear();
   controller.timeline.endDate = range.end;
   controller.timeline.startDate = range.start;
-  controller.timeline.goToDate(current);
+  // MapsGL truncates range endpoints to whole seconds. Read them back before seeking.
+  const start = controller.timeline.startDate.getTime();
+  const end = controller.timeline.endDate.getTime();
+  controller.timeline.goToDate(new Date(Math.min(end, Math.max(start, Math.floor(current.getTime() / 1000) * 1000))));
 }

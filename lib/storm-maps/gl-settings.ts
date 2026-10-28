@@ -31,7 +31,7 @@ export const STORM_LAYER_GROUPS = [
   { key: 'cyclones', title: 'Hurricane tracks & cones', detail: 'Active tropical cyclones · advisory track & forecast uncertainty', ids: ['tropical-cyclones'] },
   { key: 'pressure', title: 'Pressure lines (isobars)', detail: 'Equal sea-level pressure · hPa · GFS in forecast mode', ids: ['pressure-msl-contour'] },
   { key: 'radar', title: 'Precipitation radar', detail: 'Rain, mixed precipitation & snow', ids: ['radar'] },
-  { key: 'hail', title: 'Hail threats & tracks', detail: 'Includes Canada · nowcast up to 1 hour', ids: ['hail-threats-polygons', 'hail-threats-tracks', 'hail-threats-points'] },
+  { key: 'hail', title: 'Hail threats & tracks', detail: 'U.S., Canada, Europe, Japan & Australia · nowcast up to 1 hour', ids: ['hail-threats-polygons', 'hail-threats-tracks', 'hail-threats-points'] },
   { key: 'cells', title: 'Storm cells & tracks', detail: 'U.S. radar cells, severity & movement', ids: ['stormcells-positions', 'stormcells-tracks'] },
   { key: 'lightning', title: 'Lightning activity', detail: 'Flashes & cloud-to-ground strikes · global', ids: ['lightning-flash', 'lightning-strikes'] },
   { key: 'lightningThreats', title: 'Lightning threat zones', detail: 'Observed & forecast threat areas', ids: ['lightning-threats-polygons', 'lightning-threats-tracks', 'lightning-threats-points'] },

@@ -101,6 +101,17 @@ const PREFERRED_MICROPHONE_LABELS = ['logitech zone 300', 'zone 300'];
 const BLUETOOTH_MICROPHONE_REOPEN_ATTEMPTS = 4;
 const MICROPHONE_REOPEN_RETRY_MS = 750;
 
+function getCallAudioConstraints(deviceId?: string): MediaTrackConstraints {
+  // Apply processing when capturing the stream: Telnyx reuses our localStream.
+  // These are preferences so browsers can ignore unsupported processing options.
+  return {
+    echoCancellation: { ideal: true },
+    noiseSuppression: { ideal: true },
+    autoGainControl: { ideal: true },
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+  };
+}
+
 function formatMediaDevice(device: MediaDeviceInfo) {
   return {
     deviceId: device.deviceId,
@@ -492,11 +503,7 @@ export function useDialerDevice() {
       if (attempt > 1) await wait(MICROPHONE_REOPEN_RETRY_MS);
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: microphone?.deviceId
-            ? {
-                deviceId: { exact: microphone.deviceId },
-              }
-            : true,
+          audio: getCallAudioConstraints(microphone?.deviceId),
         });
         selectedInputStreamRef.current = stream;
         setMicrophoneGranted(true);
@@ -607,7 +614,7 @@ export function useDialerDevice() {
     }
 
     try {
-      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: getCallAudioConstraints() });
       const browserAudioTrack = permissionStream.getAudioTracks()[0] ?? null;
       const browserTrackSettings = browserAudioTrack?.getSettings();
       const browserTrackDeviceId =
@@ -637,9 +644,7 @@ export function useDialerDevice() {
             microphone.deviceId === browserTrackDeviceId
               ? permissionStream
               : await navigator.mediaDevices.getUserMedia({
-                  audio: {
-                    deviceId: { exact: microphone.deviceId },
-                  },
+                  audio: getCallAudioConstraints(microphone.deviceId),
                 });
         } catch (error) {
           stopMediaStream(permissionStream);
@@ -959,7 +964,7 @@ export function useDialerDevice() {
           clientState: createTelnyxClientState(callRequestId),
           localStream: callInputStream ?? undefined,
           remoteElement: getTelnyxRemoteAudioElement() ?? undefined,
-          audio: true,
+          audio: getCallAudioConstraints(),
         });
         telnyxCallRef.current = call;
         startMicMeter(call.localStream ?? callInputStream, selectedMicrophone?.label ?? null);

@@ -11,7 +11,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { CloudLightning, Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -30,7 +30,6 @@ const scriptsTab = { href: '/scripts', icon: FileText, label: 'Scripts' };
 const baseTabs = [
   { href: '/home', icon: Home, label: 'Home' },
   { href: '/campaigns', icon: Target, label: 'Campaign' },
-  { href: '/storms', icon: CloudLightning, label: 'Storms' },
   { href: '/activity', icon: Activity, label: 'Activity' },
   { href: '/leads', icon: Users, label: 'Leads' },
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
@@ -80,7 +79,6 @@ const memberTabs = baseTabs.filter((tab) =>
   [
     '/home',
     '/campaigns',
-    '/storms',
     '/leads',
     '/activity',
     '/appointments',
@@ -95,6 +93,7 @@ const memberTabs = baseTabs.filter((tab) =>
 type TabDef = { href: string; icon: LucideIcon; label: string };
 
 function tabIsActive(tab: TabDef, pathname: string | null): boolean {
+  if (tab.href === '/campaigns' && (pathname === '/farms' || pathname?.startsWith('/farms/'))) return true;
   const isIntegrations = tab.href === '/settings/integrations';
   const isSettings = tab.href === '/settings';
   const onIntegrations = pathname?.startsWith('/settings/integrations');
@@ -210,7 +209,7 @@ function MainLayoutShell({
   const closeDrawer = () => setMobileNavOpen(false);
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="app-shell flex h-dvh min-w-0 flex-col overflow-hidden">
       <AppTopHeader />
 
       <div className="flex flex-1 min-h-0">
@@ -221,7 +220,7 @@ function MainLayoutShell({
           onMouseEnter={() => setSidebarExpanded(true)}
           onMouseLeave={() => setSidebarExpanded(false)}
         >
-          <div className="flex flex-col items-stretch justify-start flex-1 gap-3 overflow-hidden min-h-0 w-full px-1.5">
+          <div className="flex flex-col items-stretch justify-start flex-1 gap-3 overflow-y-auto min-h-0 w-full px-1.5">
             <MainNavItems
               tabs={tabs}
               pathname={pathname}
@@ -253,8 +252,9 @@ function MainLayoutShell({
         <div className="flex flex-1 flex-col min-w-0 min-h-0 p-0 bg-gray-50 dark:bg-background">
           <main
             className={cn(
-              'flex flex-1 flex-col min-h-0 p-0 m-0',
+              'flex flex-1 flex-col min-w-0 min-h-0 p-0 m-0',
               pathname?.startsWith('/storms') ||
+              pathname?.startsWith('/farms') ||
               pathname?.startsWith('/campaigns') ||
               pathname?.startsWith('/offers') ||
               pathname?.startsWith('/map') ||
@@ -267,8 +267,9 @@ function MainLayoutShell({
           >
             <div
               className={cn(
-                'flex flex-col min-h-0',
+                'flex flex-col min-w-0 min-h-0',
                 pathname?.startsWith('/storms') ||
+                pathname?.startsWith('/farms') ||
                 pathname?.startsWith('/campaigns') ||
                 pathname?.startsWith('/offers') ||
                 pathname?.startsWith('/map') ||

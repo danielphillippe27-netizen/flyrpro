@@ -1,5 +1,5 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import mapboxgl from 'mapbox-gl';
 import type { StormEvent } from '@/lib/storm-maps/intelligence/model';
 import { hurricaneWindArea } from '@/lib/storm-maps/intelligence/hurricane-area';
@@ -7,6 +7,10 @@ import { visibleEventFeatures } from '@/lib/storm-maps/intelligence/model';
 const source='storm-intelligence-event';
 const layers=['storm-intelligence-line','storm-intelligence-points','storm-intelligence-wind-fill','storm-intelligence-wind-line','storm-intelligence-category'];
 export function StormEventMap({map,event,minimumHailMM,onLocation}:{map:mapboxgl.Map;event:StormEvent|null;minimumHailMM:number;onLocation:(point:{lon:number;lat:number})=>void}){
+  // Parent timeline ticks replace callbacks without changing the selected event.
+  // Keep the latest handler without disposing map sources on each tick.
+  const onLocationRef = useRef(onLocation);
+  useEffect(() => { onLocationRef.current = onLocation; }, [onLocation]);
   useEffect(()=>{
     let drawing=false;
     const modeChanged=(e:{mode?:string})=>{drawing=Boolean(e.mode?.startsWith('draw_'));};
@@ -27,17 +31,17 @@ export function StormEventMap({map,event,minimumHailMM,onLocation}:{map:mapboxgl
     };
     const clicked=(e:mapboxgl.MapMouseEvent)=>{
       if(drawing)return;
-      if(e.type==='click')onLocation({lon:e.lngLat.lng,lat:e.lngLat.lat});
+      if(e.type==='click')onLocationRef.current({lon:e.lngLat.lng,lat:e.lngLat.lat});
       if(!map.getLayer(layers[1]))return;
       const hit=map.queryRenderedFeatures(e.point,{layers:[layers[1],layers[0],layers[2]].filter(id=>!!map.getLayer(id))})[0];
       if(!hit){if(e.type!=='click')popup?.remove();return;}
       const p=hit.properties||{},el=document.createElement('div');
       el.style.color='#0f172a';el.style.maxWidth='240px';
-      el.textContent=[p.label,p.category?`Survey rating: ${p.category}`:'',new Date(p.time).toLocaleString(),p.hailMM!=null?`Reported hail: ${Number(p.hailMM).toFixed(1)} mm`:'',p.windKPH!=null?`Sustained wind: ${p.windKPH} km/h`:'',p.gustKPH!=null?`Gusts: ${p.gustKPH} km/h`:'',p.pressureMB!=null?`Pressure: ${p.pressureMB} hPa`:'',p.description||''].filter(Boolean).join(' · ');
+      el.textContent=[p.label,p.category?`Survey rating: ${p.category}`:'',new Date(p.time).toLocaleString(),p.hailMM!=null?`${event.source === 'xweather' ? 'Estimated' : 'Reported'} hail: ${Number(p.hailMM).toFixed(1)} mm`:'',p.windKPH!=null?`Sustained wind: ${p.windKPH} km/h`:'',p.gustKPH!=null?`Gusts: ${p.gustKPH} km/h`:'',p.pressureMB!=null?`Pressure: ${p.pressureMB} hPa`:'',p.description||''].filter(Boolean).join(' · ');
       popup?.remove();popup=new mapboxgl.Popup().setLngLat(e.lngLat).setDOMContent(el).addTo(map);
     };
     draw();map.on('style.load',draw);map.on('click',clicked);map.on('mousemove',clicked);map.on('draw.modechange',modeChanged);
     return()=>{map.off('idle',draw);map.off('draw.modechange',modeChanged);map.off('style.load',draw);map.off('click',clicked);map.off('mousemove',clicked);popup?.remove();for(const id of layers)if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);};
-  },[map,event,minimumHailMM,onLocation]);
+  },[map,event,minimumHailMM]);
   return null;
 }

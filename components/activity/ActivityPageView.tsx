@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SessionBreadcrumbMap } from '@/components/home/team/SessionBreadcrumbMap';
 import { Route, Hand, Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SessionFarmLink } from '@/components/activity/SessionFarmLink';
 
 const PAGE_SIZE = 25;
 const inFlightActivityKeys = new Set<string>();
@@ -539,6 +540,9 @@ export function ActivityPageView({
                 </div>
               </div>
 
+              {selectedEvent.event_type === 'session_completed' && (
+                <SessionFarmLink campaignId={selectedEvent.campaign_id ?? (typeof selectedEvent.payload.campaign_id === 'string' ? selectedEvent.payload.campaign_id : null)} />
+              )}
             </div>
           )}
         </DialogContent>

@@ -815,6 +815,7 @@ export function CampaignDetailMapView({
   onSnapComplete,
   onContactCreated,
   renderLocationCardExtra,
+  toolbarContent,
   buildingPendingOverlay,
   pointOverlays = [],
   initialMapViewMode = 'buildings',
@@ -831,6 +832,7 @@ export function CampaignDetailMapView({
     selectedAddressId?: string | null;
     campaignId: string;
   }) => ReactNode;
+  toolbarContent?: ReactNode;
   buildingPendingOverlay?: BuildingPendingOverlayConfig;
   pointOverlays?: MapPointOverlay[];
   initialMapViewMode?: InitialMapViewMode;
@@ -3623,11 +3625,14 @@ export function CampaignDetailMapView({
             statusFilters={statusFilters}
             onStatusFiltersChange={setStatusFilters}
             portalContainer={mapShellRef.current}
-            besideContent={campaign?.storm_context ? (
+            besideContent={<>
+              {toolbarContent}
+              {campaign?.storm_context ? (
               <button type="button" role="switch" aria-label="Storm overlay" aria-checked={showStormOverlay} onClick={() => setShowStormOverlay(value => !value)} className={`flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm backdrop-blur-sm ${showStormOverlay ? 'border-cyan-300/40 bg-cyan-950/90 text-cyan-100' : 'border-border bg-background/90 text-muted-foreground'}`}>
                 Storm <span className="text-[10px]">{showStormOverlay ? 'On' : 'Off'}</span>
               </button>
-            ) : undefined}
+            ) : null}
+            </>}
             extraContent={<>
               <div className="mb-3 space-y-2 border-b border-border pb-3">
                 <button type="button" role="switch" aria-label="Parcel overlay" aria-checked={showParcelsOverlay} disabled={!parcelsReady} onClick={() => setShowParcelsOverlay(value => !value)} className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-50">
@@ -3682,7 +3687,7 @@ export function CampaignDetailMapView({
             </div>
           ) : null}
           {/* View switcher: parcel rendering remains available internally, but is not a user-facing web mode. */}
-          <div className="pointer-events-none absolute top-4 right-4 z-20 flex flex-col items-end gap-2">
+          <div className={`pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-2 ${toolbarContent ? 'top-44 sm:top-4' : 'top-4'}`}>
             <div className="pointer-events-auto flex items-center gap-2">
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white/90 dark:bg-black/80 backdrop-blur-sm shadow-sm overflow-hidden">
                 <button

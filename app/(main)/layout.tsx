@@ -1,3 +1,4 @@
+import RetiredRecordingCleanup from './RetiredRecordingCleanup';
 import MainLayoutClient from './MainLayoutClient';
 
 export default async function MainLayout({
@@ -5,5 +6,5 @@ export default async function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <MainLayoutClient>{children}</MainLayoutClient>;
+  return <MainLayoutClient><RetiredRecordingCleanup />{children}</MainLayoutClient>;
 }

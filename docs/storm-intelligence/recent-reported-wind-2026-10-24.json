@@ -1,0 +1,98 @@
+{
+  "source": "https://mesonet.agron.iastate.edu/geojson/lsr.php?sts=202610230000&ets=202610241500",
+  "qualifyingReports": 136,
+  "recent": [
+    {
+      "time": "2026-10-24T09:58:00Z",
+      "city": "3 NW Wasta",
+      "state": "SD",
+      "kph": 106,
+      "reportedValue": 66.0,
+      "unit": "mph",
+      "remark": null
+    },
+    {
+      "time": "2026-10-24T08:43:00Z",
+      "city": "3 NW Wasta",
+      "state": "SD",
+      "kph": 105,
+      "reportedValue": 65.0,
+      "unit": "mph",
+      "remark": null
+    },
+    {
+      "time": "2026-10-24T05:10:00Z",
+      "city": "12 S Fort Greely",
+      "state": "AK",
+      "kph": 101,
+      "reportedValue": 63.0,
+      "unit": "mph",
+      "remark": null
+    },
+    {
+      "time": "2026-10-24T04:30:00Z",
+      "city": "16 SE Kivalina",
+      "state": "AK",
+      "kph": 108,
+      "reportedValue": 67.0,
+      "unit": "mph",
+      "remark": null
+    },
+    {
+      "time": "2026-10-24T03:32:00Z",
+      "city": "1 E Zortman",
+      "state": "MT",
+      "kph": 100,
+      "reportedValue": 62.0,
+      "unit": "mph",
+      "remark": null
+    }
+  ],
+  "strongest": [
+    {
+      "time": "2026-10-23T19:15:00Z",
+      "city": "10 E Whitlash",
+      "state": "MT",
+      "kph": 143,
+      "reportedValue": 89.0,
+      "unit": "mph",
+      "remark": "Mesonet station Mt Lebanon SE."
+    },
+    {
+      "time": "2026-10-23T18:50:00Z",
+      "city": "10 E Whitlash",
+      "state": "MT",
+      "kph": 138,
+      "reportedValue": 86.0,
+      "unit": "mph",
+      "remark": "Mesonet station Mt Lebanon SE."
+    },
+    {
+      "time": "2026-10-23T20:00:00Z",
+      "city": "13 N Chester",
+      "state": "MT",
+      "kph": 134,
+      "reportedValue": 83.0,
+      "unit": "mph",
+      "remark": "Mesonet station DW4776 Chester 13N."
+    },
+    {
+      "time": "2026-10-23T18:15:00Z",
+      "city": "10 E Whitlash",
+      "state": "MT",
+      "kph": 132,
+      "reportedValue": 82.0,
+      "unit": "mph",
+      "remark": "Mesonet station Mt Lebanon SE."
+    },
+    {
+      "time": "2026-10-23T17:50:00Z",
+      "city": "10 E Whitlash",
+      "state": "MT",
+      "kph": 129,
+      "reportedValue": 80.0,
+      "unit": "mph",
+      "remark": "Mesonet station Mt Lebanon SE."
+    }
+  ]
+}

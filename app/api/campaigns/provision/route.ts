@@ -1323,7 +1323,7 @@ export async function POST(request: NextRequest) {
 
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('owner_id, workspace_id, territory_boundary, region, bbox')
+      .select('owner_id, workspace_id, territory_boundary, region, bbox, storm_context')
       .eq('id', campaignId)
       .single();
 
@@ -1346,6 +1346,9 @@ export async function POST(request: NextRequest) {
 
     if (!canProvision) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+    if (campaign.storm_context?.campaignMode === 'area') {
+      return NextResponse.json({ error: 'This campaign saves an area without loading homes. Create address campaigns from its saved storm territory.', code: 'area_campaign' }, { status: 409 });
     }
 
     const polygon = campaign.territory_boundary;

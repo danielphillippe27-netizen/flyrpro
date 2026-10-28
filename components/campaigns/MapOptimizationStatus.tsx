@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BarChart3, CheckCircle2, ChevronDown, ChevronUp, LoaderCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DismissibleCampaignBanner } from './DismissibleCampaignBanner';
 
 type OptimizationStatus =
   | 'not_started'
@@ -99,7 +100,12 @@ export function MapOptimizationStatus({ campaignId }: { campaignId: string }) {
     value(report.building_orphans_after);
 
   return (
-    <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/30">
+    <DismissibleCampaignBanner
+      storageKey={`wolfgrid:campaign:${campaignId}:optimization-dismissed`}
+      noticeId={JSON.stringify([data.run_id, data.status, data.report])}
+      label="Dismiss map optimization notice"
+      className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900 dark:bg-emerald-950/30"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -143,6 +149,6 @@ export function MapOptimizationStatus({ campaignId }: { campaignId: string }) {
           ))}
         </div>
       ) : null}
-    </div>
+    </DismissibleCampaignBanner>
   );
 }

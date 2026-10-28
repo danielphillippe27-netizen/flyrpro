@@ -5,7 +5,8 @@ export function torontoDigestClock(now:Date){
  const value=(type:string)=>parts.find(p=>p.type===type)!.value;
  return {date:`${value('year')}-${value('month')}-${value('day')}`,hour:Number(value('hour'))};
 }
-export function buildStormDigest(hail:StormEvent[]|null,cyclones:CycloneResponse[]|null,start:Date,end:Date){
+export type AustralianDigest = {count:number;maximumMM:number|null;complete:boolean;available:boolean};
+export function buildStormDigest(hail:StormEvent[]|null,cyclones:CycloneResponse[]|null,start:Date,end:Date,australia:AustralianDigest|null=null){
  const reports=hail?.reduce((total,e)=>total+e.reportCount,0)??null;
  const states=hail?new Set(hail.filter(e=>e.reportCount).map(e=>e.sourceId.split(':').at(-1))).size:null;
  const maximum=hail?.reduce((max,e)=>Math.max(max,e.maxHailMM??0),0)??null;
@@ -16,5 +17,6 @@ export function buildStormDigest(hail:StormEvent[]|null,cyclones:CycloneResponse
  })??null;
  const hailText=reports==null?'Hail feed unavailable':`${reports} U.S. hail reports${reports?` in ${states} states; largest ${((maximum??0)/25.4).toFixed(2)} in`:''}`;
  const cycloneText=updates==null?'Cyclone feed unavailable':`${updates.length} tropical cyclone updates${updates.length?`: ${updates.slice(0,3).map(c=>c.profile.name).join(', ')}${updates.length>3?' + more':''}`:''}`;
- return {text:`WolfGrid daily storm update (past 24h): ${hailText}. ${cycloneText}. https://wolfgrid.app/storms`,hailReports:reports,hailStates:states,maximumHailMM:maximum,cycloneUpdates:updates?.map(c=>({id:c.id,name:c.profile.name,category:c.profile.maxStormCat}))??null,start:start.toISOString(),end:end.toISOString(),coverage:'U.S. reported hail; global active tropical cyclone advisories. Not complete impact footprints.'};
+ const australianText=!australia?.available?'Australian hail feed unavailable':`${australia.complete?'':'Partial archive: '}${australia.count} Australian hail-threat records${australia.maximumMM!=null?`; largest estimate ${australia.maximumMM.toFixed(1)} mm`:''} (modeled, not ground reports)`;
+ return {text:`WolfGrid daily storm update (past 24h): ${hailText}. ${australianText}. ${cycloneText}. https://wolfgrid.app/storms?region=au`,hailReports:reports,hailStates:states,maximumHailMM:maximum,australia,cycloneUpdates:updates?.map(c=>({id:c.id,name:c.profile.name,category:c.profile.maxStormCat}))??null,start:start.toISOString(),end:end.toISOString(),coverage:'U.S. reported hail; archived Australia-wide modeled hail threats; global active tropical cyclone advisories. Not complete actual storm or damage footprints.'};
 }

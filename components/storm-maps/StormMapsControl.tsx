@@ -8,8 +8,12 @@ import { StormTerritorySketch } from './StormTerritorySketch';
 import { HailZoneSelector } from './HailZoneSelector';
 import { StormTerritoryEditor } from './StormTerritoryEditor';
 import { StormDiscoveryPanel } from './intelligence/StormDiscoveryPanel';
+import { StormRegionBrowser } from './intelligence/StormRegionBrowser';
+import { australianHailSettings, type AustralianWeatherView } from '@/lib/storm-maps/australia';
 import { StormWorkbenchView } from './StormWorkbenchView';
 import { StormTerritoryOverlay } from './StormTerritoryOverlay';
+import { StormTerritoryDrawingContext } from './StormTerritoryCampaignActions';
+import { StormTerritoryDisplayContext } from '@/lib/storm-maps/territory-display';
 import type { StormDisplaySettings } from '@/lib/storm-maps/display-settings';
 import Link from 'next/link';
 import { StormOverlayPicker } from './StormOverlayPicker';
@@ -34,7 +38,7 @@ import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
 import type { StormMapsManifest, StormFeatureProperties } from '@/lib/storm-maps/types';
 
-type Props = { territoryDrawing?: boolean; onSidebarWidth?: (width: number) => void; displaySettings?: StormDisplaySettings; onDisplaySettings?: () => void; standalone?: boolean; map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
+type Props = { inline?: boolean; campaignCreation?: boolean; mobileCampaign?: boolean; initiallyOpenDiscovery?: boolean; drawingRequest?: number; territoryDrawing?: boolean; onSidebarWidth?: (width: number) => void; displaySettings?: StormDisplaySettings; onDisplaySettings?: () => void; standalone?: boolean; map: mapboxgl.Map | null; mapLoaded: boolean; workspaceId: string | null; territories?: StormTerritories; onStormModeChange?: (active: boolean) => void; onStormCampaign?: (context: StormCampaignContext, boundary?: GeoJSON.Feature<GeoJSON.Polygon>) => void };
 const timeLabel = (date: Date) => date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const EMPTY_RISK: GeoJSON.FeatureCollection<GeoJSON.Geometry, StormFeatureProperties> = { type: 'FeatureCollection', features: [] };
 
@@ -47,6 +51,9 @@ function StormWorkbench(props: Props) {
   const { map, mapLoaded, workspaceId, territories, standalone, onStormModeChange } = props;
   const { settings, setSettings } = useStormGLSettings(workspaceId);
   const [entitled, setEntitled] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [accessError, setAccessError] = useState('');
+  const [accessAttempt, setAccessAttempt] = useState(0);
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(true);
   const [territorySelection, setTerritorySelection] = useState<'draw' | 'weather'>('draw');
@@ -57,14 +64,32 @@ function StormWorkbench(props: Props) {
   const [customTimeline, setCustomTimeline] = useState<{ start: Date; end: Date } | null>(null);
   const [timelineRange, setTimelineRange] = useState(() => stormTimeRange('live', 6));
   const [tab, setTab] = useState<'overview' | 'intelligence' | 'settings'>('overview');
-  const handleWorkbenchArchive = useCallback((active: boolean) => setTab(active ? 'intelligence' : 'overview'), []);
+  const [windArchiveView, setWindArchiveView] = useState(false);
+  const handleWorkbenchArchive = useCallback((active: boolean) => { setTab(active ? 'intelligence' : 'overview'); if (!active) setWindArchiveView(false); }, []);
   const [savedTerritory, setSavedTerritory] = useState<SavedStormTerritory | null>(null);
   const [territoryRevision, setTerritoryRevision] = useState(0);
   useEffect(() => { setSavedTerritory(null); }, [workspaceId]);
   const [selectedEvent, setSelectedEvent] = useState<StormEvent | null>(null);
   // A selected storm owns the map even when another sidebar or layer control opens.
-  const archiveView = tab === 'intelligence' || selectedEvent !== null;
+  const [australianView, setAustralianView] = useState(false);
+  const archiveView = (tab === 'intelligence' && !australianView) || selectedEvent !== null;
+  const showAustralianWeather = useCallback((value: AustralianWeatherView) => {
+    setWindArchiveView(false);
+    setAustralianView(true); setSelectedEvent(null); setSavedTerritory(null); setTab('overview');
+    setCustomTimeline(value.range ?? null);
+    setSettings(previous => australianHailSettings(previous, value.view));
+  }, [setSettings]);
+  const showStormReports = useCallback(() => {
+    setWindArchiveView(false);
+    setAustralianView(false); setSelectedEvent(null); setCustomTimeline(null); setTab('intelligence');
+  }, []);
+  const showWindArchive = useCallback(() => {
+    setWindArchiveView(true);
+    setAustralianView(false); setSelectedEvent(null); setSavedTerritory(null); setCustomTimeline(null); setTab('intelligence');
+    setSettings(previous => ({ ...previous, mode: 'history', shade: 'none', radar: false, wind: false, pressure: false, cyclones: false, hail: false, cells: false, stormCones: false, lightning: false, lightningThreats: false, alerts: false, outlook: false, reports: false, inspector: false, impact: false }));
+  }, [setSettings]);
   const selectEvent = useCallback((event: StormEvent | null) => {
+    setSavedTerritory(null);
     setSelectedEvent(event);
     setCustomTimeline(null);
     if (event) {
@@ -82,15 +107,15 @@ function StormWorkbench(props: Props) {
   const hailSelectionEvent = recentHailEvent && selectedEvent ? {
     key: selectedEvent.key, title: selectedEvent.title, hazard: selectedEvent.hazard, source: selectedEvent.source,
     sourceId: selectedEvent.sourceId, start: selectedEvent.start, end: selectedEvent.end,
-  } : tab === 'overview' && settings.mode === 'history' && settings.shade === 'hail-size-max' ? {
-    key: `hail-territory:${settings.historyHours}:${territoryWindowEnd.toISOString()}`,
-    title: `Hail exposure · ${settings.historyHours} hours`, hazard: 'hail' as const, source: 'xweather' as const,
-    sourceId: 'hail-size-max', start: new Date(territoryWindowEnd.getTime() - settings.historyHours * 3600_000).toISOString(), end: territoryWindowEnd.toISOString(),
+  } : (tab === 'overview' || australianView) && settings.mode === 'history' && settings.shade === 'hail-size-max' ? {
+    key: `hail-territory:${customTimeline?.start.toISOString() ?? settings.historyHours}:${customTimeline?.end.toISOString() ?? territoryWindowEnd.toISOString()}`,
+    title: `Hail exposure · ${customTimeline ? 'selected UTC day' : `${settings.historyHours} hours`}`, hazard: 'hail' as const, source: 'xweather' as const,
+    sourceId: 'hail-size-max', start: (customTimeline?.start ?? new Date(territoryWindowEnd.getTime() - settings.historyHours * 3600_000)).toISOString(), end: (customTimeline?.end ?? territoryWindowEnd).toISOString(),
   } : null;
-  const saveTerritoryAndReturn = async (name: string, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon, context: StormCampaignContext) => {
+  const saveTerritoryAndReturn = async (name: string, boundary: GeoJSON.Polygon | GeoJSON.MultiPolygon, context: StormCampaignContext, selectSaved = true) => {
     const response = await fetch(`/api/storm-maps/intelligence/territories?workspaceId=${encodeURIComponent(workspaceId ?? '')}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, boundary, context }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error);
-    setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
+    if (selectSaved) setSavedTerritory(data.territory); setTerritoryRevision(value => value + 1);
     return data.territory as SavedStormTerritory;
   };
   const saveTerritory = async (...args: Parameters<typeof saveTerritoryAndReturn>): Promise<void> => { await saveTerritoryAndReturn(...args); };
@@ -121,13 +146,14 @@ function StormWorkbench(props: Props) {
   }, [map]);
 
   useEffect(() => {
+    setCheckingAccess(true); setAccessError('');
     setEntitled(false); setManifest(null); setOpen(false); setSavedTerritory(null); setSelectedEvent(null); setCustomTimeline(null);
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
-      .then((r) => r.ok ? r.json() : null).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) { setSettings(previous => ({ ...STRONGEST_STORM_SETTINGS, units: previous.units, shade: 'temperatures', hail: false, cells: false, lightning: false, lightningThreats: false, reports: false, outlook: false, opacity: 100, radarOpacity: 70 })); setOpen(true); } } }).catch(() => {});
+      .then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not check Storm Maps access.'); return data; }).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) { setSettings(previous => props.mobileCampaign ? { ...hailViewSettings(previous, 'history'), shade: 'none', radar: false, wind: false, pressure: false, cyclones: false, hail: false, cells: false, stormCones: false, lightning: false, lightningThreats: false, reports: false, alerts: false, outlook: false, inspector: false, impact: false } : { ...STRONGEST_STORM_SETTINGS, units: previous.units, shade: 'temperatures', hail: false, cells: false, lightning: false, lightningThreats: false, reports: false, outlook: false, opacity: 100, radarOpacity: 70 }); setOpen(true); } } }).catch(reason => { if (!abort.signal.aborted) setAccessError(reason instanceof Error ? reason.message : 'Could not connect to Storms.'); }).finally(() => { if (!abort.signal.aborted) setCheckingAccess(false); });
     return () => abort.abort();
-  }, [workspaceId, standalone, setSettings]);
+  }, [workspaceId, standalone, setSettings, accessAttempt, props.mobileCampaign]);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     if (!map || !workspaceId) return;
@@ -154,9 +180,11 @@ function StormWorkbench(props: Props) {
     return () => { map.off('style.load', changed); };
   }, [map]);
 
+  const glCapability = props.mobileCampaign ? manifest?.glToken : undefined;
+  const glPath = props.mobileCampaign ? glCapability : `session-${workspaceId}`;
   const glEnabled = manifest?.providerHealth.xweather.available === true;
   useEffect(() => {
-    if (!open || !map || !mapLoaded || !glEnabled || !workspaceId) return;
+    if (!open || !map || !mapLoaded || !glEnabled || !workspaceId || !glPath) return;
     let disposed = false;
     let controller: MapboxMapController | undefined;
     setReady(false); setLoading(true); setError(null); setLayerErrors([]); setPlaying(false);
@@ -173,7 +201,7 @@ function StormWorkbench(props: Props) {
       }
       if (disposed) return;
       const account = new sdk.Account('wolfgrid', 'session');
-      const server = `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}`;
+      const server = `${window.location.origin}/api/storm-maps/gl/${glPath}`;
       account.servers.mapsgl = server;
       account.servers.api = `${server}/api`;
       account.servers.maps = `${server}/maps`;
@@ -201,7 +229,7 @@ function StormWorkbench(props: Props) {
       controller?.dispose();
       try { if (!props.standalone) map.setProjection(projection); } catch { /* map already removed */ }
     };
-  }, [open, map, mapLoaded, workspaceId, glEnabled, revision, props.standalone]);
+  }, [open, map, mapLoaded, workspaceId, glEnabled, revision, props.standalone, glPath]);
 
   useEffect(()=>{if(selectedEvent?.hazard==='hurricane')setSettings(previous=>hurricaneViewSettings(previous,'satellite'));},[selectedEvent,setSettings]);
 
@@ -244,6 +272,7 @@ function StormWorkbench(props: Props) {
     }
     if (settings.cells && settings.stormCones) wanted.set('stormcells-cones', 0.12);
     if (archiveView) { wanted.clear(); if (recentHailEvent) wanted.set('hail-size-max', 0.85); if(selectedEvent?.hazard==='hurricane'&&Date.parse(selectedEvent.end)>=Date.now()-7*86400000){wanted.set('satellite-infrared-color',0.7);wanted.set('wind-particles',0.55);} }
+    if (savedTerritory) wanted.clear();
     const errors: string[] = [];
     for (const id of activeIds.current) {
       if (!wanted.has(id)) {
@@ -265,7 +294,7 @@ function StormWorkbench(props: Props) {
           // The SDK hardcodes the raster metadata host; keep it behind our session proxy.
           if (id === 'satellite-infrared-color' && config && !Array.isArray(config)) {
             config.id = id;
-            config.source = { ...config.source, metadataUrl: `${window.location.origin}/api/storm-maps/gl/session-${workspaceId}/maps/wolfgrid_session/satellite-infrared-color.json` };
+            config.source = { ...config.source, metadataUrl: `${window.location.origin}/api/storm-maps/gl/${glPath}/maps/wolfgrid_session/satellite-infrared-color.json` };
           }
           controller.addWeatherLayer(id === 'satellite-infrared-color' && config && !Array.isArray(config) ? config : id, { data: { preloadLowQuality: id === 'radar' || id === 'gfs-radar' || id === 'wind-particles' }, paint: { opacity, ...(!props.standalone && id.endsWith('wind-particles') ? { particle: { density: 32 } } : {}) }, timing: { preload: id === 'radar' || id === 'gfs-radar' ? 1 : 0, ...(id === 'satellite-infrared-color' || id === 'lightning-flash' || id === 'lightning-strikes' || id === 'hail-size' || id === 'hail-size-max' || id === 'hail-severe-probability-max' ? { clamp: 'past' as const } : {}) }, legend: id === 'wind-particles' || id.endsWith('-tracks') || id.endsWith('-points') || id === 'lightning-flash' ? false : undefined });
           activeIds.current.add(id);
@@ -278,7 +307,7 @@ function StormWorkbench(props: Props) {
     }
     setLayerErrors(errors);
     if (map) ensureStormDrawCasing(map);
-  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, customTimeline, settings.mode, settings.historyHours, workspaceId, props.standalone]);
+  }, [ready, settings, map, zoom, archiveView, recentHailEvent, selectedEvent, customTimeline, settings.mode, settings.historyHours, workspaceId, props.standalone, glPath, savedTerritory]);
 
   useEffect(() => {
     if (!ready) return;
@@ -291,7 +320,7 @@ function StormWorkbench(props: Props) {
   }, [ready]);
 
   useEffect(() => {
-    const enabled = !archiveView && settings.mode !== 'history' && (settings.alerts || settings.outlook || settings.reports);
+    const enabled = !savedTerritory && !archiveView && settings.mode !== 'history' && (settings.alerts || settings.outlook || settings.reports);
     if (!map || !mapLoaded || !open || !manifest || !glEnabled || !enabled) {
       if (map && mapLoaded) removeStormFeatures(map);
       setRisk(EMPTY_RISK); setRiskLoaded(false); return;
@@ -320,7 +349,7 @@ function StormWorkbench(props: Props) {
     void load(); map.on('moveend', moved);
     const minutes = props.displaySettings?.autoUpdateMinutes ?? 5; const interval = minutes ? window.setInterval(() => void load(), minutes * 60_000) : undefined;
     return () => { abort.abort(); window.clearInterval(interval); window.clearTimeout(timer); map.off('moveend', moved); cleanup?.(); try { removeStormFeatures(map); } catch { /* map removed */ } };
-  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView, props.displaySettings?.autoUpdateMinutes]);
+  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView, props.displaySettings?.autoUpdateMinutes, savedTerritory]);
 
   const togglePlayback = () => {
     const timeline = controllerRef.current?.timeline;
@@ -351,32 +380,37 @@ function StormWorkbench(props: Props) {
   const rangeTitle = archiveView&&selectedEvent ? `${selectedEvent.title} · Historical` : settings.mode === 'forecast' ? 'Forecast · next 24h' : settings.mode === 'history' ? `History · past ${settings.historyHours}h` : 'Live + 1h nowcast';
 
   if (!mapLoaded || !map) return null;
+  if (checkingAccess && props.standalone) return <p role="status" className="absolute left-5 top-5 rounded-xl bg-background p-5">Checking Storm Maps access…</p>;
+  if (accessError && props.standalone) return <div role="alert" className="absolute left-5 right-5 top-5 rounded-xl bg-background p-5"><p>{accessError}</p><button type="button" className="mt-3 min-h-11 rounded-lg border px-4" onClick={() => setAccessAttempt(value => value + 1)}>Retry</button></div>;
   if (!entitled) return props.standalone ? <div className="absolute left-5 top-5 z-30 rounded-xl bg-slate-950 p-5 text-white">Storm Maps requires an active workspace Storm Maps add-on. <Link className="underline" href="/settings">Open settings</Link></div> : null;
-  if (manifest && !glEnabled) return <StormMapsRasterControl {...props} />;
-  if (props.standalone) return <>
+  if (manifest && !glEnabled && !props.mobileCampaign) return <StormMapsRasterControl {...props} />;
+  if (props.standalone) return <StormTerritoryDrawingContext.Provider value={territory => {
+    setSavedTerritory(territory);
+    props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() });
+  }}><StormTerritoryDisplayContext.Provider value={!!savedTerritory}>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView onCreateTerritory={setTerritorySelection} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={loading} error={error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView archivedWind={windArchiveView} mobileCampaign={props.mobileCampaign} initiallyOpenDiscovery={props.initiallyOpenDiscovery} drawingRequest={props.drawingRequest} onCreateTerritory={setTerritorySelection} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={!savedTerritory && loading} error={savedTerritory ? null : error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
-      renderArchive={onTerritory => workspaceId ? <StormDiscoveryPanel map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory} /> : null}
+      renderArchive={(onTerritory, browseOnly, onSelected, windActions) => workspaceId ? <StormRegionBrowser map={map} workspaceId={workspaceId} onAustralianView={showAustralianWeather} onReports={showStormReports} onWindView={showWindArchive} windActive={windArchiveView} onSaveWind={saveTerritoryAndReturn} windActions={windActions} onEvent={selectEvent} onTerritory={onTerritory} renderHistory={country=><StormDiscoveryPanel key={`history:${country}`} simple savedHistory savedCountry={country} browseOnly={browseOnly} onSelected={onSelected} allAreasByDefault map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory}/>} renderReports={()=><StormDiscoveryPanel simple browseOnly={browseOnly} onSelected={onSelected} allAreasByDefault map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory}/>} /> : null}
       renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
-      renderTerritory={() => <>
-        <div className="mb-3 flex gap-2" role="group" aria-label="Storm territory selection">
+      renderTerritory={onSelectionReady => <>
+        <div style={props.mobileCampaign ? { display: 'none' } : undefined} className="mb-3 flex gap-2" role="group" aria-label="Storm territory selection">
           <button type="button" aria-pressed={territorySelection === 'draw'} onClick={() => setTerritorySelection('draw')} className="flex-1 rounded-lg border border-cyan-300/40 px-2 py-2 text-xs">Draw territory</button>
           <button type="button" aria-pressed={territorySelection === 'weather'} onClick={() => setTerritorySelection('weather')} className="flex-1 rounded-lg border border-cyan-300/40 px-2 py-2 text-xs">Select weather zone</button>
         </div>
-        {territorySelection === 'draw' && workspaceId && <StormTerritoryEditor key="custom-storm-drawing" workspaceId={workspaceId} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} savedTerritory={savedTerritory} context={{version:1,event:selectedEvent?{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end}:hailSelectionEvent??{key:`storm-map:${territoryWindowEnd.toISOString()}`,title:'Storm inspection area',hazard:'hail',source:'xweather',sourceId:'storm-map-selection',start:timelineRange.start.toISOString(),end:timelineRange.end.toISOString()},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'user-drawn'}} />}
+        {territorySelection === 'draw' && workspaceId && <StormTerritoryEditor onPrepareCampaign={savedTerritory ? (name,boundary,context) => saveTerritoryAndReturn(name,boundary,context,false) : undefined} onSelectionReady={onSelectionReady} key="custom-storm-drawing" workspaceId={workspaceId} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} savedTerritory={savedTerritory} context={{version:1,event:selectedEvent?{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end}:hailSelectionEvent??{key:`storm-map:${territoryWindowEnd.toISOString()}`,title:'Storm inspection area',hazard:'hail',source:'xweather',sourceId:'storm-map-selection',start:timelineRange.start.toISOString(),end:timelineRange.end.toISOString()},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'user-drawn'}} />}
         {territorySelection === 'weather' && <>
           {!selectedEvent && !hailSelectionEvent && <p className="text-xs">Choose a storm in Find storm first, or draw your own territory.</p>}
-        {workspaceId && ready && controllerRef.current && hailSelectionEvent && <HailZoneSelector workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => {
+        {workspaceId && ready && controllerRef.current && hailSelectionEvent && <HailZoneSelector onSelectionReady={onSelectionReady} workspaceId={workspaceId} map={map} controller={controllerRef.current} windowKey={hailSelectionEvent.key} onSelecting={setSelectingTerritory} onApply={async zone => {
           return await saveTerritoryAndReturn(zone.name,zone.polygon.geometry,{version:2,event:hailSelectionEvent,selectedAt:new Date().toISOString(),minimumHailMM:zone.minimum,maximumHailMM:zone.maximum,selection:'intensity-zone',evidenceKind:'hail-sampled',sampling:{cellMeters:zone.cellMeters,clickedMM:zone.sampledMM,method:'numerical-map-contour'}});
         }} />}
         {workspaceId && selectedEvent?.hazard==='hurricane'&&<HurricaneAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
         {workspaceId && selectedEvent?.hazard==='tornado'&&<TornadoAreaSelector map={map} event={selectedEvent} workspaceId={workspaceId} onSave={saveTerritory}/>}
         {workspaceId && selectedEvent && selectedEvent.hazard!=='hurricane' && selectedEvent.hazard!=='tornado' && !hailSelectionEvent && <StormTerritoryEditor workspaceId={workspaceId} key={selectedEvent.key} map={map} onSelecting={setSelectingTerritory} onSave={saveTerritory} context={{version:1,event:{key:selectedEvent.key,title:selectedEvent.title,hazard:selectedEvent.hazard,source:selectedEvent.source,sourceId:selectedEvent.sourceId,start:selectedEvent.start,end:selectedEvent.end},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'user-drawn',evidenceKind:'reports'}} />}
         </>}
-        {workspaceId && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
+        {workspaceId && territorySelection !== 'draw' && <SavedStormTerritories renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} />}
       </>} />
-  </>;
+  </StormTerritoryDisplayContext.Provider></StormTerritoryDrawingContext.Provider>;
   return <>
     <div className="absolute left-[5.5rem] top-3 z-30 flex items-center gap-2">
       <button type="button" onClick={() => { props.onStormModeChange?.(true); if (!open) { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); if (map.getZoom() < 4) map.easeTo({ zoom: 5, pitch: 0, bearing: 0, duration: 600 }); else if (map.getPitch() !== 0) map.easeTo({ pitch: 0, bearing: 0, duration: 600 }); setOpen(true); setPanel(true); } else setPanel(!panel); }} aria-expanded={open && panel} aria-controls="storm-maps-gl-panel" className="flex h-9 w-[4.08rem] items-center justify-center gap-1 rounded-full border border-cyan-200/60 bg-slate-950/90 px-1.5 text-xs font-semibold text-white shadow-xl backdrop-blur-xl"><CloudLightning className="h-3 w-3 shrink-0 text-cyan-300" />Storm</button>

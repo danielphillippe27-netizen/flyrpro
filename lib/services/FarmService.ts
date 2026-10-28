@@ -406,32 +406,17 @@ export class FarmTouchService {
   }
 
   static async fetchTouches(farmId: string): Promise<FarmTouch[]> {
-    let { data, error } = await this.client
-      .from('farm_touches')
-      .select('*')
-      .eq('farm_id', farmId)
-      .order('scheduled_date', { ascending: false });
-
-    if (error && isMissingColumnError(error, 'scheduled_date')) {
-      const fallback = await this.client
-        .from('farm_touches')
-        .select('*')
-        .eq('farm_id', farmId)
-        .order('date', { ascending: false, nullsFirst: false });
-      data = fallback.data;
-      error = fallback.error;
-    }
-
-    if (error && isMissingColumnError(error, 'date')) {
-      const fallback = await this.client
-        .from('farm_touches')
-        .select('*')
-        .eq('farm_id', farmId)
-        .order('created_at', { ascending: false });
-      data = fallback.data;
-      error = fallback.error;
-    }
-
+    const read = async (column: string) => {
+      try {
+        const data = await fetchAllInPages(async (from, to) => await this.client
+          .from('farm_touches').select('*').eq('farm_id', farmId)
+          .order(column, { ascending: false, nullsFirst: false }).order('id').range(from, to));
+        return { data, error: null };
+      } catch (error) { return { data: null, error }; }
+    };
+    let { data, error } = await read('scheduled_date');
+    if (error && isMissingColumnError(error, 'scheduled_date')) ({ data, error } = await read('date'));
+    if (error && isMissingColumnError(error, 'date')) ({ data, error } = await read('created_at'));
     if (error) throw new Error(formatError(error));
     return ((data || []) as LegacyFarmTouchRow[]).map((touch) => withFarmTouchDefaults(touch) as FarmTouch);
   }
@@ -541,14 +526,10 @@ export class FarmLeadService {
   }
 
   static async fetchLeads(farmId: string): Promise<FarmLead[]> {
-    const { data, error } = await this.client
-      .from('farm_leads')
-      .select('*')
-      .eq('farm_id', farmId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw new Error(formatError(error));
-    return (data || []) as FarmLead[];
+    const data = await fetchAllInPages(async (from, to) => await this.client
+      .from('farm_leads').select('*').eq('farm_id', farmId)
+      .order('created_at', { ascending: false }).order('id').range(from, to));
+    return data as FarmLead[];
   }
 }
 
@@ -556,28 +537,18 @@ export class FarmTouchOutcomeService {
   private static client = createClient();
 
   static async fetchOutcomes(farmId: string): Promise<FarmTouchAddress[]> {
-    const { data, error } = await this.client
-      .from('farm_touch_addresses')
-      .select('*')
-      .eq('farm_id', farmId)
-      .order('occurred_at', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    if (error) {
+    const read = (columns: string) => fetchAllInPages(async (from, to) => await this.client
+      .from('farm_touch_addresses').select(columns).eq('farm_id', farmId)
+      .order('occurred_at', { ascending: false }).order('created_at', { ascending: false })
+      .order('id').range(from, to));
+    try {
+      return await read('*') as unknown as FarmTouchAddress[];
+    } catch (error) {
       if (isMissingColumnError(error, 'campaign_address_id')) {
-        const fallback = await this.client
-          .from('farm_touch_addresses')
-          .select('id, farm_id, farm_touch_id, farm_address_id, status, notes, occurred_at, created_by, created_at, updated_at')
-          .eq('farm_id', farmId)
-          .order('occurred_at', { ascending: false })
-          .order('created_at', { ascending: false });
-        if (fallback.error) throw new Error(formatError(fallback.error));
-        return (fallback.data || []) as FarmTouchAddress[];
+        return await read('id, farm_id, farm_touch_id, farm_address_id, status, notes, occurred_at, created_by, created_at, updated_at') as unknown as FarmTouchAddress[];
       }
       throw new Error(formatError(error));
     }
-
-    return (data || []) as FarmTouchAddress[];
   }
 
   static async recordOutcome(payload: {

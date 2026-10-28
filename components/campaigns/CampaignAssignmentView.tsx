@@ -1609,6 +1609,7 @@ function CampaignAssignmentZonePreviewMap({
   );
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  const previewMapFittedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [buildingRenderState, setBuildingRenderState] = useState<MapBuildingsRenderState | null>(null);
@@ -1672,7 +1673,11 @@ function CampaignAssignmentZonePreviewMap({
     [addressById, assignmentAddresses, members, zones]
   );
 
-  const initialPoint = previewPoints[0] ?? null;
+  // Seed the camera from campaign homes, independent of the selected reps.
+  const initialPoint = assignmentAddresses.find((address) =>
+    Number.isFinite(address.lon) && Number.isFinite(address.lat)
+    && (address.lon !== 0 || address.lat !== 0)
+  ) ?? null;
   const initialLon = initialPoint?.lon ?? null;
   const initialLat = initialPoint?.lat ?? null;
   const hasRenderableAssignmentMap = Boolean(mapLoaded || buildingRenderState?.hasVisibleFeatures);
@@ -1764,6 +1769,7 @@ function CampaignAssignmentZonePreviewMap({
           dragRotate: true,
         });
         mapRef.current = map;
+        previewMapFittedRef.current = false;
         enableFreeMapCamera(map);
         map.addControl(new mapboxgl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
         map.on('style.load', () => {
@@ -1816,6 +1822,9 @@ function CampaignAssignmentZonePreviewMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || previewPoints.length === 0) return;
+    // Assignment updates refresh the layers without resetting the user's view.
+    if (previewMapFittedRef.current) return;
+    previewMapFittedRef.current = true;
 
     if (previewPoints.length === 1) {
       map.easeTo({
@@ -1927,12 +1936,12 @@ function CampaignAssignmentZonePreviewMap({
   const wrapperClassName = expandedOpen
     ? 'fixed inset-0 z-[70] grid h-[100dvh] w-[100vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-none border-0 bg-background'
     : layout === 'hero'
-      ? 'grid h-full min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-muted/20'
+      ? 'grid h-[420px] sm:h-full min-h-[360px] sm:min-h-[560px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-border bg-muted/20'
       : 'overflow-hidden rounded-lg border border-border bg-muted/20';
   const mapFrameClassName = expandedOpen
     ? 'relative h-full min-h-0 w-full'
     : layout === 'hero'
-      ? 'relative h-full min-h-[520px] w-full'
+      ? 'relative h-full min-h-[320px] sm:min-h-[520px] w-full'
       : 'relative h-[360px] min-h-[320px] w-full';
 
   return (
@@ -3138,10 +3147,6 @@ export function CampaignAssignmentView({
     if (selectedMemberIds[0]) wholeTeamZones.set(selectedMemberIds[0], assignmentAddresses);
     return wholeTeamZones;
   }, [assignmentAddresses, mode, selectedMemberIds, zones]);
-  const assignmentMapKey = useMemo(
-    () => [mode, splitMode, ...selectedMemberIds].join(':'),
-    [mode, selectedMemberIds, splitMode]
-  );
 
   const toggleSelectedMember = useCallback((memberId: string) => {
     setSelectedMemberIds((current) => {
@@ -3519,7 +3524,7 @@ export function CampaignAssignmentView({
                       type="button"
                       onClick={() => toggleSelectedMember(member.user_id)}
                       disabled={saving}
-                      className={`flex min-h-9 w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                      className={`flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                         selected
                           ? 'border-foreground bg-foreground text-background'
                           : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
@@ -3555,7 +3560,7 @@ export function CampaignAssignmentView({
                     onClick={() => {
                       setMode(option.id === 'shared' ? 'whole_team' : 'zone_split');
                     }}
-                    className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={`flex min-h-11 sm:min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                       option.active
                         ? 'border-foreground bg-muted/60 text-foreground'
                         : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
@@ -3584,7 +3589,7 @@ export function CampaignAssignmentView({
                           aria-checked={active}
                           disabled={saving}
                           onClick={() => setSplitMode(option.id as CampaignAssignmentSplitMode)}
-                          className={`flex min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          className={`flex min-h-11 sm:min-h-9 w-full min-w-0 items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-center text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                             active
                               ? 'border-foreground bg-muted/60 text-foreground'
                               : 'border-border bg-background text-muted-foreground hover:bg-muted/40'
@@ -3635,17 +3640,17 @@ export function CampaignAssignmentView({
           </div>
 
           <div className="border-t border-border p-4">
-            <Button className="w-full" onClick={() => void handleSave()} disabled={saving || selectedMemberIds.length === 0}>
+            <Button className="min-h-11 w-full" onClick={() => void handleSave()} disabled={saving || selectedMemberIds.length === 0}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Send Assignment
             </Button>
           </div>
         </aside>
 
-        <div className="min-h-[560px]">
+        <div className="min-w-0 min-h-[360px] sm:min-h-[560px]">
 	          {zonePreviewMembers.length > 0 ? (
 	            <CampaignAssignmentZonePreviewMap
-	              key={assignmentMapKey}
+	              key={campaignId}
 	              campaignId={campaignId}
               addresses={addresses}
               assignmentAddresses={assignmentAddresses}
@@ -3661,7 +3666,7 @@ export function CampaignAssignmentView({
               liveDemoPlaybackToken={demoLivePlaybackToken || (assignmentMapRevealed ? 1 : 0)}
             />
           ) : (
-            <div className="flex h-full min-h-[560px] items-center justify-center rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+            <div className="flex h-full min-h-[360px] sm:min-h-[560px] items-center justify-center rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
               Select at least one rep to preview assignment zones.
             </div>
           )}
@@ -3705,7 +3710,18 @@ export function CampaignAssignmentView({
           </div>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 space-y-3 md:hidden">
+          {assignmentReportRows.map(row => (
+            <article key={row.id} className="rounded-lg border border-border p-3">
+              <div className="flex min-w-0 items-center gap-2"><span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: row.color }} /><h4 className="min-w-0 flex-1 truncate font-medium">{row.name}</h4><span className="text-xs text-muted-foreground">{row.zoneLabel}</span></div>
+              <dl className="mt-3 grid grid-cols-3 gap-3 text-sm">
+                {Object.entries({ Homes: row.assignedHomes, Attempted: row.workedHomes, Conversations: row.conversations, Leads: row.leads, Appointments: row.appointments, Completion: formatAssignmentPercent(row.workedHomes, row.assignedHomes) }).map(([label, value]) => <div key={label}><dt className="text-[11px] text-muted-foreground">{label}</dt><dd className="font-semibold">{value}</dd></div>)}
+              </dl>
+            </article>
+          ))}
+          {assignmentReportRows.length === 0 && <p className="text-sm text-muted-foreground">No assignees selected.</p>}
+        </div>
+        <div className="mt-4 hidden overflow-x-auto md:block">
           <div className="min-w-[760px] overflow-hidden rounded-md border border-border">
             <div className="grid grid-cols-[1.3fr_0.8fr_repeat(6,0.7fr)] gap-0 border-b border-border bg-muted/35 px-3 py-2 text-xs font-medium text-muted-foreground">
               <span>Assignee</span>

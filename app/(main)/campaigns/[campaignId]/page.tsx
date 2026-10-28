@@ -43,6 +43,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
 import { MapOptimizationStatus } from '@/components/campaigns/MapOptimizationStatus';
+import { DismissibleCampaignBanner } from '@/components/campaigns/DismissibleCampaignBanner';
 import { TerritoryIQPanel } from '@/components/campaigns/TerritoryIQPanel';
 import { FinancePanel } from '@/components/finance/FinancePanel';
 import {
@@ -1410,15 +1411,17 @@ export default function CampaignDetailPage() {
 
       <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {campaignHomeCapNotice ? (
-          <div
-            role="status"
+          <DismissibleCampaignBanner
+            storageKey={`wolfgrid:campaign:${campaignId}:home-cap-dismissed`}
+            noticeId={campaignHomeCapNotice}
+            label="Dismiss campaign home limit notice"
             className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
           >
             <p className="text-sm font-semibold">This campaign area was over the home limit</p>
             <p className="mt-1 text-sm leading-5">
               {campaignHomeCapNotice.slice(CAMPAIGN_HOME_CAP_NOTICE_PREFIX.length).trim()}
             </p>
-          </div>
+          </DismissibleCampaignBanner>
         ) : null}
         {campaign.storm_context && <StormCampaignSummary context={campaign.storm_context} />}
         <StatsHeader stats={campaignStats}
@@ -1560,7 +1563,7 @@ export default function CampaignDetailPage() {
           className="w-full"
           id="campaign-demo-tabs"
         >
-          <TabsList>
+          <TabsList className="max-w-full justify-start overflow-x-auto [&>button]:min-h-11 [&>button]:shrink-0 h-auto">
             <TabsTrigger value="map">Map</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="addresses">Addresses</TabsTrigger>

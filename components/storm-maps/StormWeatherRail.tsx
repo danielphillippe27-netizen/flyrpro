@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { Settings2, X, CloudHail, CloudLightning, Tornado, Wind, Radar, Zap, Waves, Thermometer, Satellite, ShieldAlert, Cloud } from 'lucide-react';
 import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
 import { hailViewSettings, hurricaneViewSettings } from '@/lib/storm-maps/gl-settings';
-type Props = { settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; alwaysShowNames?: boolean; onSettings?: () => void; compact?: boolean };
-export function StormWeatherRail({ settings, onChange, alwaysShowNames = false }: Props) {
+type Props = { settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; alwaysShowNames?: boolean; onSettings?: () => void; compact?: boolean; mobileOpen?: boolean; onMobileClose?: () => void };
+export function StormWeatherRail({ settings, onChange, alwaysShowNames = false, mobileOpen = false, onMobileClose }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const shade = (id: StormGLSettings['shade']) => ({ ...settings, shade: settings.shade === id ? 'none' as const : id, inspector: true });
   const layers = [
@@ -23,23 +23,23 @@ export function StormWeatherRail({ settings, onChange, alwaysShowNames = false }
   ];
   const selected = layers.find(layer => layer.key === editing && layer.active);
   const defaultOpacity = selected ? selected.key === 'radar' ? settings.radarOpacity : selected.key === 'wind' ? 35 : ['cells','cyclones','lightning'].includes(selected.key) ? 100 : settings.opacity : 100;
-  return <><aside aria-label="Weather layers" className="absolute right-4 top-44 z-30 max-h-[calc(100%-17rem)] w-64 overflow-y-auto pr-1 text-white [scrollbar-width:none] max-sm:w-52">
-    <div className="space-y-2">{layers.map(layer => <div key={layer.key} className="group relative flex h-10 items-center justify-end">
-      <button type="button" aria-label={layer.label + ' settings'} aria-expanded={editing === layer.key} title={layer.label + ' settings'} disabled={!layer.active} onClick={() => setEditing(editing === layer.key ? null : layer.key)} className={`absolute right-0 flex h-10 w-10 items-center justify-center rounded-lg bg-[#0c202c]/90 text-[#b5c5cb] transition-opacity duration-200 hover:text-white ${layer.active ? 'opacity-100' : 'pointer-events-none invisible opacity-0'}`}><Settings2 className="h-4 w-4" /></button>
-      <button type="button" aria-label={layer.label} title={layer.detail} aria-pressed={layer.active} onClick={() => { if (layer.active && editing === layer.key) setEditing(null); onChange({ ...layer.apply(), inspector: true }); }} className={`relative flex min-w-0 items-center justify-end gap-2 rounded-lg transition-transform duration-200 focus-visible:outline focus-visible:outline-[#a9d7d5] ${layer.active ? '-translate-x-12' : 'translate-x-0'}`}>
-        <span className={`rounded-full bg-[#172c38]/90 px-3 py-1.5 text-[11px] transition-all duration-200 ${alwaysShowNames ? '' : 'translate-x-3 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100'}`}>{layer.label}</span>
-        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 shadow-lg ${layer.active ? 'border-[#a9d7d5]' : 'border-[#142d3b]'}`} style={{ background: layer.gradient }}><layer.icon aria-hidden="true" className="h-5 w-5 text-white drop-shadow-md" /></span>
+  return <><aside aria-label="Weather layers" className={`absolute right-4 top-44 z-30 max-h-[calc(100%-17rem)] w-64 overflow-y-auto pr-1 text-slate-900 dark:text-white [scrollbar-width:none] max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:max-h-[60%] max-md:w-auto max-md:rounded-t-2xl max-md:bg-white max-md:dark:bg-[#0c202c] max-md:p-3 ${mobileOpen ? "" : "max-md:hidden"}`}>
+    <div className="mb-2 flex items-center justify-between md:hidden"><h2 className="font-semibold">Weather layers</h2><button type="button" aria-label="Close weather layers" onClick={onMobileClose} className="flex h-11 w-11 items-center justify-center"><X className="h-5 w-5" /></button></div><div className="space-y-2">{layers.map(layer => <div key={layer.key} className="group relative flex h-11 md:h-10 items-center justify-end">
+      <button type="button" aria-label={layer.label + ' settings'} aria-expanded={editing === layer.key} title={layer.label + ' settings'} disabled={!layer.active} onClick={() => setEditing(editing === layer.key ? null : layer.key)} className={`absolute right-0 flex h-10 w-10 items-center justify-center rounded-lg bg-white/95 text-slate-600 dark:bg-[#0c202c]/90 dark:text-[#b5c5cb] transition-opacity duration-200 hover:text-slate-950 dark:hover:text-white ${layer.active ? 'opacity-100' : 'pointer-events-none invisible opacity-0'}`}><Settings2 className="h-4 w-4" /></button>
+      <button type="button" aria-label={layer.label} title={layer.detail} aria-pressed={layer.active} onClick={() => { if (layer.active && editing === layer.key) setEditing(null); onChange({ ...layer.apply(), inspector: true }); }} className={`relative flex min-w-0 max-md:flex-1 items-center justify-end gap-2 rounded-lg transition-transform duration-200 focus-visible:outline focus-visible:outline-teal-700 dark:focus-visible:outline-[#a9d7d5] ${layer.active ? '-translate-x-12' : 'translate-x-0'}`}>
+        <span className={`rounded-full bg-white/95 dark:bg-[#172c38]/90 px-3 py-1.5 text-[11px] transition-all duration-200 ${alwaysShowNames ? '' : 'max-md:translate-x-0 max-md:opacity-100 translate-x-3 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100'}`}>{layer.label}</span>
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 shadow-lg ${layer.active ? 'border-teal-700 dark:border-[#a9d7d5]' : 'border-slate-300 dark:border-[#142d3b]'}`} style={{ background: layer.gradient }}><layer.icon aria-hidden="true" className="h-5 w-5 text-white drop-shadow-md" /></span>
       </button>
     </div>)}</div>
   </aside>
-    {selected && <section aria-label={selected.label + ' settings'} className="absolute right-20 top-36 z-40 w-[min(18rem,calc(100%-7rem))] rounded-xl bg-[#0c202c] p-4 text-white shadow-xl">
+    {selected && <section aria-label={selected.label + ' settings'} className={`${mobileOpen ? "" : "max-md:hidden"} absolute right-20 top-36 z-40 w-[min(18rem,calc(100%-7rem))] rounded-xl border border-border bg-white p-4 text-slate-900 dark:border-white/10 dark:bg-[#0c202c] dark:text-white shadow-xl max-md:inset-x-2 max-md:top-16 max-md:max-h-[calc(100%-5rem)] max-md:w-auto max-md:overflow-y-auto`}>
       <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">{selected.label}</h2><button type="button" aria-label="Close layer settings" onClick={()=>setEditing(null)}><X className="h-4 w-4" /></button></div>
-      <p className="mb-4 text-xs text-slate-300">{selected.detail}</p>
-      <button type="button" aria-pressed={selected.active} onClick={()=>onChange({...selected.apply(),inspector:true})} className="mb-4 w-full rounded-lg border border-white/20 py-2 text-sm">{selected.active?'Hide layer':'Show layer'}</button>
+      <p className="mb-4 text-xs text-slate-600 dark:text-slate-300">{selected.detail}</p>
+      <button type="button" aria-pressed={selected.active} onClick={()=>onChange({...selected.apply(),inspector:true})} className="mb-4 w-full rounded-lg border border-border dark:border-white/20 py-2 text-sm">{selected.active?'Hide layer':'Show layer'}</button>
       {selected.key !== 'alerts' && <><label className="block text-xs">Opacity · {settings.layerOpacities?.[selected.key] ?? defaultOpacity}%
-        <input aria-label={selected.label+' opacity'} type="range" min={0} max={100} step={5} value={settings.layerOpacities?.[selected.key] ?? defaultOpacity} onChange={event=>onChange({...settings,layerOpacities:{...settings.layerOpacities,[selected.key]:Number(event.target.value)}})} className="mt-3 w-full accent-[#a9d7d5]" />
+        <input aria-label={selected.label+' opacity'} type="range" min={0} max={100} step={5} value={settings.layerOpacities?.[selected.key] ?? defaultOpacity} onChange={event=>onChange({...settings,layerOpacities:{...settings.layerOpacities,[selected.key]:Number(event.target.value)}})} className="mt-3 w-full accent-teal-700 dark:accent-[#a9d7d5]" />
       </label>
-      <button type="button" onClick={()=>{const values={...settings.layerOpacities};delete values[selected.key];onChange({...settings,layerOpacities:values});}} className="mt-3 text-xs text-[#a9d7d5]">Reset opacity</button></>}
+      <button type="button" onClick={()=>{const values={...settings.layerOpacities};delete values[selected.key];onChange({...settings,layerOpacities:values});}} className="mt-3 text-xs text-teal-700 dark:text-[#a9d7d5]">Reset opacity</button></>}
     </section>}
   </>;
 }

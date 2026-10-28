@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
 import { WorkspaceCoverageSettings } from '@/components/settings/WorkspaceCoverageSettings';
+import { FarmSettingsCard } from '@/components/settings/FarmSettingsCard';
 import { StormMapsSettingsCard } from '@/components/settings/StormMapsSettingsCard';
 import {
   SALESPERSON_STRIPE_GUARDIAN_POLICY,
@@ -875,6 +876,7 @@ function SettingsPageContent() {
             </Card>
           )}
 
+          {!isSalespersonSettings ? <FarmSettingsCard key={currentWorkspaceId} workspaceId={currentWorkspaceId} /> : null}
           {!isSalespersonSettings ? <WorkspaceCoverageSettings /> : null}
           {!isSalespersonSettings ? (
             <StormMapsSettingsCard workspaceId={currentWorkspaceId} />

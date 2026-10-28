@@ -1264,6 +1264,7 @@ export function PowerDialerPage() {
   }: PlaceCallOptions = {}) => {
     const requestedLead = forceLeadId ? leads.find((lead) => lead.id === forceLeadId) ?? null : activeLead;
     if (!requestedLead || !currentWorkspaceId) return;
+    const isTestCall = normalizePhoneNumber(requestedLead.phone, 'CA').e164 === normalizePhoneNumber(TEST_LEAD.phone, 'CA').e164;
     if (device.isInCall) {
       setMessage('A call is already active.');
       return;
@@ -1274,12 +1275,15 @@ export function PowerDialerPage() {
     setMessage(null);
 
     try {
-      const { updatedLeads, skippedCount } = await skipInvalidPendingLeads();
+      // A microphone test must never fall through to the prospect queue.
+      const { updatedLeads, skippedCount } = isTestCall
+        ? { updatedLeads: leads, skippedCount: 0 }
+        : await skipInvalidPendingLeads();
       const requestedLeadFromQueue = updatedLeads.find((lead) => lead.id === requestedLead.id);
       const leadToCall =
-        requestedLeadFromQueue && statusForLead(requestedLeadFromQueue) === 'pending' && hasDialablePhone(requestedLeadFromQueue.phone)
+        requestedLeadFromQueue && (isTestCall || statusForLead(requestedLeadFromQueue) === 'pending') && hasDialablePhone(requestedLeadFromQueue.phone)
           ? requestedLeadFromQueue
-          : forceLeadId
+          : forceLeadId || isTestCall
             ? null
             : findNextDialableLead(updatedLeads, requestedLead.id);
 
@@ -1314,7 +1318,7 @@ export function PowerDialerPage() {
         doubleDialRetryRef.current = { leadId: leadToCall.id, remaining: 1 };
       }
       setActiveCallId(data.call.id);
-      setDiallerRunning(true);
+      setDiallerRunning(!isTestCall);
       setActiveCallIsDoubleDial(doubleDial);
       setMessage(
         doubleDial

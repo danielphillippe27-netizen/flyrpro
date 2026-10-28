@@ -129,6 +129,7 @@ export async function GET(request: NextRequest) {
     generatedAt: new Date(generatedAt).toISOString(),
     expiresAt: issued.expiresAt,
     tileToken: issued.token,
+    glToken: issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token,
     radarProvider,
     layers,
     featureEndpoint: '/api/storm-maps/features',

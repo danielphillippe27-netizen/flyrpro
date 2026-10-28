@@ -84,14 +84,21 @@ export async function POST(
       visited_count: 0,
     }));
 
-    const { error: deleteError } = await admin.from('farm_addresses').delete().eq('farm_id', farm.id);
-    if (deleteError) {
-      return NextResponse.json({ error: deleteError.message }, { status: 500 });
-    }
+    // Keep existing IDs and history, including homes imported outside campaign caps.
+    const existing = await fetchAllInPages<{ campaign_address_id: string | null; gers_id: string | null; formatted: string }>(async (from, to) =>
+      await admin.from('farm_addresses').select('campaign_address_id, gers_id, formatted')
+        .eq('farm_id', farm.id).order('id').range(from, to));
+    const campaignIds = new Set(existing.map(row => row.campaign_address_id).filter(Boolean));
+    const externalIds = new Set(existing.map(row => row.gers_id).filter(Boolean));
+    const formatted = new Set(existing.map(row => row.formatted.trim().toLowerCase()));
+    const newRows = rows.filter(row =>
+      !campaignIds.has(row.campaign_address_id) &&
+      !(row.gers_id && externalIds.has(row.gers_id)) &&
+      !formatted.has(row.formatted.trim().toLowerCase()));
 
     const batchSize = 500;
-    for (let index = 0; index < rows.length; index += batchSize) {
-      const batch = rows.slice(index, index + batchSize);
+    for (let index = 0; index < newRows.length; index += batchSize) {
+      const batch = newRows.slice(index, index + batchSize);
       if (batch.length === 0) continue;
       const { error: insertError } = await admin.from('farm_addresses').insert(batch);
       if (insertError) {
@@ -102,7 +109,7 @@ export async function POST(
     await admin
       .from('farms')
       .update({
-        address_count: rows.length,
+        address_count: existing.length + newRows.length,
         last_generated_at: new Date().toISOString(),
       })
       .eq('id', farm.id);
@@ -110,7 +117,7 @@ export async function POST(
     return NextResponse.json({
       farm_id: farm.id,
       linked_campaign_id: linkedCampaignId,
-      inserted_count: rows.length,
+      inserted_count: newRows.length,
     });
   } catch (error) {
     console.error('[farm sync] Failed to mirror campaign addresses into farm_addresses:', error);

@@ -1,3 +1,4 @@
+import { areaCampaignMapBundle } from '@/lib/storm-maps/intelligence/area-campaign';
 import { NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -208,6 +209,15 @@ export async function GET(
         .maybeSingle();
       return Boolean(data?.campaign_id);
     });
+
+    if (!hasSnapshot) {
+      const { data: areaCampaign } = await supabase.from('campaigns')
+        .select('storm_context,territory_boundary,updated_at').eq('id', campaignId).maybeSingle();
+      if (areaCampaign?.storm_context?.campaignMode === 'area') {
+        return jsonResponse(areaCampaignMapBundle(campaignId, areaCampaign.territory_boundary, areaCampaign.updated_at),
+          { status: 200, spans, startedAt });
+      }
+    }
 
     if (hasSnapshot) {
       try {

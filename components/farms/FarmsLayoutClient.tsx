@@ -1,13 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { FarmListSidebar } from '@/components/farms/FarmListSidebar';
+import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar';
 import { FarmsPageHeader } from '@/components/farms/FarmsPageHeader';
 import { FarmService } from '@/lib/services/FarmService';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 
-const FARM_SIDEBAR_COLLAPSED_KEY = 'flyr-farm-sidebar-collapsed';
+const FARM_SIDEBAR_COLLAPSED_KEY = 'flyr-campaign-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
 
 function useFarmHeaderTitle() {
@@ -81,13 +82,16 @@ export function FarmsLayoutClient({
 
   return (
     <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
-      <FarmListSidebar
-        onNewFarm={() => router.push('/farms/create')}
+      <div className={pathname === '/farms' ? 'flex shrink-0 max-md:w-full max-md:[&>aside]:!w-full' : 'hidden shrink-0 md:flex'}>
+      <CampaignListSidebar
+        onNewCampaign={() => router.push('/campaigns/create')}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsedPersisted(!collapsed)}
         width={SIDEBAR_WIDTH}
       />
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+      </div>
+      <div className={`flex-1 min-w-0 flex-col overflow-hidden bg-background ${pathname === '/farms' ? 'hidden md:flex' : 'flex'}`}>
+        <div className="border-b border-border px-4 py-2 text-sm md:hidden"><Link href="/campaigns">← All campaigns</Link></div>
         {!isCreatePage && <FarmsPageHeader title={headerTitle} />}
         <div
           ref={mainContentRef}

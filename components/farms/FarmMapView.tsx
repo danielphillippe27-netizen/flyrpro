@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -48,6 +48,7 @@ export function FarmMapView({
   onDataChanged,
   className,
   showOutcomeControls = true,
+  toolbarContent,
 }: {
   farm: Farm;
   addresses: FarmAddress[];
@@ -62,6 +63,7 @@ export function FarmMapView({
   onDataChanged?: () => void | Promise<void>;
   className?: string;
   showOutcomeControls?: boolean;
+  toolbarContent?: ReactNode;
 }) {
   const [outcomeNotes, setOutcomeNotes] = useState('');
   const [savingStatus, setSavingStatus] = useState<FarmAddressOutcomeStatus | null>(null);
@@ -218,7 +220,7 @@ export function FarmMapView({
 
   if (!linkedCampaignId) {
     return (
-      <div className="flex h-[520px] items-center justify-center rounded-xl border border-border bg-muted/20 text-sm text-muted-foreground">
+      <div className={`flex items-center justify-center rounded-xl border border-border bg-muted/20 text-sm text-muted-foreground ${className ?? 'h-[520px]'}`}>
         Linked campaign map is not available for this farm yet.
       </div>
     );
@@ -227,6 +229,7 @@ export function FarmMapView({
   return (
     <div className={`relative w-full overflow-hidden rounded-xl border border-border ${className ?? 'h-[520px]'}`}>
       <CampaignDetailMapView
+        toolbarContent={toolbarContent}
         campaignId={linkedCampaignId}
         addresses={campaignAddresses}
         campaign={linkedCampaign}

@@ -22,6 +22,7 @@ import {
 } from '@/lib/territory/use-territory-create-phase';
 import { createClient, getClientAsync } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
+import { useFarmEnabled } from '@/lib/hooks/useFarmEnabled';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy } from '@/lib/industry-copy';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
@@ -41,6 +42,7 @@ import {
   type SelfServeProspectingStep,
   type SelfServeSelectionTool,
 } from '@/components/campaigns/SelfServeProspectingFunnel';
+import { CampaignFarmDialog } from '@/components/farms/CampaignFarmDialog';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
@@ -48,7 +50,7 @@ import { StormTerritoryReview } from '@/components/storm-maps/intelligence/Storm
 import { StormMapsControl } from '@/components/storm-maps/StormMapsControl';
 import { PaywallGuard } from '@/components/PaywallGuard';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
-import { Building2, CalendarDays, CircleAlert, Map, Minus, Pencil, Plus, Search, Satellite, Trash2, TriangleAlert, Users } from 'lucide-react';
+import { Building2, CalendarDays, CircleAlert, Map, Minus, Pencil, Plus, Search, Satellite, Sprout, Trash2, TriangleAlert, Users } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 import {
@@ -58,6 +60,7 @@ import {
 } from '@/lib/demo/demo44TeamTrial';
 import { initTracking, track } from '@/lib/demo/analytics/track';
 import { buildSelfServeDoorOutcomes } from '@/lib/demo/selfServeDoorOutcomes';
+
 
 const MAP_USABLE_PHASES = new Set(['map_ready', 'linker_ready', 'optimizing', 'optimized']);
 const MAP_READY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -453,6 +456,7 @@ export default function CreateCampaignPage() {
   const searchParams = useSearchParams();
   const { theme } = useTheme();
   const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { enabled: farmEnabled } = useFarmEnabled(currentWorkspaceId);
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const copy = getIndustryCopy(isSelfServeDemo ? undefined : currentWorkspace?.industry);
   const shouldResumeSelfServeCampaign = isSelfServeDemo && searchParams.get('resumeCampaign') === '1';
@@ -462,6 +466,7 @@ export default function CreateCampaignPage() {
   const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', mapTheme, 'v11'), [mapTheme]);
   const [name, setName] = useState('');
   const [stormMode, setStormMode] = useState(false);
+  const [farmCreation, setFarmCreation] = useState<{ boundary: GeoJSON.Polygon | null; name: string } | null>(null);
   const [stormContext, setStormContext] = useState<StormCampaignContext | null>(null);
   useEffect(() => { setStormContext(null); }, [currentWorkspaceId]);
   const [loading, setLoading] = useState(false);
@@ -2333,9 +2338,12 @@ export default function CreateCampaignPage() {
     <div className={`h-full min-h-0 flex flex-col overflow-hidden ${isSelfServeDemo ? 'bg-white' : 'bg-gray-50 dark:bg-background'}`}>
       <div className="relative min-h-0 flex-1">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
-        {!isSelfServeDemo ? <MapInfoButton show={mapLoaded} /> : null}
+        {!isSelfServeDemo && farmEnabled && <CampaignFarmDialog open={!!farmCreation} onOpenChange={open => { if (!open) setFarmCreation(null); }} initialBoundary={farmCreation?.boundary} initialName={farmCreation?.name} />}
         {!isSelfServeDemo ? (
+          <MapInfoButton show={mapLoaded} besideContent={<div className="flex items-center gap-2">
           <StormMapsControl
+            inline
+            campaignCreation
             map={map.current}
             mapLoaded={mapLoaded}
             workspaceId={currentWorkspaceId}
@@ -2357,6 +2365,8 @@ export default function CreateCampaignPage() {
               }
             }}
           />
+          {farmEnabled ? <button type="button" disabled={!mapLoaded || loading || provisioning} onClick={() => setFarmCreation({ boundary: getDrawnPolygon(drawRef.current), name })} className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-emerald-200/60 bg-black px-3 text-xs font-semibold text-white disabled:opacity-50"><Sprout className="h-3 w-3 text-emerald-300" aria-hidden="true" />Farm</button> : null}
+          </div>} />
         ) : null}
         {!isSelfServeDemo && mapLoaded && map.current && (
           <UserLocationLayer

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readStormDisplay, DEFAULT_STORM_DISPLAY, IMPERIAL_UNITS } from '../display-settings';
+import { readStormDisplay, migrateStormDisplay, resolveStormBaseMap, DEFAULT_STORM_DISPLAY, IMPERIAL_UNITS } from '../display-settings';
 assert.deepEqual(readStormDisplay(null), DEFAULT_STORM_DISPLAY);
 const custom = readStormDisplay({ projection: 'globe', baseMap: 'light', unitSystem: 'custom', customUnits: { speed: 'kts', pressure: 'mb', intensity: 'in/hr', temperature: 'invalid' }, autoUpdateMinutes: 0, autoHideControls: true });
 assert.equal(custom.projection, 'globe'); assert.equal(custom.customUnits.speed, 'kts'); assert.equal(custom.customUnits.temperature, 'C'); assert.equal(custom.customUnits.intensity, 'in/hr'); assert.equal(custom.autoUpdateMinutes, 0);
@@ -7,4 +7,16 @@ assert.deepEqual(readStormDisplay({ unitSystem: 'imperial', customUnits: { speed
 assert.equal(readStormDisplay({ autoUpdateMinutes: 1, projection: 'invalid' }).autoUpdateMinutes, 10);
 assert.equal(readStormDisplay({ autoUpdateMinutes: null }).autoUpdateMinutes, 10);
 assert.notEqual(readStormDisplay(null).customUnits, DEFAULT_STORM_DISPLAY.customUnits);
+assert.equal(resolveStormBaseMap('auto', 'light'), 'mapbox://styles/mapbox/light-v11');
+assert.equal(resolveStormBaseMap('auto', 'dark'), 'mapbox://styles/mapbox/dark-v11');
+assert.equal(resolveStormBaseMap('light', 'dark'), 'mapbox://styles/mapbox/light-v11');
+assert.equal(resolveStormBaseMap('dark', 'light'), 'mapbox://styles/mapbox/dark-v11');
+assert.equal(resolveStormBaseMap('streets', 'light'), 'mapbox://styles/mapbox/streets-v12');
+assert.equal(readStormDisplay({ baseMap: 'invalid' }).baseMap, 'auto');
+assert.equal(readStormDisplay({ baseMap: 'dark' }).baseMap, 'dark');
+assert.equal(migrateStormDisplay({ baseMap: 'dark', unitSystem: 'imperial', projection: 'mercator' }).baseMap, 'auto');
+assert.equal(migrateStormDisplay({ baseMap: 'light' }).baseMap, 'light');
+assert.equal(migrateStormDisplay({ baseMap: 'streets' }).baseMap, 'streets');
+assert.equal(migrateStormDisplay({ unitSystem: 'imperial', projection: 'mercator' }).projection, 'mercator');
+assert.deepEqual(migrateStormDisplay({ unitSystem: 'imperial' }).customUnits, IMPERIAL_UNITS);
 console.log('Display settings: defaults, independent units, presets, persisted Off and invalid preference recovery passed');

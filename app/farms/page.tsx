@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 import { FarmIcon } from '@/components/icons/FarmIcon';
 
 export default function FarmsPage() {
@@ -8,8 +10,9 @@ export default function FarmsPage() {
       <FarmIcon className="w-12 h-12 text-primary mb-4" />
       <h2 className="text-lg font-semibold text-foreground mb-1">Select a farm</h2>
       <p className="text-sm text-muted-foreground max-w-sm">
-        Choose a farm from the list or create a new farm area to start working repeatable sessions.
+        Draw a farm, count its addresses, and split the doors into Monday–Friday lists. Keep your homes and contacts together.
       </p>
+      <Button asChild className="mt-5"><Link href="/farms/create">Create farm</Link></Button>
     </div>
   );
 }

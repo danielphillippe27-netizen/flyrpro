@@ -15,15 +15,14 @@ import {
   type DemoChoreographyBuilding,
   type DemoLiveChoreography,
 } from '@/lib/demo/team-live-map-choreography';
+import { TeamLiveActivity } from './TeamLiveActivity';
+import type { TeamLivePresence, TeamMapMember } from '@/lib/team-live-map-display';
 import { Card, CardContent } from '@/components/ui/card';
 
 const ROUTES_SOURCE_ID = 'team-routes';
 const ROUTES_LAYER_ID = 'team-routes-layer';
 const KNOCKS_SOURCE_ID = 'team-knocks';
 const KNOCKS_LAYER_ID = 'team-knocks-layer';
-const LIVE_SOURCE_ID = 'team-live-presence';
-const LIVE_LAYER_ID = 'team-live-presence-layer';
-const LIVE_LABEL_LAYER_ID = 'team-live-presence-labels';
 const LEGACY_DEMO_ASSIGNMENT_ROUTES_SOURCE_ID = 'team-demo-assignment-routes';
 const LEGACY_DEMO_ASSIGNMENT_ROUTES_LAYER_ID = 'team-demo-assignment-routes-layer';
 const DEMO_ASSIGNMENT_HOMES_SOURCE_ID = 'team-demo-assignment-homes';
@@ -32,7 +31,7 @@ const LEGACY_DEMO_ASSIGNMENT_HOMES_LINE_LAYER_ID = 'team-demo-assignment-homes-l
 const DEMO_ANIMATION_FRAME_MS = 120;
 const DEMO_COMPLETED_COLOR = '#16A34A';
 
-type MapMember = { user_id: string; display_name: string; color: string };
+type MapMember = TeamMapMember;
 type MapSession = {
   session_id: string;
   user_id: string;
@@ -45,24 +44,7 @@ type MapSession = {
   flyers_delivered?: number;
   path_geojson?: string | null;
 };
-type LivePresence = {
-  user_id: string;
-  display_name: string;
-  color: string;
-  campaign_id: string;
-  campaign_name: string;
-  session_id: string | null;
-  lat: number;
-  lng: number;
-  status: string;
-  updated_at: string | null;
-  started_at: string | null;
-  active_seconds: number;
-  distance_meters: number;
-  doors_hit: number;
-  conversations: number;
-  flyers_delivered: number;
-};
+type LivePresence = TeamLivePresence;
 
 type TeamMapTabProps = {
   range: { start: string; end: string };
@@ -452,7 +434,8 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
-  const liveFitKeyRef = useRef<string | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
 
   const [members, setMembers] = useState<MapMember[]>([]);
   const [sessions, setSessions] = useState<MapSession[]>([]);
@@ -472,6 +455,9 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   );
 
   const fetchMapData = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     if (demoLive) {
       setMembers(DEMO_LIVE_MEMBERS.map((member) => ({
         user_id: member.user_id,
@@ -504,11 +490,23 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     setError(null);
     try {
       const res = await fetch(
-        `/api/team/map?workspaceId=${encodeURIComponent(currentWorkspaceId)}&start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&mode=${encodeURIComponent(mapMode)}`
+        `/api/team/map?workspaceId=${encodeURIComponent(currentWorkspaceId)}&start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}&mode=${encodeURIComponent(mapMode)}`,
+        { signal: controller.signal, cache: 'no-store' }
       );
+      if (res.status === 401 || res.status === 403) {
+        setMembers([]);
+        setLivePresence([]);
+        setSessions([]);
+        setKnockEvents([]);
+        setLastSyncAt(null);
+        setError('Live Map access is unavailable. Sign in with an authorized team account.');
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      setMembers(data.members ?? []);
+      if (controller.signal.aborted) return;
+      setLastSyncAt(Date.now());
+      setMembers(((data.members ?? []) as MapMember[]).filter(member => memberIds.length === 0 || memberIds.includes(member.user_id)));
       setSessions(data.sessions ?? []);
       const liveRows = ((data.livePresence ?? []) as LivePresence[]).filter((row) => {
         if (!Number.isFinite(row.lat) || !Number.isFinite(row.lng)) return false;
@@ -524,14 +522,11 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
           return memberIds.includes(event.user_id ?? '');
         })
       );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load map data');
-      setMembers([]);
-      setSessions([]);
-      setKnockEvents([]);
-      setLivePresence([]);
+    } catch {
+      if (controller.signal.aborted) return;
+      setError('Could not refresh team activity. Last reported locations are shown; retrying automatically.');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [campaignId, currentWorkspaceId, demoAreaResolved, demoLive, range.start, range.end, mapMode, memberIds]);
 
@@ -580,7 +575,6 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         setDemoArea(area);
         setDemoChoreography(buildDemoChoreography(bundle, area));
         setDemoAreaResolved(true);
-        liveFitKeyRef.current = null;
       })
       .catch(() => {
         if (!cancelled) {
@@ -623,14 +617,13 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
   }, [demoArea, demoAssignmentHomes, demoElapsedMs, demoLive, mapMode]);
 
   useEffect(() => {
-    fetchMapData();
+    setLivePresence([]);
+    setMembers([]);
+    setLastSyncAt(null);
+    void fetchMapData();
+    return () => requestRef.current?.abort();
   }, [fetchMapData]);
 
-  useEffect(() => {
-    if (mapMode !== 'live') {
-      liveFitKeyRef.current = null;
-    }
-  }, [mapMode]);
 
   useEffect(() => {
     if (mapMode !== 'live' || demoLive) return;
@@ -661,20 +654,25 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         ...mapInitOptions,
         center: [-79.3832, 43.6532],
         zoom: 11,
+        pitch: mapMode === 'live' ? 45 : 0,
       });
+      map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
       map.on('load', () => setMapLoaded(true));
       mapRef.current = map;
     };
 
-    void initMap();
+    void initMap().catch(() => {
+      if (!cancelled) setError('The map could not load. Refresh the page to try again.');
+    });
     return () => {
       cancelled = true;
+      setMapLoaded(false);
       mapRef.current?.remove();
       mapRef.current = null;
       popupRef.current?.remove();
       popupRef.current = null;
     };
-  }, [resolvedMapStyle]);
+  }, [resolvedMapStyle, mapMode]);
 
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
@@ -918,112 +916,6 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     };
   }, [demoChoreography, demoElapsedMs, demoLive, mapLoaded, mapMode]);
 
-  // Live agent puck layer
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded) return;
-
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = livePresence.map((row) => ({
-      type: 'Feature',
-      id: row.user_id,
-      properties: {
-        user_id: row.user_id,
-        display_name: row.display_name,
-        campaign_name: row.campaign_name,
-        color: row.color,
-        status: row.status,
-        updated_at: row.updated_at,
-        started_at: row.started_at,
-        active_seconds: row.active_seconds,
-        distance_meters: row.distance_meters,
-        doors_hit: row.doors_hit,
-        conversations: row.conversations,
-        flyers_delivered: row.flyers_delivered,
-      },
-      geometry: {
-        type: 'Point',
-        coordinates: [row.lng, row.lat],
-      },
-    }));
-
-    const geo: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: 'FeatureCollection', features };
-    const ensureLiveLayer = () => {
-      try {
-        const existing = map.getSource(LIVE_SOURCE_ID);
-        if (existing && 'setData' in existing) {
-          (existing as mapboxgl.GeoJSONSource).setData(geo);
-        } else if (!existing) {
-          map.addSource(LIVE_SOURCE_ID, { type: 'geojson', data: geo });
-        }
-        if (!map.getLayer(LIVE_LAYER_ID)) {
-          map.addLayer({
-            id: LIVE_LAYER_ID,
-            type: 'circle',
-            source: LIVE_SOURCE_ID,
-            paint: {
-              'circle-radius': ['case', ['==', ['get', 'status'], 'paused'], 8, 10],
-              'circle-color': ['get', 'color'],
-              'circle-opacity': ['case', ['==', ['get', 'status'], 'paused'], 0.58, 0.95],
-              'circle-stroke-width': 3,
-              'circle-stroke-color': '#FFFFFF',
-            },
-          });
-        }
-        if (!map.getLayer(LIVE_LABEL_LAYER_ID)) {
-          map.addLayer({
-            id: LIVE_LABEL_LAYER_ID,
-            type: 'symbol',
-            source: LIVE_SOURCE_ID,
-            layout: {
-              'text-field': ['get', 'display_name'],
-              'text-size': 12,
-              'text-offset': [0, 1.45],
-              'text-anchor': 'top',
-              'text-allow-overlap': demoLive,
-              'text-ignore-placement': demoLive,
-            },
-            paint: {
-              'text-color': '#111827',
-              'text-halo-color': '#FFFFFF',
-              'text-halo-width': 1.4,
-            },
-          });
-        }
-        const liveVisibility = mapMode === 'live' ? 'visible' : 'none';
-        map.setLayoutProperty(LIVE_LAYER_ID, 'visibility', liveVisibility);
-        map.setLayoutProperty(LIVE_LABEL_LAYER_ID, 'visibility', liveVisibility);
-      } catch (e) {
-        console.error('TeamMapTab live layer:', e);
-      }
-    };
-
-    // Mapbox GL JS v3: isStyleLoaded() is unreliable immediately after the load
-    // event. Try immediately (works if style is ready), then retry on idle as
-    // a guaranteed fallback once all tiles and style resources have settled.
-    ensureLiveLayer();
-    map.once('idle', ensureLiveLayer);
-
-    return () => {
-      map.off('idle', ensureLiveLayer);
-    };
-  }, [demoLive, livePresence, mapLoaded, mapMode]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded || demoLive || mapMode !== 'live' || livePresence.length === 0) return;
-    const fitKey = livePresence
-      .map((row) => row.user_id)
-      .sort()
-      .join(',');
-    if (liveFitKeyRef.current === fitKey) return;
-    liveFitKeyRef.current = fitKey;
-    const bounds = new mapboxgl.LngLatBounds();
-    livePresence.forEach((row) => bounds.extend([row.lng, row.lat]));
-    if (!bounds.isEmpty()) {
-      map.fitBounds(bounds, { padding: 72, maxZoom: 15, duration: 600 });
-    }
-  }, [demoLive, livePresence, mapLoaded, mapMode]);
-
   // Route click popup
   useEffect(() => {
     const map = mapRef.current;
@@ -1059,44 +951,6 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
     };
   }, [mapLoaded, mapMode]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoaded || mapMode !== 'live') return;
-
-    const onLiveClick = (e: mapboxgl.MapLayerMouseEvent) => {
-      const f = e.features?.[0];
-      if (!f?.properties) return;
-      popupRef.current?.remove();
-      const props = f.properties as Record<string, unknown>;
-      const doors = Number(props.doors_hit ?? 0) || 0;
-      const convos = Number(props.conversations ?? 0) || 0;
-      const flyers = Number(props.flyers_delivered ?? 0) || 0;
-      const distance = `${((Number(props.distance_meters ?? 0) || 0) / 1000).toFixed(2)} km`;
-      const elapsed = formatLiveDuration(props.started_at, props.active_seconds);
-      const updated = formatRelativeUpdate(props.updated_at);
-
-      popupRef.current = new mapboxgl.Popup({ closeButton: true, closeOnClick: false })
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div class="p-2 min-w-[190px]">
-            <p class="font-semibold text-sm">${escapeHtml(String(props.display_name ?? 'Member'))}</p>
-            <p class="text-xs text-gray-500 mt-1">${escapeHtml(String(props.campaign_name ?? 'Campaign'))}</p>
-            <p class="text-xs text-gray-500">${escapeHtml(updated)} · ${escapeHtml(String(props.status ?? 'active'))}</p>
-            <p class="text-xs mt-2">Doors: ${doors} · Convos: ${convos} · Flyers: ${flyers}</p>
-            <p class="text-xs">Time: ${escapeHtml(elapsed)} · Distance: ${escapeHtml(distance)}</p>
-          </div>`
-        )
-        .addTo(map);
-    };
-
-    map.on('click', LIVE_LAYER_ID, onLiveClick);
-    return () => {
-      map.off('click', LIVE_LAYER_ID, onLiveClick);
-      popupRef.current?.remove();
-      popupRef.current = null;
-    };
-  }, [mapLoaded, mapMode]);
-
   const completedDemoHomeCount = demoChoreography
     ? completedAssignedHomes(demoChoreography, demoElapsedMs)
     : 0;
@@ -1117,9 +971,14 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         </Card>
       )}
 
-      <div className="relative rounded-xl border border-border overflow-hidden bg-card" style={{ minHeight: 400 }}>
-        <div ref={mapContainerRef} className="w-full h-[420px]" />
-        {loading && (
+      <div className={mapMode === 'live' ? 'flex flex-col-reverse overflow-hidden rounded-2xl border border-border bg-card lg:flex-row' : ''}>
+      {mapMode === 'live' && (
+        <TeamLiveActivity map={mapLoaded ? mapRef.current : null} members={members} presence={livePresence}
+          loading={loading} error={error} lastSyncAt={lastSyncAt} demo={demoLive} onRefresh={() => void fetchMapData()} />
+      )}
+      <div className="relative min-w-0 flex-1 overflow-hidden rounded-xl border border-border bg-card" style={{ minHeight: 400 }}>
+        <div ref={mapContainerRef} className={mapMode === 'live' ? 'h-[480px] w-full lg:h-[680px]' : 'h-[420px] w-full'} />
+        {loading && !lastSyncAt && (
           <div className="absolute top-4 left-4 z-10 bg-background/80 px-3 py-1.5 rounded text-sm shadow">
             Loading…
           </div>
@@ -1180,6 +1039,8 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
         ) : null}
       </div>
 
+      </div>
+
       {mapMode === 'knocked_homes' && knockEvents.length === 0 && !loading && (
         <p className="text-sm text-muted-foreground">No knock locations with coordinates in this period.</p>
       )}
@@ -1188,28 +1049,6 @@ export function TeamMapTab({ range, memberIds, mapMode, demoLive = false, campai
       )}
     </div>
   );
-}
-
-function formatLiveDuration(startedAt: unknown, activeSeconds: unknown): string {
-  const active = Number(activeSeconds ?? 0) || 0;
-  const started =
-    typeof startedAt === 'string' && startedAt
-      ? Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000))
-      : 0;
-  const seconds = Math.max(active, started);
-  if (seconds <= 0) return '0 min';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${Math.max(1, minutes)} min`;
-}
-
-function formatRelativeUpdate(value: unknown): string {
-  if (typeof value !== 'string' || !value) return 'No update time';
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return `Updated ${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  return `Updated ${minutes}m ago`;
 }
 
 function escapeHtml(s: string): string {

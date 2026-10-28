@@ -45,6 +45,8 @@ export type StormMapsManifest = {
   generatedAt: string;
   expiresAt: string;
   tileToken: string;
+  /** Short-lived weather-only capability for cookie-free native WebViews. */
+  glToken?: string;
   radarProvider: 'iem' | 'eccc' | 'xweather';
   layers: StormRasterLayer[];
   featureEndpoint: string;

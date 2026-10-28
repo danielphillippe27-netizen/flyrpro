@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -13,9 +13,20 @@ import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
 
 export default function LandingPage() {
   const router = useRouter();
+  const [demoTrackingQuery, setDemoTrackingQuery] = useState('');
+  const interactiveDemoHref = `/demo1?full=1&start=fresh${demoTrackingQuery ? `&${demoTrackingQuery}` : ''}`;
+  const freeCampaignHref = demoTrackingQuery
+    ? `/login?next=${encodeURIComponent(`/onboarding?${demoTrackingQuery}`)}`
+    : '/login';
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const tracking = new URLSearchParams();
+    for (const key of ['referralCode', 'source', 'campaign', 'demoLink']) {
+      const value = params.get(key) || (key === 'referralCode' ? params.get('ref') : null);
+      if (value) tracking.set(key, value);
+    }
+    setDemoTrackingQuery(tracking.toString());
     const code = params.get('code');
     const error = params.get('error');
     const errorCode = params.get('error_code');
@@ -51,7 +62,7 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-[#f7f5f2] text-zinc-950">
-      <PublicSiteHeader showAmbassador={false} primaryAction={{ href: "/demo1?start=fresh", label: "Interactive demo" }} />
+      <PublicSiteHeader showAmbassador={false} primaryAction={{ href: "#demo", label: "Watch demo" }} />
 
       <main>
         <section className="px-5 py-12 md:px-8 lg:py-12">
@@ -64,8 +75,8 @@ export default function LandingPage() {
                 The territory and door-to-door sales app that keeps your map, your team, and your follow-ups together.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link href="/demo1?start=fresh" className="inline-flex h-13 items-center justify-center rounded-full bg-red-600 px-7 text-sm font-bold text-white transition hover:bg-red-700">
-                  Interactive demo <ArrowRight className="ml-2 h-4 w-4" />
+                <Link href="#demo" className="inline-flex h-13 items-center justify-center rounded-full bg-red-600 px-7 text-sm font-bold text-white transition hover:bg-red-700">
+                  <Play className="mr-2 h-4 w-4 fill-current" aria-hidden="true" /> Watch demo
                 </Link>
               </div>
             </div>
@@ -101,27 +112,29 @@ export default function LandingPage() {
               </div>
               <p className="max-w-lg text-lg leading-8 text-zinc-400">Explore your campaign in 3D. Keep addresses and activity in one view, so you can see where to work and where to return.</p>
             </div>
-            <Link href="/demo1?start=fresh" aria-label="Play the WolfGrid interactive demo" className="group relative mt-9 block overflow-hidden rounded-2xl border border-white/15 bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-red-500">
-              <Image src="/landing/interactive-demo-cover.png" alt="WolfGrid 3D neighborhood map with color-coded campaign results" width={2622} height={1206} sizes="(min-width: 1280px) 1280px, 100vw" className="h-auto w-full" />
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/15 transition group-hover:bg-black/25">
-                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-white shadow-xl transition group-hover:scale-110 group-hover:bg-red-500 sm:h-24 sm:w-24">
-                  <Play className="ml-1 h-7 w-7 fill-current sm:h-10 sm:w-10" aria-hidden="true" />
-                </span>
-                <span className="rounded-full bg-black/80 px-5 py-2 text-sm font-bold text-white sm:text-base">Launch interactive demo</span>
+            <div id="demo" className="mt-9 scroll-mt-28 overflow-hidden rounded-2xl border border-white/15 bg-zinc-900">
+              <iframe
+                src="https://iframe.videodelivery.net/efb7769ec5cdce81732b3d3f669bc30e?controls=true&preload=metadata"
+                title="Watch the WolfGrid demo"
+                className="aspect-video w-full border-0"
+                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+              <div>
+                <h3 className="text-xl font-bold">Ready to try it yourself?</h3>
+                <p className="mt-2 text-sm text-zinc-400">Learn more with the full demo, or sign up to start your first campaign free.</p>
               </div>
-            </Link>
-          </div>
-        </section>
-
-        <section className="bg-red-600 px-5 py-16 text-white md:px-8 md:py-20">
-          <div className="mx-auto flex max-w-7xl flex-col justify-between gap-8 lg:flex-row lg:items-center">
-            <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-white/80">Try it for yourself</p><h2 className="mt-4 text-4xl font-black leading-[1.05] tracking-[-0.04em] md:text-5xl">Put your next territory<br />on the grid.</h2><p className="mt-5 text-base text-white/90">Explore WolfGrid in the interactive demo, then start your first campaign free.</p></div>
-            <div className="flex flex-col gap-3 sm:flex-row lg:flex-col">
-              <Link href="/demo1?start=fresh" className="inline-flex h-13 items-center justify-center rounded-full bg-white px-8 text-sm font-bold text-zinc-950 transition hover:bg-zinc-100">Interactive demo <ArrowRight className="ml-2 h-4 w-4" /></Link>
-              <Link href="/plans" className="inline-flex h-13 items-center justify-center rounded-full border border-white/50 px-8 text-sm font-bold transition hover:bg-white/10">View pricing</Link>
+              <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
+                <Link href={interactiveDemoHref} className="inline-flex h-13 items-center justify-center rounded-full border border-white/30 px-6 text-sm font-bold text-white transition hover:bg-white/10">Learn more</Link>
+                <Link href={freeCampaignHref} className="inline-flex h-13 items-center justify-center rounded-full bg-red-600 px-6 text-sm font-bold text-white transition hover:bg-red-700">Sign up <ArrowRight className="ml-2 h-4 w-4" /></Link>
+              </div>
             </div>
           </div>
         </section>
+
       </main>
 
       <PublicSiteFooter />

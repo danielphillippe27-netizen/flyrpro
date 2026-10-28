@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { stormContext, stormError } from '@/lib/storm-maps/intelligence/access';
 import { stormTerritorySchema } from '@/lib/storm-maps/intelligence/storm-territories';
 import { partitionStormCampaigns } from '@/lib/storm-maps/intelligence/campaign-partitions';
+import { LARGE_STORM_TERRITORY_GUIDANCE, MAX_STORM_CAMPAIGN_HOMES, stormNeedsTerritoryOverlay } from '@/lib/storm-maps/intelligence/campaign-policy';
 import { resolveCampaignRegion, resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 import { BEDROCK_CANADA_CONFIG, BEDROCK_US_CONFIG, BedrockCountryService } from '@/lib/services/BedrockCountryService';
 import regions from '@/scripts/regions.json';
@@ -35,6 +36,8 @@ export async function POST(request: NextRequest) {
     })));
     const pins = scans.flatMap(scan => scan.addresses.map((address, index) => ({ id: scan.ids[index], lon: Number(address.lon), lat: Number(address.lat) })));
     if (pins.some(pin => !Number.isFinite(pin.lon) || !Number.isFinite(pin.lat))) throw new Error('Some addresses have invalid coordinates.');
+    const addressCount = new Set(pins.filter(pin => booleanPointInPolygon(point([pin.lon, pin.lat]), boundary)).map(pin => pin.id)).size;
+    if (stormNeedsTerritoryOverlay(addressCount)) return NextResponse.json({ territoryOnly: true, addressCount, maximumHomes: MAX_STORM_CAMPAIGN_HOMES, message: LARGE_STORM_TERRITORY_GUIDANCE, parts: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
     const parts = polygons.flatMap(polygon => { const contained = pins.filter(pin => booleanPointInPolygon(point([pin.lon, pin.lat]), polygon)); return contained.length ? partitionStormCampaigns(polygon, contained) : []; });
     if (!parts.length) throw new Error('No campaign addresses were found in this territory.');
     return NextResponse.json({ parts, name: parsed.data.name, context: { ...parsed.data.context, territoryId: body.territoryId, selectedAt: new Date().toISOString() } }, { headers: { 'Cache-Control': 'private, no-store' } });

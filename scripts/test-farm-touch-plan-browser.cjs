@@ -1,0 +1,67 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+const { build } = require('esbuild');
+const { compile } = require('@tailwindcss/node');
+const { chromium } = require('playwright');
+
+(async () => {
+  const root = process.cwd();
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'wolfgrid-farm-review-'));
+  let browser, server;
+  try {
+    const entry = path.join(temp, 'entry.tsx');
+    await fs.writeFile(entry, `import React, {useState} from 'react'; import { createRoot } from 'react-dom/client'; import { FarmTouchPlan } from ${JSON.stringify(path.join(root, 'components/farms/FarmTouchPlan.tsx'))};
+    const initial=[{slotId:'next',touchId:'next',sequenceNumber:2,cycleNumber:2,suggestedDate:'2026-11-01',scheduledDate:'2026-11-01',mode:'social_ad',title:'Neighbourhood campaign',notes:'',homesTarget:'100'}];
+    const touches=[{id:'done',farm_id:'farm',cycle_number:1,scheduled_date:'2026-09-15',completed_date:'2026-09-16',status:'completed',mode:'flyer',title:'Fall flyer',homes_target:100,homes_reached:95}];
+    function App(){ const [drafts,setDrafts]=useState(initial);const [message,setMessage]=useState('');return <main className="p-4"><FarmTouchPlan drafts={drafts} touches={touches} saving={false} message={message} onChange={(id,field,value)=>setDrafts(d=>d.map(item=>item.slotId===id?{...item,[field]:value}:item))} onRemove={id=>setDrafts(d=>d.filter(item=>item.slotId!==id))} onAdd={()=>setDrafts(d=>[...d,{...initial[0],slotId:'added',touchId:null,title:'',cycleNumber:3}])} onReset={()=>setDrafts(initial)} onSave={()=>setMessage('Plan saved. Your timeline is up to date.')}/></main>};createRoot(document.getElementById('root')).render(<App/>);`);
+    await build({ entryPoints: [entry], outfile: path.join(temp, 'app.js'), bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic', nodePaths: [path.join(root, 'node_modules')], tsconfig: path.join(root, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"development"' } });
+    const compiler = await compile(await fs.readFile(path.join(root, 'app/globals.css'), 'utf8'), { base: path.join(root, 'app'), onDependency() {} });
+    const source = (await Promise.all(['components/farms/FarmTouchPlan.tsx', 'components/ui/button.tsx', 'components/ui/input.tsx', 'components/ui/label.tsx'].map(file => fs.readFile(path.join(root, file), 'utf8')))).join('\n');
+    const candidates = source.match(/[A-Za-z0-9_\-:/.[\]%#(),]+/g) || [];
+    await fs.writeFile(path.join(temp, 'style.css'), compiler.build(candidates));
+    server = http.createServer(async (req, res) => {
+      const filename = req.url === '/app.js' ? 'app.js' : req.url === '/style.css' ? 'style.css' : null;
+      if (filename) { res.setHeader('Content-Type', filename.endsWith('.css') ? 'text/css' : 'text/javascript'); res.end(await fs.readFile(path.join(temp, filename))); return; }
+      res.setHeader('Content-Type', 'text/html'); res.end('<html class="dark"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"><body><div id="root"></div><script src="/app.js"></script></body></html>');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    browser = await chromium.launch({ headless: true, channel: 'chrome' });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.getByRole('heading', { name: 'Your touchpoint plan' }).waitFor();
+    assert.equal(await page.getByLabel('Touchpoint 1 type').inputValue(), 'social_ad');
+    assert.equal(await page.getByLabel('Touchpoint 1 type').locator('option').count(), 8);
+    await page.getByLabel('Touchpoint 1 title').fill('Winter pop by');
+    await page.getByLabel('Touchpoint 1 type').selectOption('pop_by');
+    await page.getByLabel('Touchpoint 1 date').fill('2026-12-03');
+    await page.getByRole('button', { name: 'Details for touchpoint 1' }).click();
+    await page.getByLabel('Target homes').fill('150');
+    await page.getByLabel('Notes', { exact: true }).fill('Bring market report');
+    await page.getByRole('button', { name: 'Save plan', exact: true }).click();
+    await page.getByRole('status').filter({hasText:'Plan saved'}).waitFor();
+    await page.getByRole('button', { name: 'Details for touchpoint 1' }).click();
+    await page.getByRole('button', { name: 'Edit Winter pop by', exact: true }).press('Enter');
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    assert.equal(await page.getByLabel('Notes', {exact:true}).inputValue(), 'Bring market report');
+    await page.screenshot({ path: path.join(temp, 'desktop.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Remove Winter pop by', exact: true }).click();
+    await page.getByText('No upcoming touchpoints. Add one to start your plan.').waitFor();
+    assert.equal(await page.getByText('Fall flyer', {exact:true}).count(), 1);
+    await page.getByRole('button', { name: 'Add touchpoint', exact: true }).click();
+    assert.equal(await page.getByLabel('Touchpoint 1 title').inputValue(), '');
+    await page.getByRole('button', { name: 'Undo changes', exact: true }).click();
+    assert.equal(await page.getByLabel('Touchpoint 1 title').inputValue(), 'Neighbourhood campaign');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('group', {name: /Cumulative touchpoint progress/}).waitFor();
+    const chartBox = await page.getByRole('group', {name: /Cumulative touchpoint progress/}).boundingBox();
+    assert(chartBox.width < 390 && chartBox.height > 200, 'Phone graph should fit the screen with readable labels');
+    await page.screenshot({ path: path.join(temp, 'mobile.png'), fullPage: true });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Mobile layout overflows');
+    assert.deepEqual(errors, []);
+    console.log(`Touchpoint planner checks passed: all eight types, edits, details, save callback, timeline edit/remove, add, undo, history preservation, mobile layout. Screenshots: ${temp}`);
+  } finally { await browser?.close(); if (server) await new Promise(resolve => server.close(resolve)); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

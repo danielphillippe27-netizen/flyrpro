@@ -22,6 +22,7 @@ type CloudflareChapterPlayerProps = {
   eyebrow: string;
   showChapterHeader?: boolean;
   autoPlayWithSound?: boolean;
+  startLabel?: string;
   holdAtEnd?: boolean;
   stopAtSeconds?: number;
   completionOverlay?: ReactNode;
@@ -62,6 +63,7 @@ export function CloudflareChapterPlayer({
   eyebrow,
   showChapterHeader = true,
   autoPlayWithSound = false,
+  startLabel,
   holdAtEnd = false,
   stopAtSeconds,
   completionOverlay,
@@ -252,7 +254,7 @@ export function CloudflareChapterPlayer({
                 <span className="mr-4 grid size-10 place-items-center rounded-full bg-red-500 text-white">
                   {starting ? <Loader2 className="size-5 animate-spin" /> : playbackError ? <RotateCcw className="size-5" /> : <Play className="size-5 fill-current" />}
                 </span>
-                {playbackError ? 'Try playing again' : autoPlayWithSound ? 'Play with sound' : 'Continue with sound'}
+                {playbackError ? 'Try playing again' : autoPlayWithSound ? 'Play with sound' : startLabel ?? 'Continue with sound'}
                 <Volume2 className="ml-3 size-5 text-red-500" />
               </button>
               {playbackError ? (

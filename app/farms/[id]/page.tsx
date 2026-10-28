@@ -1,19 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { useParams } from 'next/navigation';
 import {
   BarChart3,
   CalendarDays,
-  CheckCircle2,
   Clock3,
   DollarSign,
-  Home,
   ListTodo,
   Mailbox,
   MapPinned,
-  PlayCircle,
   Search,
   Settings2,
   TrendingUp,
@@ -50,7 +48,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Progress } from '@/components/ui/progress';
+import { FarmPerformanceDashboard } from '@/components/farms/FarmPerformanceDashboard';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
 import { FarmMapView } from '@/components/farms/FarmMapView';
 import { FinancePanel } from '@/components/finance/FinancePanel';
@@ -69,7 +67,11 @@ import {
   normalizeFarmTouchTypes,
 } from '@/lib/farms/config';
 import { buildFarmDashboardAnalytics } from '@/lib/farms/analytics';
-import { buildCadenceTouchPlan, formatDateInput } from '@/lib/farms/plan';
+import { localPlanDate, saveTouchPlan } from '@/lib/farms/touch-plan';
+import { FarmTouchPlan, type PlannerTouchDraft } from '@/components/farms/FarmTouchPlan';
+import { FarmDoorPlanner } from '@/components/farms/FarmDoorPlanner';
+import settingsStyles from '@/components/farms/FarmSettings.module.css';
+import { formatDateInput } from '@/lib/farms/plan';
 import {
   buildLegacyCampaignText,
   isMissingCampaignColumnErrorMessage,
@@ -87,26 +89,8 @@ const MODE_LABELS: Record<FarmSessionMode, string> = {
   event: 'Event',
 };
 
-type ActivityItem =
-  | { id: string; type: 'session'; timestamp: string; title: string; description: string; touchId: string }
-  | { id: string; type: 'lead'; timestamp: string; title: string; description: string; touchId?: string | null }
-  | { id: string; type: 'contact'; timestamp: string; title: string; description: string; touchId?: string | null };
-
 type DashboardScope = 'current_cycle' | 'all_time';
 type MapLayerScope = 'all_time' | 'cycle';
-type PlannerTouchDraft = {
-  slotId: string;
-  touchId: string | null;
-  sequenceNumber: number;
-  cycleNumber: number;
-  suggestedDate: string;
-  scheduledDate: string;
-  mode: FarmSessionMode;
-  title: string;
-  notes: string;
-  homesTarget: string;
-};
-
 type PlannerTouchSlot = PlannerTouchDraft;
 
 type CampaignWithLegacyDescription = CampaignV2 & {
@@ -193,15 +177,6 @@ function formatEveryDaysLabel(value: number | null): string {
   return `Every ${rounded} day${rounded === 1 ? '' : 's'}`;
 }
 
-function formatAgeLabel(days: number | null): string {
-  if (days == null) return 'Age unavailable';
-  if (days <= 0) return 'Starts today';
-  if (days === 1) return '1 day old';
-  if (days < 30) return `${days} days old`;
-  const months = Math.floor(days / 30);
-  return `${months} month${months === 1 ? '' : 's'} old`;
-}
-
 function formatSupabaseError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
@@ -246,12 +221,14 @@ export default function FarmPage() {
   const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('plan');
+  }, []);
   const [overviewScope, setOverviewScope] = useState<DashboardScope>('current_cycle');
+  const [chartSessionIds, setChartSessionIds] = useState<string[] | null>(null);
   const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
   const [showMapContactsOverlay, setShowMapContactsOverlay] = useState(true);
   const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
-  const [selectedCycleFilter, setSelectedCycleFilter] = useState<string>('all');
-  const [selectedTouchFilter, setSelectedTouchFilter] = useState<string>('all');
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTouch, setSelectedTouch] = useState<FarmTouch | null>(null);
@@ -264,6 +241,9 @@ export default function FarmPage() {
   const [homesReached, setHomesReached] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [planMessage, setPlanMessage] = useState('');
+  const [planError, setPlanError] = useState('');
+  const pendingPlanCreations = useRef(new Map<string, FarmTouch>());
   const [planDrafts, setPlanDrafts] = useState<PlannerTouchDraft[]>([]);
   const [savingConfig, setSavingConfig] = useState(false);
   const [mapTabVersion, setMapTabVersion] = useState(0);
@@ -318,7 +298,7 @@ export default function FarmPage() {
           ? ContactsService.fetchContacts(resolvedUserId, currentWorkspaceId, { farmId })
           : Promise.resolve([]),
         FinanceService.fetchEntriesForTarget({ farmId }).catch(() => []),
-        FarmTouchOutcomeService.fetchOutcomes(farmId).catch(() => []),
+        FarmTouchOutcomeService.fetchOutcomes(farmId),
         fetch(`/api/farms/${farmId}/campaign`, {
           credentials: 'include',
         })
@@ -426,14 +406,6 @@ export default function FarmPage() {
         })),
     [resolvedTouches]
   );
-  const filteredTouches = useMemo(
-    () =>
-      selectedCycleFilter === 'all'
-        ? resolvedTouches
-        : resolvedTouches.filter((touch) => String(touch.resolvedCycleNumber) === selectedCycleFilter),
-    [resolvedTouches, selectedCycleFilter]
-  );
-
   useEffect(() => {
     if (!farm) return;
     setConfigName(farm.name ?? '');
@@ -503,68 +475,6 @@ export default function FarmPage() {
     },
     [currentFlyerUrl, farmCampaignNotes, farmScripts]
   );
-
-  const activityItems = useMemo<ActivityItem[]>(() => {
-    const allowedTouchIds =
-      selectedCycleFilter === 'all' ? null : new Set(filteredTouches.map((touch) => touch.id));
-    const sessionItems: ActivityItem[] = resolvedTouches.flatMap((touch) => {
-      const items: ActivityItem[] = [
-        {
-          id: `${touch.id}:scheduled`,
-          type: 'session',
-          timestamp: touch.scheduled_date,
-          title: `${MODE_LABELS[touch.mode ?? 'doorknock']} session scheduled`,
-          description: touch.title || 'Session added to this farm.',
-          touchId: touch.id,
-        },
-      ];
-
-      if (touch.completed_date) {
-        items.push({
-          id: `${touch.id}:completed`,
-          type: 'session',
-          timestamp: touch.completed_date,
-          title: `${MODE_LABELS[touch.mode ?? 'doorknock']} session completed`,
-          description:
-            touch.homes_reached != null
-              ? `${touch.homes_reached} homes reached`
-              : touch.notes || 'Completed without a recorded home count.',
-          touchId: touch.id,
-        });
-      }
-
-      return items;
-    });
-
-    const leadItems: ActivityItem[] = leads.map((lead) => ({
-      id: lead.id,
-      type: 'lead',
-      timestamp: lead.created_at,
-      title: lead.name || 'New lead captured',
-      description: `Source: ${lead.lead_source}`,
-      touchId: lead.touch_id ?? null,
-    }));
-
-    const contactItems: ActivityItem[] = contacts.map((contact) => ({
-      id: contact.id,
-      type: 'contact',
-      timestamp: contact.created_at,
-      title: contact.full_name || 'New contact created',
-      description: contact.address || 'CRM contact linked to this farm.',
-      touchId: null,
-    }));
-
-    return [...sessionItems, ...leadItems, ...contactItems]
-      .filter((item) => (allowedTouchIds ? (item.touchId ? allowedTouchIds.has(item.touchId) : false) : true))
-      .filter((item) => selectedTouchFilter === 'all' || item.touchId === selectedTouchFilter)
-      .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
-  }, [contacts, filteredTouches, leads, resolvedTouches, selectedCycleFilter, selectedTouchFilter]);
-
-  useEffect(() => {
-    if (selectedTouchFilter === 'all') return;
-    if (filteredTouches.some((touch) => touch.id === selectedTouchFilter)) return;
-    setSelectedTouchFilter('all');
-  }, [filteredTouches, selectedTouchFilter]);
 
   useEffect(() => {
     if (resolvedTouches.length === 0) {
@@ -654,53 +564,6 @@ export default function FarmPage() {
     };
   }, [analytics.currentCycleLabel, kpis, overviewScope]);
 
-  const planningSummary = useMemo(() => {
-    if (!farm) {
-      return {
-        farmAge: 'Age unavailable',
-        completedSinceLaunch: 0,
-        goal: 'No goal set',
-        pace: 'No pace data yet',
-        cycleWindow: 'No completion window set',
-      };
-    }
-
-    const goalType = getFarmGoalType(farm);
-    const goalTarget = getFarmGoalTarget(farm);
-    const startDate = new Date(farm.start_date);
-    const hasValidStartDate = !Number.isNaN(startDate.getTime());
-    const ageDays = hasValidStartDate
-      ? Math.max(0, Math.floor((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)))
-      : null;
-    const completedSinceLaunch = resolvedTouches.filter((touch) => {
-      if (touch.status !== 'completed' || !touch.effectiveDate || !hasValidStartDate) return false;
-      return new Date(touch.effectiveDate).getTime() >= startDate.getTime();
-    }).length;
-
-    let pace = 'No pace data yet';
-    if (goalType === 'touches_per_year') {
-      if (ageDays != null) {
-        const annualizedTouches = ageDays === 0 ? completedSinceLaunch : (completedSinceLaunch / ageDays) * 365;
-        pace = `${formatMetricValue(annualizedTouches)} / ${goalTarget} touches per year pace`;
-      }
-    } else if (goalType === 'touches_per_cycle') {
-      pace = `${kpis.cycleTouches.length.toLocaleString()} / ${goalTarget.toLocaleString()} touches in ${kpis.currentCycleLabel.toLowerCase()}`;
-    } else {
-      pace = `${kpis.cycleVisits.toLocaleString()} / ${goalTarget.toLocaleString()} homes in ${kpis.currentCycleLabel.toLowerCase()}`;
-    }
-
-    return {
-      farmAge: formatAgeLabel(ageDays),
-      completedSinceLaunch,
-      goal: formatFarmGoal(farm),
-      pace,
-      cycleWindow:
-        farm.cycle_completion_window_days != null
-          ? `Complete each cycle within ${farm.cycle_completion_window_days} day${farm.cycle_completion_window_days === 1 ? '' : 's'}`
-          : 'No completion window set',
-    };
-  }, [farm, kpis, resolvedTouches]);
-
   const defaultPlannedHomesTarget = useMemo(() => {
     if (!farm || getFarmGoalType(farm) !== 'homes_per_cycle') return '';
     return String(getFarmGoalTarget(farm));
@@ -709,7 +572,6 @@ export default function FarmPage() {
   const plannerSlots = useMemo<PlannerTouchSlot[]>(() => {
     if (!farm) return [];
 
-    const generatedDates = buildCadenceTouchPlan(farm, 12);
     const scheduledTouches = resolvedTouches
       .filter((touch) => touch.status === 'scheduled')
       .sort(
@@ -717,25 +579,14 @@ export default function FarmPage() {
           new Date(left.scheduled_date).getTime() - new Date(right.scheduled_date).getTime()
       );
 
-    return generatedDates.map((slot, index) => {
-      const touch = scheduledTouches[index] ?? null;
-
-      return {
-        slotId: touch?.id ?? `planned-${slot.sequenceNumber}`,
-        touchId: touch?.id ?? null,
-        sequenceNumber: slot.sequenceNumber,
-        cycleNumber: touch?.resolvedCycleNumber ?? slot.cycleNumber,
-        suggestedDate: slot.suggestedDate,
-        scheduledDate: touch ? formatDateInput(touch.scheduled_date) : slot.suggestedDate,
-        mode: touch?.mode ?? 'doorknock',
-        title: touch?.title ?? '',
-        notes: touch?.notes ?? '',
-        homesTarget:
-          typeof touch?.homes_target === 'number'
-            ? String(touch.homes_target)
-            : defaultPlannedHomesTarget,
-      };
-    });
+    return scheduledTouches.map((touch, index) => ({
+      slotId: touch.id, touchId: touch.id, sequenceNumber: index + 1,
+      cycleNumber: touch.resolvedCycleNumber,
+      suggestedDate: formatDateInput(touch.scheduled_date),
+      scheduledDate: formatDateInput(touch.scheduled_date),
+      mode: touch.mode ?? 'doorknock', title: touch.title ?? '', notes: touch.notes ?? '',
+      homesTarget: touch.homes_target != null ? String(touch.homes_target) : defaultPlannedHomesTarget,
+    }));
   }, [defaultPlannedHomesTarget, farm, resolvedTouches]);
 
   useEffect(() => {
@@ -1241,6 +1092,8 @@ export default function FarmPage() {
 
   const handlePlanDraftChange = useCallback(
     (slotId: string, field: keyof Omit<PlannerTouchDraft, 'slotId' | 'touchId' | 'sequenceNumber' | 'cycleNumber' | 'suggestedDate'>, value: string) => {
+      setPlanMessage('');
+      setPlanError('');
       setPlanDrafts((current) =>
         current.map((draft) => (draft.slotId === slotId ? { ...draft, [field]: value } : draft))
       );
@@ -1250,63 +1103,39 @@ export default function FarmPage() {
 
   const handleResetPlan = useCallback(() => {
     setPlanDrafts(plannerSlots);
+    setPlanMessage('');
+    setPlanError('');
   }, [plannerSlots]);
 
   const handleSavePlan = useCallback(async () => {
     if (!farm) return;
 
-    const invalidDraft = planDrafts.find((draft) => !draft.scheduledDate);
-    if (invalidDraft) {
-      alert(`Please choose a date for cycle ${invalidDraft.cycleNumber}.`);
-      return;
-    }
-
     setSavingPlan(true);
+    setPlanMessage('');
+    setPlanError('');
     try {
-      for (const draft of planDrafts) {
-        const scheduledDate = new Date(`${draft.scheduledDate}T12:00:00`);
-        if (Number.isNaN(scheduledDate.getTime())) {
-          throw new Error(`Cycle ${draft.cycleNumber} has an invalid date.`);
-        }
-
-        const scheduledDateIso = scheduledDate.toISOString();
-        const homesTargetValue = draft.homesTarget.trim() ? Number(draft.homesTarget) : null;
-        if (homesTargetValue != null && (!Number.isFinite(homesTargetValue) || homesTargetValue < 0)) {
-          throw new Error(`Cycle ${draft.cycleNumber} has an invalid target homes value.`);
-        }
-        const sharedPayload = {
-          mode: draft.mode,
-          title: draft.title.trim() || null,
-          scheduled_date: scheduledDateIso,
-          notes: draft.notes.trim() || undefined,
-          homes_target: homesTargetValue,
-        } satisfies Partial<FarmTouch>;
-
-        if (draft.touchId) {
-          await FarmTouchService.updateTouch(draft.touchId, sharedPayload);
-          continue;
-        }
-
-        await FarmTouchService.createSession({
-          farmId: farm.id,
-          workspaceId: farm.workspace_id ?? currentWorkspaceId,
-          cycleNumber: draft.cycleNumber,
-          mode: draft.mode,
-          title: draft.title.trim() || undefined,
-          scheduledDate: scheduledDateIso,
-          notes: draft.notes.trim() || undefined,
-          homesTarget: homesTargetValue,
-        });
-      }
-
-      await loadData(userId);
+      await saveTouchPlan({
+        drafts: planDrafts, farmId: farm.id,
+        workspaceId: farm.workspace_id ?? currentWorkspaceId,
+        originalTouches: [...touches, ...pendingPlanCreations.current.values()],
+        writer: FarmTouchService,
+        onCreated: (slotId, created) => {
+          pendingPlanCreations.current.set(created.id, created);
+          setPlanDrafts(current => current.map(item => item.slotId === slotId ? { ...item, touchId: created.id } : item));
+        },
+      });
+      // Refresh this plan explicitly; a failed refresh must not announce success.
+      const refreshed = await FarmTouchService.fetchTouches(farm.id);
+      setTouches(refreshed);
+      pendingPlanCreations.current.clear();
+      setPlanMessage('Plan saved. Your timeline is up to date.');
     } catch (error) {
       console.error('Save farm plan:', error);
-      alert(error instanceof Error ? error.message : 'Failed to save cycle plan');
+      setPlanError(`${error instanceof Error ? error.message : 'Unable to save the plan.'} Your edits are still here; try saving again.`);
     } finally {
       setSavingPlan(false);
     }
-  }, [currentWorkspaceId, farm, loadData, planDrafts, userId]);
+  }, [currentWorkspaceId, farm, planDrafts, touches]);
 
   const handleStartSession = async (touch: FarmTouch) => {
     try {
@@ -1467,10 +1296,10 @@ export default function FarmPage() {
   }
 
   return (
-    <div className="min-h-full bg-muted/30 dark:bg-background relative">
-      <main className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList>
+    <div className={`bg-muted/30 dark:bg-background relative ${activeTab === 'map' ? 'h-full overflow-hidden' : 'min-h-full'}`}>
+      <main className={activeTab === 'map' ? 'flex h-full w-full flex-col p-2 sm:p-3' : 'w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6'}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className={`w-full ${activeTab === 'map' ? 'min-h-0 flex-1' : ''}`}>
+        <TabsList className="max-w-full shrink-0 justify-start overflow-x-auto">
           <TabsTrigger value="overview">Dashboard</TabsTrigger>
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="map">Map</TabsTrigger>
@@ -1484,116 +1313,27 @@ export default function FarmPage() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm text-muted-foreground">{overviewSnapshot.label}</p>
-                  <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1">
-                    <button
-                      type="button"
-                      onClick={() => setOverviewScope('current_cycle')}
-                      className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                        overviewScope === 'current_cycle'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {kpis.currentCycleLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOverviewScope('all_time')}
-                      className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                        overviewScope === 'all_time'
-                          ? 'bg-background text-foreground shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      All Time
-                    </button>
-                  </div>
-                </div>
-                <h2 className="text-2xl font-semibold text-foreground">
-                  This farm is {formatPercentage(overviewSnapshot.coverageRate)} covered
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  {overviewSnapshot.contacts.toLocaleString()} contacts made across {overviewSnapshot.sessions.toLocaleString()} sessions.
-                  Current contact rate: {formatPercentage(overviewSnapshot.contactRate)}.
-                </p>
-              </div>
-              <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                  Coverage: {overviewSnapshot.coverageCount.toLocaleString()} / {kpis.totalHomes.toLocaleString()} homes
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                  Efficiency: {formatMetricValue(overviewSnapshot.contacts / Math.max(overviewSnapshot.sessions, 1))} contacts / session
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                  Conversion: {formatPercentage(overviewSnapshot.contactRate)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Home className="w-4 h-4" />
-                Homes
-              </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{kpis.totalHomes.toLocaleString()}</div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${kpis.allTimeUniqueVisitedHomes.toLocaleString()} visited all time`
-                  : `${kpis.cycleUniqueVisitedHomes.toLocaleString()} visited in ${kpis.currentCycleLabel.toLowerCase()}`}
-              </p>
-            </div>
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                Homes Visited
-              </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{overviewSnapshot.visits.toLocaleString()}</div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${kpis.cycleVisits.toLocaleString()} in ${kpis.currentCycleLabel.toLowerCase()}`
-                  : `${kpis.totalVisits.toLocaleString()} all time`}
-              </p>
-            </div>
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Contacts Made
-              </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{overviewSnapshot.contacts.toLocaleString()}</div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${kpis.cycleContacts.toLocaleString()} in ${kpis.currentCycleLabel.toLowerCase()}`
-                  : `${kpis.totalContacts.toLocaleString()} all time`}
-              </p>
-            </div>
-            <div className="bg-card p-4 rounded-xl border border-border">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" />
-                Contact Rate
-              </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{formatPercentage(overviewSnapshot.contactRate)}</div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${formatPercentage(kpis.cycleContactRate)} in ${kpis.currentCycleLabel.toLowerCase()}`
-                  : `${formatPercentage(kpis.totalContactRate)} all time`}
-              </p>
-            </div>
-          </div>
-
+          <FarmPerformanceDashboard
+            name={farm.name}
+            addresses={addresses}
+            touches={resolvedTouches}
+            outcomes={touchOutcomes}
+            leads={leads}
+            currentCycle={analytics.currentCycleNumber}
+            scope={overviewScope}
+            onScopeChange={setOverviewScope}
+            onSessions={(ids) => { setChartSessionIds(ids); setActiveTab('activity'); }}
+          />
+          <details className="rounded-2xl border border-border/60 bg-card p-5">
+            <summary className="cursor-pointer text-sm font-medium">More analytics <span className="ml-2 text-xs font-normal text-muted-foreground">Sessions, spend & cadence</span></summary>
+            <div className="mt-5 space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <ListTodo className="w-4 h-4" />
                 Sessions
               </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{overviewSnapshot.sessions.toLocaleString()}</div>
+              <div className="mt-4 text-2xl font-semibold text-foreground">{overviewSnapshot.sessions.toLocaleString()}</div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {overviewScope === 'all_time'
                   ? `${kpis.cycleTouches.length.toLocaleString()} in ${kpis.currentCycleLabel}`
@@ -1605,7 +1345,7 @@ export default function FarmPage() {
                 <BarChart3 className="w-4 h-4" />
                 Avg Homes / Session
               </p>
-              <div className="mt-4 text-3xl font-semibold text-foreground">{formatMetricValue(overviewSnapshot.avgHomesPerSession)}</div>
+              <div className="mt-4 text-2xl font-semibold text-foreground">{formatMetricValue(overviewSnapshot.avgHomesPerSession)}</div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {overviewScope === 'all_time'
                   ? `${formatMetricValue(kpis.cycleAvgHomesPerSession)} this cycle`
@@ -1615,13 +1355,13 @@ export default function FarmPage() {
             <div className="bg-card p-4 rounded-xl border border-border">
               <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Users className="w-4 h-4" />
-                Answer Rate
+                Contact Rate
               </p>
               <div className="mt-4 text-2xl font-semibold text-foreground">
                 {formatPercentage(overviewSnapshot.contactRate)}
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                {overviewSnapshot.visits.toLocaleString()} doors / {overviewSnapshot.contacts.toLocaleString()} conversations
+                {overviewSnapshot.visits.toLocaleString()} farm touches / {overviewSnapshot.contacts.toLocaleString()} contacts
               </p>
             </div>
             <div className="bg-card p-4 rounded-xl border border-border">
@@ -1695,218 +1435,40 @@ export default function FarmPage() {
             </div>
           </div>
 
-          <div className="bg-card p-4 rounded-xl border border-border space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Coverage Progress</h2>
-                <p className="text-sm text-muted-foreground">
-                  {overviewSnapshot.coverageCount.toLocaleString()} / {kpis.totalHomes.toLocaleString()} homes visited in {overviewSnapshot.label.toLowerCase()}
-                </p>
-              </div>
-              <p className="text-sm font-medium text-foreground">{formatPercentage(overviewSnapshot.coverageRate)}</p>
             </div>
-            <Progress value={overviewSnapshot.coverageRate * 100} />
-          </div>
+          </details>
 
         </TabsContent>
 
         <TabsContent value="plan" className="mt-4 space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5">
-            <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Planning outlook</p>
-                <h2 className="text-2xl font-semibold text-foreground">Plan the next cycle with pace and timing</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Use the farm goal, cadence, and start date to map the next cycles.
-                </p>
-              </div>
-              <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                  Next due: {formatDateLabel(kpis.nextTouchDueAt)}
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                  Pace: {planningSummary.pace}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card rounded-2xl border border-border p-5">
-            <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold text-foreground">Next 12 Cycles</h2>
-                <p className="text-sm text-muted-foreground">
-                  Generated from the farm start date and cadence settings. Edit each cycle&apos;s touch type, date, title, notes, and target homes before saving.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Cadence: {formatFarmCadence(farm)}. Start date: {formatDateLabel(farm.start_date)}. Goal: {planningSummary.goal}.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handleResetPlan} disabled={savingPlan}>
-                  Reset dates
-                </Button>
-                <Button onClick={handleSavePlan} disabled={savingPlan || planDrafts.length === 0}>
-                  {savingPlan ? 'Saving plan...' : 'Save 12-cycle plan'}
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              {planDrafts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Set a valid farm start date to generate the cycle plan.</p>
-              ) : (
-                planDrafts.map((draft) => (
-                  <div key={draft.slotId} className="rounded-xl border border-border bg-muted/20 p-4 space-y-4">
-                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Cycle {draft.cycleNumber}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Cycle {draft.cycleNumber} • Suggested date {formatDateLabel(draft.suggestedDate)}
-                        </p>
-                      </div>
-                      <Badge variant={draft.touchId ? 'secondary' : 'outline'}>
-                        {draft.touchId ? 'Scheduled cycle' : 'New planned cycle'}
-                      </Badge>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="space-y-2">
-                        <Label htmlFor={`plan-date-${draft.sequenceNumber}`}>Date</Label>
-                        <Input
-                          id={`plan-date-${draft.sequenceNumber}`}
-                          type="date"
-                          value={draft.scheduledDate}
-                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'scheduledDate', event.target.value)}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Touch type</Label>
-                        <Select
-                          value={draft.mode}
-                          onValueChange={(value) => handlePlanDraftChange(draft.slotId, 'mode', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="doorknock">Doorknock</SelectItem>
-                            <SelectItem value="flyer">Flyer</SelectItem>
-                            <SelectItem value="canada_post">Canada Post</SelectItem>
-                            <SelectItem value="pop_by">Pop by</SelectItem>
-                            <SelectItem value="letter">Letter</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`plan-title-${draft.sequenceNumber}`}>Title</Label>
-                        <Input
-                          id={`plan-title-${draft.sequenceNumber}`}
-                          value={draft.title}
-                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'title', event.target.value)}
-                          placeholder={`Cycle ${draft.cycleNumber}`}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`plan-target-${draft.sequenceNumber}`}>Target homes</Label>
-                        <Input
-                          id={`plan-target-${draft.sequenceNumber}`}
-                          type="number"
-                          min="0"
-                          value={draft.homesTarget}
-                          onChange={(event) => handlePlanDraftChange(draft.slotId, 'homesTarget', event.target.value)}
-                          placeholder={defaultPlannedHomesTarget || 'Optional'}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor={`plan-notes-${draft.sequenceNumber}`}>Notes</Label>
-                      <Textarea
-                        id={`plan-notes-${draft.sequenceNumber}`}
-                        value={draft.notes}
-                        onChange={(event) => handlePlanDraftChange(draft.slotId, 'notes', event.target.value)}
-                        rows={3}
-                        placeholder="Add a quick note for this cycle."
-                      />
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <FarmTouchPlan
+            drafts={planDrafts}
+            touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
+            saving={savingPlan}
+            message={planMessage}
+            error={planError}
+            onChange={handlePlanDraftChange}
+            onReset={handleResetPlan}
+            onSave={handleSavePlan}
+            onRemove={(slotId) => { setPlanMessage(''); setPlanError(''); setPlanDrafts(current => current.filter(draft => draft.slotId !== slotId)); }}
+            onAdd={() => {
+              setPlanMessage('');
+              setPlanError('');
+              setPlanDrafts(current => {
+                const cycle = Math.max(0, ...resolvedTouches.map(touch => touch.resolvedCycleNumber), ...current.map(draft => draft.cycleNumber)) + 1;
+                const date = localPlanDate();
+                return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
+                  suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
+              });
+            }}
+          />
+          <details className="rounded-xl border border-border bg-card p-4">
+            <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
+            <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
+          </details>
         </TabsContent>
 
-        <TabsContent value="map" className="mt-4">
-          <div className="mb-4 rounded-xl border border-border bg-card p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">Master Farm Map</h2>
-                <p className="text-sm text-muted-foreground">
-                  Use the master map as the farm&apos;s long-term memory, then slice it by cycle when you need the operational view.
-                </p>
-              </div>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1">
-                  <button
-                    type="button"
-                    onClick={() => setMapLayerScope('all_time')}
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'all_time'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Master
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMapLayerScope('cycle')}
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'cycle'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Cycle
-                  </button>
-                </div>
-                {mapLayerScope === 'cycle' ? (
-                  <Select value={selectedMapCycleSelectValue} onValueChange={setSelectedMapCycleNumber}>
-                    <SelectTrigger className="w-[220px]">
-                      <SelectValue placeholder="Select cycle" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {cycleFilterOptions.map((cycle) => (
-                        <SelectItem key={cycle.value} value={cycle.value}>
-                          {cycle.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : null}
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <Switch
-                    id="farm-map-contacts-overlay"
-                    checked={showMapContactsOverlay}
-                    onCheckedChange={setShowMapContactsOverlay}
-                  />
-                  <Label htmlFor="farm-map-contacts-overlay" className="cursor-pointer text-sm">
-                    Contact overlay
-                  </Label>
-                </div>
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {mapLayerScope === 'cycle'
-                ? `Showing homes last touched during ${selectedMapCycleLabel.toLowerCase()}.`
-                : 'Showing cumulative visit state across the farm, with optional contact pins layered on top.'}
-            </p>
-          </div>
-          <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ height: '560px' }}>
+        <TabsContent value="map" className="mt-1 min-h-0 overflow-hidden rounded-xl border border-border bg-card">
             <FarmMapView
               key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}`}
               farm={farm}
@@ -1919,134 +1481,97 @@ export default function FarmPage() {
               contacts={contacts}
               showContactsOverlay={showMapContactsOverlay}
               onDataChanged={() => loadData(userId)}
+              className="h-full rounded-none border-0"
+              toolbarContent={
+                <div className="flex flex-wrap items-center gap-2" aria-label="Farm map layers">
+                <div className="inline-flex rounded-lg border border-border bg-background/95 p-1">
+                  <button
+                    type="button"
+                    aria-pressed={mapLayerScope === 'all_time'}
+                    onClick={() => setMapLayerScope('all_time')}
+                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                      mapLayerScope === 'all_time'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Master
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={mapLayerScope === 'cycle'}
+                    onClick={() => setMapLayerScope('cycle')}
+                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                      mapLayerScope === 'cycle'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Cycle
+                  </button>
+                </div>
+                {mapLayerScope === 'cycle' ? (
+                  <Select value={selectedMapCycleSelectValue} onValueChange={setSelectedMapCycleNumber}>
+                    <SelectTrigger aria-label={`Map cycle: ${selectedMapCycleLabel}`} className="w-[180px] bg-background/95">
+                      <SelectValue placeholder="Select cycle" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cycleFilterOptions.map((cycle) => (
+                        <SelectItem key={cycle.value} value={cycle.value}>
+                          {cycle.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2">
+                  <Switch
+                    id="farm-map-contacts-overlay"
+                    checked={showMapContactsOverlay}
+                    onCheckedChange={setShowMapContactsOverlay}
+                  />
+                  <Label htmlFor="farm-map-contacts-overlay" className="cursor-pointer text-sm">
+                    Contact overlay
+                  </Label>
+                </div>
+                </div>
+              }
               showOutcomeControls={false}
             />
-          </div>
         </TabsContent>
 
         <TabsContent value="activity" className="mt-4 space-y-4">
+          {chartSessionIds && <section className="rounded-xl border border-border bg-card p-5 space-y-4" aria-label="Sessions from selected chart period">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">Sessions from selected chart period</h2>
+              <Button size="sm" variant="outline" onClick={() => setChartSessionIds(null)}>Show all activity</Button>
+            </div>
+            {resolvedTouches.filter(touch => chartSessionIds.includes(touch.id)).map(touch => <div key={touch.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
+              <div><p className="text-sm font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p><p className="mt-1 text-xs text-muted-foreground">Cycle {touch.resolvedCycleNumber} · {formatDateLabel(touch.started_at ?? touch.scheduled_date)}</p></div>
+              <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{touch.status.replace('_', ' ')}</Badge>{touch.status === 'scheduled' && <Button size="sm" variant="outline" onClick={() => void handleStartSession(touch)}>Start session</Button>}{touch.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => handleOpenComplete(touch)}>Complete session</Button>}</div>
+            </div>)}
+          </section>}
           <div className="bg-card p-4 rounded-xl border border-border space-y-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="cycleFilter">Cycle filter</Label>
-                  <Select value={selectedCycleFilter} onValueChange={setSelectedCycleFilter}>
-                    <SelectTrigger id="cycleFilter" className="w-[220px]">
-                      <SelectValue placeholder="All cycles" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All cycles</SelectItem>
-                      {cycleFilterOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="sessionFilter">Session filter</Label>
-                  <Select value={selectedTouchFilter} onValueChange={setSelectedTouchFilter}>
-                    <SelectTrigger id="sessionFilter" className="w-[260px]">
-                      <SelectValue placeholder="All sessions" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All sessions</SelectItem>
-                      {filteredTouches.map((touch) => (
-                        <SelectItem key={touch.id} value={touch.id}>
-                          {touch.title || MODE_LABELS[touch.mode ?? 'doorknock']} • Cycle {touch.resolvedCycleNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button onClick={() => setSessionDialogOpen(true)}>
-                <PlayCircle className="w-4 h-4 mr-2" />
-                New Session
-              </Button>
+            <div>
+              <h2 className="text-sm font-semibold text-foreground mb-1">Farm activity</h2>
+              <p className="text-sm text-muted-foreground">Canvassing sessions for this farm.</p>
+              <Link href="/activity" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline mt-2">
+                View all workspace activity
+              </Link>
             </div>
-            <div className="space-y-3">
-              {activityItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No farm activity yet for this selection.</p>
-              ) : (
-                activityItems.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-border p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="font-medium">{item.title}</p>
-                        <p className="text-sm text-muted-foreground">{item.description}</p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{new Date(item.timestamp).toLocaleString()}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+            {linkedCampaignId ? (
+              <ActivityPageView
+                key={linkedCampaignId}
+                campaignId={linkedCampaignId}
+                forcedTypeFilter="session_completed"
+                hideFilterControls
+                defaultRangePreset="all"
+                emptyMessage="No sessions for this farm yet."
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No sessions for this farm yet.</p>
+            )}
           </div>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ListTodo className="w-4 h-4" />
-                Sessions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {filteredTouches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No sessions created yet for this selection.</p>
-              ) : (
-                filteredTouches.map((touch) => (
-                  <div key={touch.id} className="rounded-xl border border-border p-4 space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p>
-                          <Badge variant="secondary">Cycle {touch.resolvedCycleNumber}</Badge>
-                          <Badge variant="outline">{MODE_LABELS[touch.mode ?? 'doorknock']}</Badge>
-                          <Badge variant={touch.status === 'completed' ? 'secondary' : touch.status === 'in_progress' ? 'default' : 'outline'}>
-                            {touch.status.replace('_', ' ')}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Scheduled {new Date(touch.scheduled_date).toLocaleString()}
-                        </p>
-                        {touch.notes ? (
-                          <p className="text-sm text-muted-foreground">{touch.notes}</p>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {touch.status === 'scheduled' ? (
-                          <Button variant="outline" size="sm" onClick={() => handleStartSession(touch)}>
-                            Start
-                          </Button>
-                        ) : null}
-                        {touch.status !== 'completed' ? (
-                          <Button size="sm" onClick={() => handleOpenComplete(touch)}>
-                            Complete
-                          </Button>
-                        ) : null}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedTouchFilter(touch.id);
-                          }}
-                        >
-                          Filter activity
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <span>Target: {touch.homes_target ?? '—'}</span>
-                      <span>Reached: {touch.homes_reached ?? '—'}</span>
-                      <span>Completed: {touch.completed_date ? new Date(touch.completed_date).toLocaleString() : '—'}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="homes" className="mt-4">
@@ -2457,17 +1982,21 @@ export default function FarmPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="configure" className="mt-4 space-y-4">
+        <TabsContent value="configure" className={`mt-4 space-y-4 ${settingsStyles.settings}`}>
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+            <CardHeader className="border-b border-border pb-5">
+              <CardTitle className="flex items-center gap-2 text-2xl">
                 <Settings2 className="w-4 h-4" />
-                Farm Configuration
+                Farm settings
               </CardTitle>
+              <p className="text-sm text-muted-foreground">Manage your farm details, outreach schedule, and goals.</p>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr),280px]">
-                <div className="space-y-5">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="min-w-0 space-y-6">
+                  <section className={settingsStyles.section} aria-labelledby="farm-details-heading">
+                    <h3 id="farm-details-heading">Farm details</h3>
+                    <p className={settingsStyles.description}>Give this farm a clear name and description.</p>
                   <div className="space-y-2">
                     <Label htmlFor="configName">Farm name</Label>
                     <Input
@@ -2489,6 +2018,10 @@ export default function FarmPage() {
                     />
                   </div>
 
+                  </section>
+                  <section className={settingsStyles.section} aria-labelledby="farm-schedule-heading">
+                    <h3 id="farm-schedule-heading">Schedule &amp; coverage</h3>
+                    <p className={settingsStyles.description}>Choose when to start and how many homes to reach each cycle.</p>
                   <div className="space-y-2">
                     <Label htmlFor="configStartDate">Start date</Label>
                     <Input
@@ -2499,7 +2032,7 @@ export default function FarmPage() {
                     />
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),180px]">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
                     <div className="space-y-2">
                       <Label htmlFor="configTouchesPerInterval">Target homes per cycle</Label>
                       <Input
@@ -2523,14 +2056,14 @@ export default function FarmPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Cadence</Label>
+                      <Label htmlFor="configCadence">Repeat cycle</Label>
                       <Select
                         value={configTouchesInterval}
                         onValueChange={(value) =>
                           setConfigTouchesInterval(value as FarmTouchInterval)
                         }
                       >
-                        <SelectTrigger>
+                        <SelectTrigger id="configCadence">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -2544,16 +2077,17 @@ export default function FarmPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
+                  </section>
+                  <section className={settingsStyles.section} aria-labelledby="farm-goals-heading">
                     <div className="space-y-1">
-                      <p className="font-medium text-foreground">Goal tracking</p>
+                      <h3 id="farm-goals-heading">Goal tracking</h3>
                       <p className="text-sm text-muted-foreground">
                         One cycle equals one planned area hit. Track either homes reached or session volume against that cycle.
                       </p>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),140px]">
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px]">
                       <div className="space-y-2">
-                        <Label>Goal type</Label>
+                        <Label htmlFor="configGoalType">Goal type</Label>
                         <Select
                           value={configGoalType}
                           onValueChange={(value) => {
@@ -2564,7 +2098,7 @@ export default function FarmPage() {
                             }
                           }}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger id="configGoalType">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -2577,7 +2111,7 @@ export default function FarmPage() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="configGoalTarget">Target</Label>
+                        <Label htmlFor="configGoalTarget">Goal target</Label>
                         <Input
                           id="configGoalTarget"
                           type="number"
@@ -2613,10 +2147,13 @@ export default function FarmPage() {
                         placeholder="Optional, e.g. 14 days"
                       />
                     </div>
-                  </div>
+                  </section>
 
+                  <section className={settingsStyles.section} aria-labelledby="farm-outreach-heading">
+                    <h3 id="farm-outreach-heading">Outreach &amp; budget</h3>
+                    <p className={settingsStyles.description}>Select your outreach methods and optional annual budget.</p>
                   <div className="space-y-2">
-                    <Label>Type of touches</Label>
+                    <Label>Outreach methods</Label>
                     <FarmTouchTypePicker
                       value={configTouchTypes}
                       onChange={setConfigTouchTypes}
@@ -2625,7 +2162,7 @@ export default function FarmPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="configAnnualBudget">Budget for year</Label>
+                    <Label htmlFor="configAnnualBudget">Annual budget ($)</Label>
                     <Input
                       id="configAnnualBudget"
                       type="number"
@@ -2636,23 +2173,24 @@ export default function FarmPage() {
                       placeholder="Optional"
                     />
                   </div>
+                  </section>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
                   <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="font-medium text-foreground">Farm status</p>
+                        <h3 className="text-base font-semibold text-foreground">Farm status</h3>
                         <p className="text-sm text-muted-foreground">
                           Toggle whether this farm is still active.
                         </p>
                       </div>
-                      <Switch checked={configActive} onCheckedChange={setConfigActive} />
+                      <Switch aria-label="Farm active" checked={configActive} onCheckedChange={setConfigActive} />
                     </div>
                   </div>
 
                   <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-2 text-sm">
-                    <p className="font-medium text-foreground">Preview</p>
+                    <h3 className="text-base font-semibold text-foreground">Plan summary</h3>
                     <p className="text-muted-foreground">
                       {configStartDate
                         ? `Launches ${new Date(`${configStartDate}T12:00:00`).toLocaleDateString()}`

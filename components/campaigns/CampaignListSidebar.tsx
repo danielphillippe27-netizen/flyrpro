@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Plus, Search, ChevronsLeft, ChevronsRight, Trash2, ChevronDown } from 'lucide-react';
 import { CampaignsService } from '@/lib/services/CampaignsService';
-import type { CampaignV2 } from '@/types/database';
+import { FarmService } from '@/lib/services/FarmService';
+import { useFarmEnabled } from '@/lib/hooks/useFarmEnabled';
+import { campaignListEntries, type CampaignListEntry } from '@/lib/campaign-list-entries';
+import { CampaignKindBadge } from './CampaignKindBadge';
+import type { Farm, CampaignV2 } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -100,6 +104,9 @@ export function CampaignListSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const { currentWorkspace, currentWorkspaceId } = useWorkspace();
+  const { enabled: farmEnabled } = useFarmEnabled(currentWorkspaceId);
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [farmLoadError, setFarmLoadError] = useState(false);
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const [campaigns, setCampaigns] = useState<CampaignV2[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,6 +122,15 @@ export function CampaignListSidebar({
   const handleDeleteCampaign = useCallback(
     async (id: string) => {
       try {
+        if (id.startsWith('farm:')) {
+          const farmId = id.slice(5);
+          await FarmService.deleteFarm(farmId);
+          setFarms(previous => previous.filter(farm => farm.id !== farmId));
+          if (pathname?.startsWith(`/farms/${farmId}`)) router.push('/campaigns');
+          window.dispatchEvent(new CustomEvent('flyr-farms-refresh'));
+          toast.success('Farm deleted');
+          return;
+        }
         await CampaignsService.deleteCampaign(id);
         setCampaigns((prev) => prev.filter((c) => c.id !== id));
         if (pathname?.startsWith(`/campaigns/${id}`)) {
@@ -142,7 +158,7 @@ export function CampaignListSidebar({
         setLoading(false);
         return;
       }
-      const [data, assignmentsPayload] = await Promise.all([
+      const [data, assignmentsPayload, farmsPayload] = await Promise.all([
         CampaignsService.fetchCampaignsV2(id, currentWorkspaceId),
         currentWorkspaceId
           ? fetch(`/api/campaign-assignments?workspaceId=${encodeURIComponent(currentWorkspaceId)}`, {
@@ -151,7 +167,10 @@ export function CampaignListSidebar({
               .then((response) => response.ok ? response.json() : null)
               .catch(() => null)
           : Promise.resolve(null),
+        FarmService.fetchFarms(id, currentWorkspaceId).then(data => ({ data, error: false })).catch(() => ({ data: [] as Farm[], error: true })),
       ]);
+      setFarms(farmsPayload.data);
+      setFarmLoadError(farmsPayload.error);
       const assignmentRows = Array.isArray(assignmentsPayload?.assignments)
         ? (assignmentsPayload.assignments as CampaignAssignmentListRow[])
         : [];
@@ -219,15 +238,18 @@ export function CampaignListSidebar({
   useEffect(() => {
     void loadCampaigns();
     window.addEventListener('flyr-campaigns-refresh', loadCampaigns);
+    window.addEventListener('flyr-farms-refresh', loadCampaigns);
     return () => {
       window.removeEventListener('flyr-campaigns-refresh', loadCampaigns);
+      window.removeEventListener('flyr-farms-refresh', loadCampaigns);
     };
   }, [loadCampaigns]);
 
   const memberFilteredCampaigns = useMemo(() => {
-    if (memberIds.length === 0) return campaigns;
-    return campaigns.filter((campaign) => memberIds.includes(campaign.owner_id));
-  }, [campaigns, memberIds]);
+    const entries = campaignListEntries(campaigns, farms, farmEnabled);
+    if (memberIds.length === 0) return entries;
+    return entries.filter((campaign) => memberIds.includes(campaign.owner_id));
+  }, [campaigns, farms, farmEnabled, memberIds]);
 
   const byStatus = useMemo(() => {
     const active = memberFilteredCampaigns.filter((c) => ACTIVE_STATUSES.includes(c.status));
@@ -253,13 +275,13 @@ export function CampaignListSidebar({
     return list.filter(
       (c) =>
         (c.name || '').toLowerCase().includes(q) ||
-        (c.type || '').toLowerCase().includes(q)
+        (c.type || '').toLowerCase().includes(q) || c.entryKind.includes(q)
     );
   }, [byStatus.active, byStatus.completed, statusTab, search]);
 
   const activeId = pathname?.startsWith('/campaigns/')
     ? pathname.split('/')[2]
-    : null;
+    : pathname?.startsWith('/farms/') ? `farm:${pathname.split('/')[2]}` : null;
 
   if (collapsed) {
     return (
@@ -344,6 +366,7 @@ export function CampaignListSidebar({
             <Plus className="w-3.5 h-3.5" />
           </Button>
         </div>
+        {farmEnabled && farmLoadError && !loading && <div role="alert" className="mt-2 text-xs text-destructive">Could not load farms. <button type="button" className="underline" onClick={() => void loadCampaigns()}>Retry</button></div>}
         {loadError && !loading && campaigns.length === 0 ? (
           <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
             <div className="flex items-center justify-between gap-2">
@@ -412,7 +435,7 @@ function CampaignList({
   copy,
   onDeleteCampaign,
 }: {
-  campaigns: CampaignV2[];
+  campaigns: CampaignListEntry[];
   activeId: string | null;
   loading: boolean;
   userId: string | null;
@@ -421,7 +444,7 @@ function CampaignList({
   copy: ReturnType<typeof getIndustryCopy>;
   onDeleteCampaign: (id: string) => Promise<void>;
 }) {
-  const [deleteTarget, setDeleteTarget] = useState<CampaignV2 | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CampaignListEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -472,11 +495,12 @@ function CampaignList({
                   )}
                 >
                   <Link
-                    href={`/campaigns/${campaign.id}`}
+                    href={campaign.href}
                     data-testid={`campaign-${campaign.id}`}
-                    className="truncate min-w-0 flex-1"
+                    className="flex min-w-0 flex-1 items-center gap-2"
                   >
-                    {campaign.name || copy.campaigns.unnamed}
+                    <span className="min-w-0 flex-1 truncate">{campaign.name || copy.campaigns.unnamed}</span>
+                    <CampaignKindBadge kind={campaign.entryKind} />
                   </Link>
                   {assignmentLabel ? (
                     <Badge
@@ -514,7 +538,7 @@ function CampaignList({
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{copy.campaigns.deleteTitle}</DialogTitle>
+            <DialogTitle>{deleteTarget?.entryKind === 'farm' ? 'Delete farm' : copy.campaigns.deleteTitle}</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete &quot;{deleteTarget?.name || copy.campaigns.deleteDescriptionFallback}&quot;? This cannot be undone.
             </DialogDescription>

@@ -1,0 +1,68 @@
+.settings {
+  --field-border: #a1a1aa;
+  --field-background: #fff;
+}
+
+:global(.dark) .settings {
+  --field-border: #71717a;
+  --field-background: #18181b;
+  color-scheme: dark;
+}
+
+.section {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--background);
+}
+
+.section h3 {
+  color: var(--foreground);
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.description {
+  margin-top: -0.75rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.settings :global([data-slot="label"]) {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.settings :is(input, textarea, :global([data-slot="select-trigger"])) {
+  width: 100%;
+  min-height: 2.875rem;
+  border: 1px solid var(--field-border);
+  border-radius: 0.5rem;
+  background: var(--field-background);
+  color: var(--foreground);
+  font-size: 1rem;
+  padding: 0.625rem 0.875rem;
+  box-shadow: 0 1px 2px #0000000d;
+}
+
+.settings :is(input, textarea, :global([data-slot="select-trigger"])):focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.settings textarea[data-slot="textarea"] {
+  min-height: 7rem;
+  resize: vertical;
+}
+
+@media (max-width: 639px) {
+  .section {
+    padding: 1rem;
+  }
+}

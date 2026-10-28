@@ -1,0 +1,223 @@
+{
+  "checkedAt": "2026-10-24T16:33:40.329Z",
+  "countries": {
+    "CA": {
+      "savedHours": 170,
+      "indexed": 171,
+      "pending": 0,
+      "days": [
+        {
+          "date": "2026-10-24",
+          "peakTime": "2026-10-24T15:00:00.000Z",
+          "latestTime": "2026-10-24T15:00:00.000Z",
+          "maximumKPH": 110.55118110236222,
+          "hours": 14,
+          "regions": [
+            "Manitoba",
+            "Newfoundland and Labrador",
+            "Saskatchewan",
+            "Yukon"
+          ]
+        },
+        {
+          "date": "2026-10-23",
+          "peakTime": "2026-10-23T18:00:00.000Z",
+          "latestTime": "2026-10-23T23:00:00.000Z",
+          "maximumKPH": 114.80314960629921,
+          "hours": 16,
+          "regions": [
+            "Alberta",
+            "Newfoundland and Labrador",
+            "Nova Scotia",
+            "Saskatchewan"
+          ]
+        },
+        {
+          "date": "2026-10-21",
+          "peakTime": "2026-10-21T02:00:00.000Z",
+          "latestTime": "2026-10-21T12:00:00.000Z",
+          "maximumKPH": 121.88976377952757,
+          "hours": 12,
+          "regions": [
+            "British Columbia",
+            "Northwest Territories",
+            "Yukon"
+          ]
+        },
+        {
+          "date": "2026-10-20",
+          "peakTime": "2026-10-20T12:00:00.000Z",
+          "latestTime": "2026-10-20T23:00:00.000Z",
+          "maximumKPH": 144.56692913385828,
+          "hours": 24,
+          "regions": [
+            "British Columbia",
+            "Newfoundland and Labrador",
+            "Northwest Territories",
+            "Yukon"
+          ]
+        },
+        {
+          "date": "2026-10-19",
+          "peakTime": "2026-10-19T23:00:00.000Z",
+          "latestTime": "2026-10-19T23:00:00.000Z",
+          "maximumKPH": 113.38582677165356,
+          "hours": 15,
+          "regions": [
+            "Manitoba",
+            "Newfoundland and Labrador",
+            "Ontario",
+            "Quebec",
+            "Yukon"
+          ]
+        },
+        {
+          "date": "2026-10-18",
+          "peakTime": "2026-10-18T14:00:00.000Z",
+          "latestTime": "2026-10-18T23:00:00.000Z",
+          "maximumKPH": 114.80314960629921,
+          "hours": 23,
+          "regions": [
+            "Alberta",
+            "Manitoba",
+            "Nunavut",
+            "Ontario",
+            "Saskatchewan"
+          ]
+        },
+        {
+          "date": "2026-10-17",
+          "peakTime": "2026-10-17T21:00:00.000Z",
+          "latestTime": "2026-10-17T23:00:00.000Z",
+          "maximumKPH": 109.13385826771655,
+          "hours": 10,
+          "regions": [
+            "Alberta",
+            "Newfoundland and Labrador",
+            "Saskatchewan"
+          ]
+        }
+      ]
+    },
+    "US": {
+      "savedHours": 170,
+      "indexed": 171,
+      "pending": 0,
+      "days": [
+        {
+          "date": "2026-10-24",
+          "peakTime": "2026-10-24T00:00:00.000Z",
+          "latestTime": "2026-10-24T15:00:00.000Z",
+          "maximumKPH": 141.73228346456693,
+          "hours": 16,
+          "regions": [
+            "Alaska",
+            "California",
+            "Montana",
+            "Nebraska",
+            "North Dakota",
+            "South Dakota",
+            "Wyoming"
+          ]
+        },
+        {
+          "date": "2026-10-23",
+          "peakTime": "2026-10-23T23:00:00.000Z",
+          "latestTime": "2026-10-23T23:00:00.000Z",
+          "maximumKPH": 143.14960629921262,
+          "hours": 24,
+          "regions": [
+            "Alaska",
+            "Minnesota",
+            "Montana",
+            "North Dakota",
+            "South Dakota",
+            "Wyoming"
+          ]
+        },
+        {
+          "date": "2026-10-22",
+          "peakTime": "2026-10-22T19:00:00.000Z",
+          "latestTime": "2026-10-22T23:00:00.000Z",
+          "maximumKPH": 127.55905511811024,
+          "hours": 18,
+          "regions": [
+            "Alaska",
+            "Arizona"
+          ]
+        },
+        {
+          "date": "2026-10-21",
+          "peakTime": "2026-10-21T04:00:00.000Z",
+          "latestTime": "2026-10-21T15:00:00.000Z",
+          "maximumKPH": 123.30708661417323,
+          "hours": 14,
+          "regions": [
+            "Alaska"
+          ]
+        },
+        {
+          "date": "2026-10-20",
+          "peakTime": "2026-10-20T08:00:00.000Z",
+          "latestTime": "2026-10-20T23:00:00.000Z",
+          "maximumKPH": 138.89763779527559,
+          "hours": 24,
+          "regions": [
+            "Alaska"
+          ]
+        },
+        {
+          "date": "2026-10-19",
+          "peakTime": "2026-10-19T23:00:00.000Z",
+          "latestTime": "2026-10-19T23:00:00.000Z",
+          "maximumKPH": 123.30708661417323,
+          "hours": 10,
+          "regions": [
+            "Alaska"
+          ]
+        },
+        {
+          "date": "2026-10-18",
+          "peakTime": "2026-10-18T02:00:00.000Z",
+          "latestTime": "2026-10-18T03:00:00.000Z",
+          "maximumKPH": 119.05511811023624,
+          "hours": 4,
+          "regions": [
+            "Montana"
+          ]
+        },
+        {
+          "date": "2026-10-17",
+          "peakTime": "2026-10-17T22:00:00.000Z",
+          "latestTime": "2026-10-17T23:00:00.000Z",
+          "maximumKPH": 110.55118110236222,
+          "hours": 10,
+          "regions": [
+            "Arizona",
+            "Minnesota",
+            "Montana",
+            "South Dakota",
+            "Wyoming"
+          ]
+        }
+      ]
+    },
+    "AU": {
+      "savedHours": 170,
+      "indexed": 172,
+      "pending": 0,
+      "days": [
+        {
+          "date": "2026-10-24",
+          "peakTime": "2026-10-24T09:00:00.000Z",
+          "latestTime": "2026-10-24T09:00:00.000Z",
+          "maximumKPH": 99.21259842519686,
+          "hours": 1,
+          "regions": [
+            "South Australia"
+          ]
+        }
+      ]
+    }
+  }
+}

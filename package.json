@@ -44,7 +44,9 @@
     "territory-iq:toronto": "python3 scripts/ingest_toronto_territory_iq.py --env-file .env.local",
     "test:territory-iq-data": "cd ../municipal_data/territory_iq_canada && python3 -m unittest discover -s acquisition/tests -v",
     "test:crm-integrations": "npx tsx scripts/test-crm-integrations.ts",
-    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts && npx tsx lib/storm-maps/__tests__/intelligence.test.ts && npx tsx lib/storm-maps/__tests__/territoryReview.test.ts && npx tsx lib/storm-maps/__tests__/tornadoSurveys.test.ts && npx tsx lib/storm-maps/__tests__/stormSelection.test.tsx"
+    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts && npx tsx lib/storm-maps/__tests__/intelligence.test.ts && npx tsx lib/storm-maps/__tests__/territoryReview.test.ts && npx tsx lib/storm-maps/__tests__/tornadoSurveys.test.ts && npx tsx lib/storm-maps/__tests__/stormSelection.test.tsx && npx tsx lib/storm-maps/__tests__/stormBrowser.test.tsx && npx tsx lib/storm-maps/__tests__/stormTerritoryOverlay.test.tsx && npx tsx lib/storm-maps/__tests__/savedHistory.test.tsx",
+    "test:mobile-storms": "npx tsx lib/storm-maps/__tests__/mobileStorms.test.ts && npx tsx lib/storm-maps/__tests__/mobileWind.test.tsx && npx tsx lib/storm-maps/__tests__/largeTerritory.test.tsx",
+    "test:mobile-storms-browser": "node scripts/test-mobile-storms-browser.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.986.0",
@@ -57,6 +59,7 @@
     "@google/generative-ai": "^0.24.1",
     "@googlemaps/js-api-loader": "^2.0.2",
     "@mapbox/mapbox-gl-draw": "^1.4.3",
+    "@mapbox/vector-tile": "^2.0.4",
     "@radix-ui/react-avatar": "^1.1.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -115,6 +118,7 @@
     "next": "15.5.9",
     "next-auth": "^4.24.14",
     "next-themes": "^0.4.4",
+    "pbf": "^4.0.1",
     "pmtiles": "^3.2.1",
     "postgres": "^3.4.3",
     "qrcode": "^1.5.4",

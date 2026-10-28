@@ -38,7 +38,7 @@ test('identity, campaign, GPS and activity reach the manager together', async ()
   const { livePresence } = await load();
   assert.equal(livePresence.length, 1);
   assert.deepEqual(livePresence[0], {
-    user_id: 'rep', display_name: 'Alex Smith', color: '#123456', campaign_id: 'campaign', campaign_name: 'North Oshawa', session_id: 'session', lat: 43.9, lng: -78.8, status: 'active', updated_at: livePresence[0].updated_at, started_at: '2026-01-01', active_seconds: 120, distance_meters: 100, doors_hit: 4, conversations: 2, flyers_delivered: 3,
+    user_id: 'rep', display_name: 'Alex Smith', color: '#123456', avatar_url: null, campaign_id: 'campaign', campaign_name: 'North Oshawa', session_id: 'session', lat: 43.9, lng: -78.8, status: 'active', updated_at: livePresence[0].updated_at, started_at: '2026-01-01', active_seconds: 120, distance_meters: 100, doors_hit: 4, conversations: 2, flyers_delivered: 3,
   });
 });
 test('movement and door counts change on the next refresh', async () => {
@@ -95,3 +95,10 @@ for (const table of ['workspace_members', 'user_profiles', 'campaigns', 'campaig
     await assert.rejects(() => loadLivePresence(client(fixture(), table), 'team'), new RegExp(`${table} unavailable`));
   });
 }
+
+test('profile photos reach both roster and live markers', async () => {
+  const tables = fixture(); tables.user_profiles[0].avatar_url = 'https://example.com/alex.jpg';
+  const result = await load(tables);
+  assert.equal(result.members[0].avatar_url, 'https://example.com/alex.jpg');
+  assert.equal(result.livePresence[0].avatar_url, result.members[0].avatar_url);
+});

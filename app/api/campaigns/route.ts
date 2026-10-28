@@ -65,6 +65,7 @@ function isMissingCampaignAllowanceRpc(error: unknown): boolean {
 }
 
 interface CreateCampaignBody {
+  area_only?: boolean;
   storm_context?: StormCampaignContext;
   name: string;
   description?: string;
@@ -234,7 +235,9 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const body: CreateCampaignBody = await request.json();
     const { name, description, type, address_source, region, workspace_id, seed_query, tags, bbox, territory_boundary } = body;
+    const areaOnly = body.area_only === true;
     const stormContext = body.storm_context === undefined ? null : campaignStormSchema.safeParse(body.storm_context);
+    if (areaOnly && (!stormContext?.success || !stormContext.data.territoryId)) return NextResponse.json({ error: 'Save a storm territory before creating an area campaign.' }, { status: 400 });
     if (stormContext && !stormContext.success) return NextResponse.json({ error: 'Invalid storm selection' }, { status: 400 });
     const normalizedType = typeof type === 'string' ? type.trim() : type;
 
@@ -306,6 +309,8 @@ export async function POST(request: NextRequest) {
       targetWorkspaceId = fallbackResolution.workspaceId;
     }
 
+    if (stormContext?.success && workspace_id && targetWorkspaceId !== workspace_id) return NextResponse.json({ error: 'Storm workspace access changed. Reopen Storms in your current workspace.' }, { status: 403 });
+
     if (stormContext?.success && stormContext.data.territoryId) {
       const { data: parent, error: parentError } = await admin.from('storm_territories').select('*').eq('workspace_id', targetWorkspaceId).eq('id', stormContext.data.territoryId).maybeSingle();
       if (parentError) return NextResponse.json({ error: 'Could not verify the storm territory. Please retry.' }, { status: 503 });
@@ -318,6 +323,11 @@ export async function POST(request: NextRequest) {
       stormContext.data = sourceContext.data;
       const child = stormTerritoryPolygonSchema.safeParse(territory_boundary);
       if (!child.success) return NextResponse.json({ error: 'Select a valid campaign boundary.' }, { status: 400 });
+    }
+
+    if (stormContext?.success) {
+      delete stormContext.data.campaignMode;
+      if (areaOnly) stormContext.data.campaignMode = 'area';
     }
 
     let { data: canCreateCampaign, error: campaignAllowanceError } = await admin.rpc(
@@ -412,13 +422,13 @@ export async function POST(request: NextRequest) {
       total_flyers: 0,
       scans: 0,
       conversions: 0,
-      status: 'draft',
-      provision_status: territory_boundary ? 'pending' : null,
-      provision_phase: territory_boundary ? 'created' : null,
+      status: areaOnly ? 'active' : 'draft',
+      provision_status: areaOnly ? 'ready' : territory_boundary ? 'pending' : null,
+      provision_phase: areaOnly ? 'map_ready' : territory_boundary ? 'created' : null,
       provision_source: null,
       provisioned_at: null,
       addresses_ready_at: null,
-      map_ready_at: null,
+      map_ready_at: areaOnly ? new Date().toISOString() : null,
       optimized_at: null,
       has_parcels: false,
       building_link_confidence: 0,

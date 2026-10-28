@@ -8,6 +8,50 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Fullscreen removes the surface from its parent's flex layout. Give its
+   absolutely positioned canvas a definite viewport-sized containing block. */
+.storm-fullscreen-surface:fullscreen {
+  position: relative;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--background, #080a19);
+}
+.storm-fullscreen-surface:-webkit-full-screen {
+  position: relative;
+  display: block;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--background, #080a19);
+}
+
+/* Keep app forms readable without iOS focus zoom; allow pinch zoom normally. */
+@media (max-width: 767px) {
+  .storm-workspace .mapboxgl-ctrl-bottom-right,
+  .storm-workspace .mapboxgl-ctrl-bottom-left {
+    bottom: calc(6.5rem + env(safe-area-inset-bottom));
+  }
+  .app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .app-shell select, .app-shell textarea,
+  [data-slot="dialog-content"] input, [data-slot="dialog-content"] textarea {
+    font-size: 16px;
+  }
+}
+
+
+.storm-workspace[data-mobile-campaign] .mapboxgl-ctrl-bottom-left,
+.storm-workspace[data-mobile-campaign] .mapboxgl-ctrl-bottom-right { bottom: 0; }
+
+/* Keep native Storms forms at the iOS focus-zoom threshold. */
+.storm-workspace[data-mobile-campaign] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.storm-workspace[data-mobile-campaign] select,
+.storm-workspace[data-mobile-campaign] textarea {
+  font-size: 16px;
+}
+
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -371,3 +415,22 @@
 .integrations-page [data-slot="card-content"] button {
   min-height: 2.5rem;
 }
+
+/* Native Storms title floats over the map; keep tools below its touch targets. */
+[data-storm-overlay-header] .storm-mobile-toolbar { top: 64px; }
+[data-storm-overlay-header] .storm-mobile-rail { top: 132px; }
+[data-storm-overlay-header] .storm-mobile-status { top: 116px; }
+.storm-workspace[data-mobile-campaign] .mapboxgl-ctrl-group:has(.mapbox-gl-draw_ctrl-draw-btn) { display: none; }
+
+[data-storm-overlay-header] .storm-workspace [role="dialog"] { top: 64px; max-height: calc(100% - 80px); }
+
+/* Full-bleed native Storms: one search pill opposite Close, tools stay in the viewport. */
+[data-storm-map-only] .storm-mobile-toolbar { top: calc(var(--storm-native-top, 0px) + 8px); }
+[data-storm-map-only] .storm-mobile-rail { top: calc(var(--storm-native-top, 0px) + 120px); }
+[data-storm-map-only] .storm-mobile-status { top: calc(var(--storm-native-top, 0px) + 64px); right: 116px; }
+[data-storm-map-only] .storm-workspace [role="dialog"] { top: calc(var(--storm-native-top, 0px) + 64px); max-height: calc(100% - var(--storm-native-top, 0px) - 80px); }
+[data-storm-overlay-header] .storm-mobile-rail { top: 176px; }
+.storm-workspace[data-mobile-campaign] .mapboxgl-canvas-container { touch-action: none; }
+
+/* Keep saved storms aligned with the map action column. */
+[data-storm-map-only] .storm-mobile-rail { top: calc(var(--storm-native-top, 0px) + 176px); }

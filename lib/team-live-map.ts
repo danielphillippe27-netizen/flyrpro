@@ -24,14 +24,14 @@ export async function loadTeamMembers(
   const { data: profiles, error: profilesError } = userIds.length
     ? await supabase
         .from('user_profiles')
-        .select('user_id, first_name, last_name')
+        .select('user_id, first_name, last_name, avatar_url')
         .in('user_id', userIds)
-    : { data: [] as Array<{ user_id: string; first_name: string | null; last_name: string | null }>, error: null };
+    : { data: [] as Array<{ user_id: string; first_name: string | null; last_name: string | null; avatar_url?: string | null }>, error: null };
 
   if (profilesError) throw profilesError;
 
   const profileByUserId = new Map(
-    ((profiles ?? []) as Array<{ user_id: string; first_name: string | null; last_name: string | null }>).map(
+    ((profiles ?? []) as Array<{ user_id: string; first_name: string | null; last_name: string | null; avatar_url?: string | null }>).map(
       (profile) => [profile.user_id, profile]
     )
   );
@@ -40,6 +40,7 @@ export async function loadTeamMembers(
     user_id: row.user_id,
     display_name: displayNameFromProfile(profileByUserId.get(row.user_id)),
     color: row.color ?? '#3B82F6',
+    avatar_url: profileByUserId.get(row.user_id)?.avatar_url ?? null,
   }));
 }
 
@@ -129,6 +130,7 @@ export async function loadLivePresence(
         user_id: row.user_id,
         display_name: member?.display_name ?? 'Member',
         color: member?.color ?? '#3B82F6',
+        avatar_url: member?.avatar_url ?? null,
         campaign_id: row.campaign_id,
         campaign_name: campaign?.title || campaign?.name || 'Campaign',
         session_id: row.session_id,

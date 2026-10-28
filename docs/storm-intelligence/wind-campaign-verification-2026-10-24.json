@@ -1,0 +1,50 @@
+{
+  "archive": {
+    "CA": {
+      "savedHours": 167,
+      "unindexed": 0,
+      "highWindHours93": 142
+    },
+    "US": {
+      "savedHours": 167,
+      "unindexed": 0,
+      "highWindHours93": 167
+    },
+    "AU": {
+      "savedHours": 167,
+      "unindexed": 0,
+      "highWindHours93": 18
+    },
+    "NZ": {
+      "savedHours": 167,
+      "unindexed": 0,
+      "highWindHours93": 13
+    }
+  },
+  "territories": [
+    {
+      "id": "38b550cf-2ab4-49f1-9031-e7016a4e033c",
+      "evidence": "wind-sampled",
+      "range": {
+        "time": "2026-10-24T12:00:00.000Z",
+        "method": "archived-native-grid",
+        "country": "CA",
+        "latitude": 58.55474117686862,
+        "longitude": -97.89394204150119,
+        "maximumKPH": null,
+        "minimumKPH": 93.341952
+      },
+      "revision": 1
+    }
+  ],
+  "campaigns": [
+    {
+      "id": "7a832033-9e76-48e5-846c-f312ebb07b03",
+      "evidence": "wind-sampled",
+      "mode": "area",
+      "territoryId": "38b550cf-2ab4-49f1-9031-e7016a4e033c",
+      "status": "ready",
+      "boundary": true
+    }
+  ]
+}

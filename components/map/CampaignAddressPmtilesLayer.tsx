@@ -612,6 +612,24 @@ export function CampaignAddressPmtilesLayer({
         },
       } as mapboxgl.AnyLayer);
 
+      // Keep homes visible across a storm-sized area. Meter-sized cylinders
+      // disappear at overview zooms, so use screen-sized dots until street level.
+      map.addLayer({
+        id: GLOW_LAYER_ID,
+        type: 'circle',
+        source: SOURCE_ID,
+        maxzoom: ADDRESS_LABEL_MIN_ZOOM,
+        filter: getLayerFilter('Point'),
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2.5, 12, 3.5, 16, 4],
+          'circle-color': addressColorExpression,
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0.95, 16, 0],
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#111827',
+          'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 14, 1, 16, 0],
+        },
+      } as mapboxgl.AnyLayer);
+
       map.addLayer({
         id: LABEL_LAYER_ID,
         type: 'symbol',
@@ -666,7 +684,7 @@ export function CampaignAddressPmtilesLayer({
         try {
           if (!map.isStyleLoaded() || !map.getLayer(CIRCLE_LAYER_ID)) return;
           const features = map.queryRenderedFeatures(event.point, {
-            layers: [CIRCLE_LAYER_ID],
+            layers: [GLOW_LAYER_ID, CIRCLE_LAYER_ID],
           });
           if (features.length > 0) clickHandler(Object.assign(event, { features }));
         } catch {
@@ -683,7 +701,7 @@ export function CampaignAddressPmtilesLayer({
             return;
           }
           const features = map.queryRenderedFeatures(event.point, {
-            layers: [CIRCLE_LAYER_ID],
+            layers: [GLOW_LAYER_ID, CIRCLE_LAYER_ID],
           });
           if (features.length > 0) {
             enterHandler();
@@ -926,7 +944,7 @@ export function CampaignAddressPmtilesLayer({
           source.setData(buildFallbackAddressFeatureCollection(renderAddresses, deletedAddressSet));
         }
         if (map.getLayer(GLOW_LAYER_ID)) {
-          map.setFilter(GLOW_LAYER_ID, getLayerFilter('Polygon'));
+          map.setFilter(GLOW_LAYER_ID, getLayerFilter('Point'));
           map.setPaintProperty(GLOW_LAYER_ID, 'circle-color', addressColorExpression);
         }
         if (map.getLayer(CIRCLE_LAYER_ID)) {

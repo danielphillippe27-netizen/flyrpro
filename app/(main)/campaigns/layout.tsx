@@ -6,6 +6,10 @@ import { CampaignListSidebar } from '@/components/campaigns/CampaignListSidebar'
 import { CampaignsPageHeader } from '@/components/campaigns/CampaignsPageHeader';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { handleWheelScrollContainer } from '@/lib/scrollContainer';
+import { useMobileLayout } from '@/lib/hooks/useMobileLayout';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { List } from 'lucide-react';
 
 const CAMPAIGN_SIDEBAR_COLLAPSED_KEY = 'flyr-campaign-sidebar-collapsed';
 const SIDEBAR_WIDTH = 280;
@@ -54,6 +58,9 @@ export default function CampaignsLayout({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [collapsed, setCollapsed] = useState(false);
+  const isMobile = useMobileLayout();
+  const [mobileListOpen, setMobileListOpen] = useState(pathname === '/campaigns');
+  useEffect(() => { setMobileListOpen(pathname === '/campaigns'); }, [pathname]);
   const headerTitle = useCampaignHeaderTitle();
   const isCreatePage = pathname === '/campaigns/create';
   const isSelfServeCreatePage = isCreatePage && searchParams.get('source') === 'self-serve-demo';
@@ -92,7 +99,7 @@ export default function CampaignsLayout({
 
   return (
     <div className="flex flex-1 h-full min-h-0 w-full overflow-hidden">
-      {!isSelfServeCreatePage ? (
+      {!isSelfServeCreatePage && !isMobile ? (
         <CampaignListSidebar
           onNewCampaign={() => router.push('/campaigns/create')}
           collapsed={collapsed}
@@ -100,8 +107,22 @@ export default function CampaignsLayout({
           width={SIDEBAR_WIDTH}
         />
       ) : null}
+      {isMobile && !isSelfServeCreatePage && (
+        <Sheet open={mobileListOpen} onOpenChange={setMobileListOpen}>
+          <SheetContent side="left" className="flex w-[min(100vw,22rem)] flex-col gap-0 p-0">
+            <SheetHeader className="border-b p-4 text-left"><SheetTitle>Campaigns</SheetTitle></SheetHeader>
+            <div className="flex min-h-0 flex-1 [&>aside]:!w-full" onClick={event => { if ((event.target as HTMLElement).closest('a[href]')) setMobileListOpen(false); }}>
+              <CampaignListSidebar width={320} collapsed={false} onToggleCollapse={() => setMobileListOpen(false)} onNewCampaign={() => { setMobileListOpen(false); router.push('/campaigns/create'); }} />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
-        {!isCreatePage && <CampaignsPageHeader title={headerTitle} />}
+        {!isSelfServeCreatePage && <div className="flex shrink-0 items-center gap-3 border-b bg-card px-3 py-2 md:hidden">
+          <Button variant="outline" className="min-h-11" onClick={() => setMobileListOpen(true)}><List className="h-4 w-4" />Campaigns</Button>
+          <span className="min-w-0 truncate text-sm font-medium">{headerTitle}</span>
+        </div>}
+        {!isCreatePage && !isMobile && <CampaignsPageHeader title={headerTitle} />}
         <div
           ref={mainContentRef}
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain h-full"

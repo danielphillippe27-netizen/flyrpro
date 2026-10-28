@@ -77,3 +77,9 @@ assert.equal(resolveGLRequest(['api', 'tropicalcyclones', 'archive', 'search'], 
 assert.equal(resolveGLRequest(['api', 'users'], 'GET'), null);
 assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '-1hr.png'], 'GET'), null);
 assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '20261010130000.png'], 'GET')?.kind, 'maps');
+
+// Provider setters truncate fractional seconds; an inclusive daily endpoint must still seek safely.
+let providerStart=new Date(0),providerEnd=new Date(0),sought=new Date(0);
+const truncated={pause:()=>{},clear:()=>{},get startDate(){return providerStart;},set startDate(value:Date){providerStart=new Date(Math.floor(+value/1000)*1000);},get endDate(){return providerEnd;},set endDate(value:Date){providerEnd=new Date(Math.floor(+value/1000)*1000);},goToDate:(date:Date)=>{assert(+date>=+providerStart&&+date<=+providerEnd);sought=date;}};
+resetStormTimeline({timeline:truncated,removeWeatherLayer:()=>{}} as unknown as Parameters<typeof resetStormTimeline>[0],new Set(),{start:new Date('2026-10-24T00:00:00Z'),end:new Date('2026-10-24T15:11:11.020Z')},new Date('2026-10-24T15:11:11.020Z'));
+assert.equal(sought.toISOString(),'2026-10-24T15:11:11.000Z');

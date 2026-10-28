@@ -8,10 +8,6 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/field-recordings",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/cron/team-reports",
       "schedule": "0 12 * * *"
     },
@@ -46,6 +42,14 @@
     {
       "path": "/api/cron/storm-collection",
       "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron/storm-australia",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/storm-wind",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

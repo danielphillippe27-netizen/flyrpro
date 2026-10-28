@@ -1,3 +1,5 @@
+import { compositeHailSample } from '../intensity/hail-zone';
+import { hailSamplingBounds } from '../intensity/hail-zone';
 import assert from 'node:assert/strict';
 import { dateWindow, campaignStormSchema, visibleEventFeatures } from '../intelligence/model';
 import { reportEvents, cycloneEvent } from '../intelligence/normalize';
@@ -16,3 +18,15 @@ const cyclone=cycloneEvent({id:'2024-AL-14',profile:{name:'Milton',year:2024,isA
 assert.equal(cyclone.maxWindKPH,290);assert.equal(cyclone.category,'H5');assert.equal(cyclone.features.filter(f=>f.geometry.type==='LineString').length,1);
 assert.equal(cyclone.features.some(f=>f.geometry.type==='Polygon'),false);
 console.log('Storm Intelligence: calendar boundaries, UTC filtering, spatial filtering, report deduplication, hail units, provenance validation and date-line tracks passed');
+
+// Tight camera zoom must not clip numerical hail selection to the phone viewport.
+
+const localHailBounds = hailSamplingBounds([-110.01, 34.99, -109.99, 35.01], [-110, 35]);
+assert(localHailBounds[3] - localHailBounds[1] >= 1.08 - 1e-9);
+assert(Math.abs((localHailBounds[0] + localHailBounds[2]) / 2 + 110) < 1e-9);
+assert(Math.abs((localHailBounds[1] + localHailBounds[3]) / 2 - 35) < 1e-9);
+
+assert.equal(compositeHailSample([null, {value: 50.8, unit: 'mm', nodata: false}]), 50.8, 'One regional source must not wait for an absent regional source');
+assert.equal(compositeHailSample([{value: 1, unit: 'in', nodata: false}, {value: 38.1, unit: 'mm', nodata: false}]), 38.1);
+assert.equal(compositeHailSample([null, {value: -999, nodata: true}]), null, 'A loaded transparent pixel ends the swath');
+assert.equal(compositeHailSample([null, undefined]), undefined, 'Missing tiles remain pending rather than becoming empty pixels');

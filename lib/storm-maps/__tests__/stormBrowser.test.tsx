@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import React, {act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {JSDOM} from 'jsdom';
+import {StormCountryContext} from '../storm-country-context';
+import type {WindCountry} from '../intelligence/wind-archive-format';
+import {StormRegionBrowser} from '../../../components/storm-maps/intelligence/StormRegionBrowser';
+import {recentWindDays,recentMapDates,stormBrowserDefaults} from '../intelligence/storm-browser';
+async function main(){
+ const rows=[{source_time:'2026-10-23T06:00:00Z',captured_at:'2026-10-24T00:00:00Z',metadata:{maximumGustKPH:140,windRegions:[{name:'Montana',maximumKPH:140},{name:'Wyoming',maximumKPH:80}]}},{source_time:'2026-10-23T06:00:00Z',captured_at:'2026-10-23T10:00:00Z',metadata:{maximumGustKPH:200}},{source_time:'2026-10-23T05:00:00Z',metadata:{maximumGustKPH:121}},{source_time:'2026-10-23T04:00:00Z',metadata:{maximumGustKPH:60}},{source_time:'2026-10-22T18:00:00Z',metadata:{maximumGustKPH:100}},{source_time:'invalid',metadata:{maximumGustKPH:150}}];
+ const summaries=recentWindDays(rows);
+ assert.equal(summaries.length,2);assert.equal(summaries[0].hours,2,'Duplicate snapshots are not additional wind hours');assert.equal(summaries[0].maximumKPH,140,'Latest snapshot wins, not stale larger values');assert.equal(summaries[0].peakTime,'2026-10-23T06:00:00.000Z');
+ assert.equal(recentWindDays(rows,120).length,1);assert.deepEqual(summaries[0].regions,['Montana'],'Only states meeting the gust threshold are listed');
+ assert.deepEqual(stormBrowserDefaults(new URLSearchParams('region=au')),{country:'AU',type:'hail'});
+ assert.deepEqual(stormBrowserDefaults(new URLSearchParams('region=wind&country=NZ')),{country:'CA',type:'wind'});
+ assert.equal(stormBrowserDefaults(new URLSearchParams('region=wind&type=hail')).type,'hail','Explicit new filter wins over an old link');
+ assert.deepEqual(recentMapDates(new Date('2026-01-02T01:00:00Z'),3),['2026-01-02','2026-01-01','2025-12-31']);
+ const TestDOM=JSDOM as unknown as new(html:string,options:{url:string})=>{window:Window & typeof globalThis};
+ const dom=new TestDOM('<div id="root"></div>',{url:'https://wolfgrid.app/storms?region=wind&country=US&windTime=2026-10-23T05%3A00%3A00.000Z&minimum=120'});
+ Object.assign(globalThis,{React,self:dom.window,window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true});
+ const sources=new Map<string,{tiles?:string[]}>(),layers=new Map<string,unknown>();
+ const map={setProjection:()=>{},fitBounds:()=>{},flyTo:()=>{},isStyleLoaded:()=>true,getStyle:()=>({layers:[]}),getCenter:()=>({lng:-98,lat:58}),getSource:(id:string)=>sources.get(id),getLayer:(id:string)=>layers.get(id),addSource:(id:string,source:{tiles?:string[]})=>sources.set(id,source),removeSource:(id:string)=>sources.delete(id),addLayer:(layer:{id:string})=>layers.set(layer.id,layer),removeLayer:(id:string)=>layers.delete(id),on:()=>{},off:()=>{},once:()=>{}};
+ const original=globalThis.fetch;
+ globalThis.fetch=(async(input)=>{const url=new URL(String(input),dom.window.location.origin);return Response.json(url.pathname.endsWith('/australia')?{events:[],total:0,nextOffset:null,health:{message:'Ready'},archiveStartsAt:null}:{days:summaries,times:['2026-10-23T06:00:00.000Z','2026-10-23T05:00:00.000Z'],archiveStartsAt:'2026-10-17T14:00:00Z',health:{message:'Ready'},indexingPending:false});}) as typeof fetch;
+ let reportRenders=0;
+ const root=createRoot(document.getElementById('root')!);
+ function Harness(){const [country,setCountry]=React.useState<WindCountry>('US');return <StormCountryContext.Provider value={{country,setCountry}}><label>Country in settings<select aria-label="Storm country" value={country} onChange={event=>setCountry(event.target.value as WindCountry)}>{['CA','US','AU'].map(code=><option key={code} value={code}>{code}</option>)}</select></label><StormRegionBrowser map={map as never} workspaceId="fixture" onAustralianView={()=>{}} onReports={()=>{}} onWindView={()=>{}} windActive onSaveWind={async()=>{throw Error('No save expected');}} onEvent={()=>{}} onTerritory={()=>{}} renderHistory={country=><p>All saved storms for {country}</p>} renderReports={()=>{reportRenders++;return <p>U.S. hail reports</p>;}}/></StormCountryContext.Provider>;}
+ await act(async()=>{root.render(<Harness/>);});
+ assert.equal(document.querySelector('[aria-label="Storm filters"]')!.querySelectorAll('select').length,1,'Only Type appears above the storm list');
+ assert.equal(document.querySelectorAll('select').length,2,'Only Country and Type filters exist');
+ assert.equal(document.querySelector('[aria-label="Wind archive country"]'),null);assert.equal(document.querySelector('[aria-label="Historical wind storm threshold"]'),null);
+ assert(document.body.textContent!.includes('05:00 UTC'),'Campaign evidence reopens its exact saved hour, not a different daily peak');
+ let tile=sources.get('wolfgrid-saved-wind-source')!.tiles![0];assert(tile.includes('minimum=120'));assert.equal(reportRenders,0);
+ const change=async(label:string,value:string)=>{const select=document.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement;await act(async()=>{select.value=value;select.dispatchEvent(new dom.window.Event('change',{bubbles:true}));});};
+ await change('Storm country','AU');
+ assert.equal(sources.has('wolfgrid-saved-wind-source'),false,'Country change opens a clean recent-map list');
+ const row=[...document.querySelectorAll('button')].find(button=>button.textContent?.includes('2026-10-23 · Wind'));assert(row);await act(async()=>{row.click();});
+ tile=sources.get('wolfgrid-saved-wind-source')!.tiles![0];assert(tile.includes('country=AU'));assert(tile.includes('minimum=93.341952'),'A different country returns to the standard wind level');assert(!window.location.search.includes('windTime='),'Changing country clears a saved evidence link');
+ await change('Storm type','hail');assert.equal(document.querySelectorAll('select').length,2,'Australia has no extra location/date/size filters');assert.equal(reportRenders,0,'U.S. reports never appear under Australia');
+ await change('Storm country','CA');assert.equal(reportRenders,0,'U.S. reports never appear under Canada');assert(document.body.textContent!.includes('Daily hail map'));assert.equal(document.querySelectorAll('select').length,2);
+ assert.equal(document.querySelector('option[value="NZ"]'),null,'New Zealand is not offered');
+ await change('Storm country','US');assert(reportRenders>0);assert(document.body.textContent!.includes('U.S. hail reports'));assert.equal(document.querySelectorAll('select').length,2);
+ const historyButton=[...document.querySelectorAll('button')].find(button=>button.textContent==='+ Historic storm');assert(historyButton);await act(async()=>{historyButton.click();});assert(document.body.textContent!.includes('All saved storms for US'));
+ await change('Storm country','CA');assert(!document.body.textContent!.includes('All saved storms for US'),'Changing countries resets historic selection');
+ await act(async()=>{root.unmount();});globalThis.fetch=original;
+ console.log('PASS: two filters only, three supported country routes, country-isolated hail sources, wind day deduplication, peak-hour selection and exact saved-evidence links.');
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

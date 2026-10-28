@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { campaignListEntries } from '../campaign-list-entries';
+import type { CampaignV2, Farm } from '@/types/database';
+
+const campaign = (id: string, extra: Partial<CampaignV2> = {}) => ({ id, owner_id: 'owner', name: id, type: 'flyer', address_source: 'map', total_flyers: 0, scans: 0, conversions: 0, created_at: '2026-10-01T00:00:00Z', status: 'active', ...extra }) as CampaignV2;
+const farm = (id: string, extra: Partial<Farm> = {}) => ({ id, owner_id: 'owner', name: id, workspace_id: 'workspace', created_at: '2026-10-02T00:00:00Z', start_date: '2026-10-01', end_date: '2027-10-01', frequency: 1, is_active: true, ...extra }) as Farm;
+const campaigns = [campaign('regular'), campaign('linked', { storm_context: {} as CampaignV2['storm_context'] }), campaign('storm', { storm_context: {} as CampaignV2['storm_context'] }), campaign('orphan', { description: '[farm:legacy-id]\nBacking campaign' })];
+const farms = [farm('active', { linked_campaign_id: 'linked' }), farm('completed', { is_active: false, owner_id: 'another-member' })];
+const entries = campaignListEntries(campaigns, farms, true);
+assert.equal(entries.length, 4, 'Each farm appears once, without its backing campaign');
+assert.equal(entries.find(entry => entry.id === 'farm:active')?.href, '/farms/active');
+assert.equal(entries.find(entry => entry.id === 'farm:active')?.entryKind, 'farm', 'Farm identity wins over any context on its backing campaign');
+assert.equal(entries.find(entry => entry.id === 'farm:completed')?.status, 'completed');
+assert.equal(entries.find(entry => entry.id === 'farm:completed')?.owner_id, 'another-member', 'Member filtering retains the real farm owner');
+assert.equal(entries.find(entry => entry.id === 'storm')?.entryKind, 'storm');
+assert.equal(entries.find(entry => entry.id === 'regular')?.entryKind, 'campaign');
+assert.equal(entries[0].entryKind, 'farm', 'Farms and campaigns share the same date ordering');
+const disabled = campaignListEntries(campaigns, farms, false);
+assert.deepEqual(disabled.map(entry => entry.id).sort(), ['regular', 'storm'], 'Show Farm off hides farms and their backing records');
+assert.equal(campaignListEntries([campaign('empty')], [], true).length, 1);
+console.log('PASS: unified campaign/farm list, linked-record deduplication, badges, routes, active/completed status, owner identity and Show Farm visibility.');

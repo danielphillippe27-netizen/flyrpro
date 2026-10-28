@@ -12,6 +12,17 @@ export function hailMillimeters(sample: HailSample): number | null {
   if (sample.unit === 'cm') return sample.value * 10;
   return null;
 }
+/** Regional composites may have unloaded sources outside their own coverage.
+ * A measured value wins; a loaded no-data pixel ends the displayed swath.
+ * Undefined means no regional source has answered yet, so loading may be retried.
+ */
+export function compositeHailSample(samples: HailSample[]): number | null | undefined {
+  const measured = samples.map(hailMillimeters).filter((value): value is number => value != null);
+  if (measured.length) return Math.max(...measured);
+  if (samples.some(sample => sample != null)) return null;
+  return undefined;
+}
+
 export function bandForHail(mm: number) {
   if (!Number.isFinite(mm) || mm <= 0) throw new Error('No estimated hail at this point. Click inside a shaded hail area.');
   const minimum = [...HAIL_BANDS].reverse().find(value => mm >= value);
@@ -63,4 +74,13 @@ export function smoothHailBoundary(boundary: GeoJSON.Feature<GeoJSON.Polygon>) {
   }
   if(!smoothed||smoothed.geometry.type!=='Polygon'||kinks(smoothed).features.length)return boundary;
   return smoothed as GeoJSON.Feature<GeoJSON.Polygon>;
+}
+
+/** Sampling stays regional when the camera is close; outlines must not be clipped to the phone screen. */
+export function hailSamplingBounds(view: [number, number, number, number], point: [number, number]): [number, number, number, number] {
+  const [lon, lat] = point;
+  // At least 120 km across, with the tapped location in the middle of the sample grid.
+  const halfLat = Math.max(0.54, Math.min(1.5, (view[3] - view[1]) / 2));
+  const halfLon = halfLat / Math.max(0.2, Math.cos(lat * Math.PI / 180));
+  return [Math.max(-180, lon - halfLon), Math.max(-85, lat - halfLat), Math.min(180, lon + halfLon), Math.min(85, lat + halfLat)];
 }

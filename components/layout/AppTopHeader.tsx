@@ -450,7 +450,7 @@ export default function AppTopHeader() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="shrink-0 md:hidden"
+                className="h-11 w-11 shrink-0 md:hidden"
                 onClick={mainLayoutNav.openMobileNav}
                 aria-label="Open menu"
               >
@@ -462,14 +462,14 @@ export default function AppTopHeader() {
               alt="WolfGrid"
               width={120}
               height={60}
-              className="h-9 w-auto max-w-[min(58vw,162px)] shrink-0 object-contain object-left dark:hidden"
+              className="h-9 w-auto max-w-[104px] sm:max-w-[162px] shrink-0 object-contain object-left dark:hidden"
             />
             <Image
               src="/brand/wolfgrid-header-dark.svg"
               alt="WolfGrid"
               width={120}
               height={60}
-              className="hidden h-9 w-auto max-w-[min(58vw,162px)] shrink-0 object-contain object-left dark:block"
+              className="hidden h-9 w-auto max-w-[104px] sm:max-w-[162px] shrink-0 object-contain object-left dark:block"
             />
 
             {accessLevel === 'salesperson' ? (
@@ -499,7 +499,7 @@ export default function AppTopHeader() {
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {showPlanAndFeedback && planBadgeLabel ? (
               <div
-                className={`inline-flex max-w-[5.5rem] truncate rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold sm:max-w-none sm:px-2 sm:py-1 sm:text-[11px] ${
+                className={`hidden sm:inline-flex max-w-[5.5rem] truncate rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold sm:max-w-none sm:px-2 sm:py-1 sm:text-[11px] ${
                   isTrialBadge ? 'text-red-600 dark:text-red-400' : 'text-foreground'
                 }`}
               >
@@ -511,7 +511,7 @@ export default function AppTopHeader() {
                 variant="outline"
                 size="sm"
                 onClick={() => setFeedbackOpen(true)}
-                className="px-2 transition-shadow sm:px-3 data-[feedback-guided=true]:ring-4 data-[feedback-guided=true]:ring-red-400/60 data-[feedback-guided=true]:ring-offset-2 motion-safe:data-[feedback-guided=true]:animate-pulse dark:data-[feedback-guided=true]:ring-red-500/70 dark:data-[feedback-guided=true]:ring-offset-background"
+                className="hidden sm:inline-flex px-2 transition-shadow sm:px-3 data-[feedback-guided=true]:ring-4 data-[feedback-guided=true]:ring-red-400/60 data-[feedback-guided=true]:ring-offset-2 motion-safe:data-[feedback-guided=true]:animate-pulse dark:data-[feedback-guided=true]:ring-red-500/70 dark:data-[feedback-guided=true]:ring-offset-background"
                 data-self-serve-demo-flow="true"
                 data-feedback-trigger="true"
                 data-feedback-guided="false"
@@ -525,7 +525,7 @@ export default function AppTopHeader() {
                 variant="outline"
                 size="sm"
                 onClick={() => setSalesHelpOpen(true)}
-                className="px-2 sm:px-3"
+                className="hidden lg:inline-flex px-2 sm:px-3"
                 aria-label="Help me sell WolfGrid"
                 title="Help me sell WolfGrid"
               >
@@ -539,7 +539,7 @@ export default function AppTopHeader() {
               onClick={() => setNotificationsOpen(true)}
               aria-label="Notifications"
               title="Notifications"
-              className="relative"
+              className="relative h-11 w-11 sm:h-9 sm:w-9"
             >
               <Bell className="h-4 w-4" />
               {notificationUnreadCount > 0 ? (
@@ -570,6 +570,7 @@ export default function AppTopHeader() {
               onClick={toggleTheme}
               aria-label="Toggle theme"
               title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="hidden sm:inline-flex"
             >
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
@@ -578,7 +579,7 @@ export default function AppTopHeader() {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  className="relative flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   title={profile.fullName ?? profile.email ?? 'Profile menu'}
                   aria-label="Open profile menu"
                 >
@@ -612,6 +613,12 @@ export default function AppTopHeader() {
                   <UserRound />
                   Edit profile
                 </DropdownMenuItem>
+                <DropdownMenuItem className="sm:hidden" onSelect={toggleTheme}>
+                  {theme === 'dark' ? <Sun /> : <Moon />} Switch theme
+                </DropdownMenuItem>
+                {showPlanAndFeedback && <DropdownMenuItem className="sm:hidden" onSelect={() => setFeedbackOpen(true)}>Send feedback</DropdownMenuItem>}
+                {showSalesHelp && <DropdownMenuItem className="lg:hidden" onSelect={() => setSalesHelpOpen(true)}>Help me sell WolfGrid</DropdownMenuItem>}
+                {showPlanAndFeedback && planBadgeLabel && <DropdownMenuLabel className="sm:hidden text-xs text-muted-foreground">{planBadgeLabel}</DropdownMenuLabel>}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem variant="destructive" disabled={signingOut} onSelect={() => void handleSignOut()}>
                   <LogOut />
