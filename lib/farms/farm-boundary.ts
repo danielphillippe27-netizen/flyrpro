@@ -6,6 +6,11 @@ export function parseFarmBoundary(value: unknown): GeoJSON.Polygon | null {
   if (typeof candidate === 'string') {
     try { candidate = JSON.parse(candidate); } catch { return null; }
   }
+  if (candidate && typeof candidate === 'object' && 'type' in candidate && 'coordinates' in candidate) {
+    const geometry = candidate as { type: unknown; coordinates: unknown; crs?: { properties?: { name?: unknown } } };
+    if (geometry.crs && geometry.crs.properties?.name !== 'EPSG:4326') return null;
+    candidate = { type: geometry.type, coordinates: geometry.coordinates };
+  }
   const result = stormGeometrySchema.safeParse(candidate);
   return result.success && result.data.type === 'Polygon' ? result.data : null;
 }
