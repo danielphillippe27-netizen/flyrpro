@@ -1,5 +1,9 @@
 'use client';
 
+import { OpenAIConnection } from '@/components/crm-ai/OpenAIConnection';
+
+import { GmailConnection } from '@/components/outreach/GmailConnection';
+
 import { KimiCocoCard } from './KimiCocoCard';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -1163,6 +1167,7 @@ export default function IntegrationsPage() {
             <Button onClick={() => router.push('/subscribe?reason=integrations')}>
               View Pro workspace plans
             </Button>
+            <a href="/settings/mac" className="mt-4 block text-sm underline">Mac &amp; personal OpenAI settings</a>
           </CardContent>
         </Card>
       </div>
@@ -1207,6 +1212,13 @@ export default function IntegrationsPage() {
       
       <main className="integrations-page mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <div className="space-y-6">
+          <GmailConnection />
+          <OpenAIConnection />
+          <a href="/settings/mac" className="block rounded-xl border border-border p-5 hover:bg-muted/50">
+            <h3 className="font-semibold">Mac contacts &amp; messages</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Choose Apple Contacts and import private message history for selected people with the Mac companion.</p>
+            <span className="mt-2 inline-block text-sm">Open Mac setup →</span>
+          </a>
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
             <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6">
               <div className="max-w-2xl">

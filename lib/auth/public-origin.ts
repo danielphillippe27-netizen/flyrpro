@@ -10,6 +10,19 @@ const LEGACY_PRODUCTION_HOSTS = new Set([
  * later return to it (OAuth, email confirmation, and password recovery).
  */
 export function resolvePublicAppOrigin(fallbackOrigin?: string): string {
+  // OAuth's verifier cookie belongs to the initiating origin. A production
+  // APP_URL in a developer's environment must not move localhost's callback.
+  if (fallbackOrigin) {
+    try {
+      const local = new URL(fallbackOrigin);
+      if (
+        ['http:', 'https:'].includes(local.protocol) &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(local.hostname)
+      ) return local.origin;
+    } catch {
+      // Continue with the configured public origin for invalid fallbacks.
+    }
+  }
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const rawOrigin = configuredOrigin || fallbackOrigin || DEFAULT_APP_ORIGIN;
 

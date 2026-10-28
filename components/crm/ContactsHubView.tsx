@@ -1,5 +1,7 @@
 'use client';
 
+import { ContactOutreach } from '@/components/outreach/ContactOutreach';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Upload } from 'lucide-react';
@@ -494,6 +496,8 @@ export function ContactsHubView() {
             </div>
           </div>
         )}
+
+        <ContactOutreach contacts={visibleContacts.filter(c => selectedContactIds.length === 0 || selectedContactIds.includes(c.id))} />
 
         <LeadsTableView
           contacts={visibleContacts}

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { landingAuthRedirect } from '../landing-redirect';
+assert.equal(landingAuthRedirect('?code=google-code', ''), '/auth/callback?code=google-code&next=%2Fhome');
+assert.equal(landingAuthRedirect('?code=apple-code&next=%2Ffarms%2Ffarm-1', ''), '/auth/callback?code=apple-code&next=%2Ffarms%2Ffarm-1');
+assert.equal(landingAuthRedirect('?code=recovery-code&type=recovery', ''), '/reset-password?code=recovery-code&type=recovery');
+assert.equal(landingAuthRedirect('', '#type=recovery&access_token=fake&refresh_token=fake'), '/reset-password#type=recovery&access_token=fake&refresh_token=fake');
+assert.equal(landingAuthRedirect('?token_hash=legacy', ''), '/reset-password?token_hash=legacy');
+assert.equal(landingAuthRedirect('?code=google-code&token=legacy', ''), '/auth/callback?code=google-code&token=legacy&next=%2Fhome');
+assert.equal(landingAuthRedirect('?error=access_denied&error_code=otp_expired', ''), '/login?error=reset_link_invalid');
+assert.equal(landingAuthRedirect('?error=access_denied&error_code=other', ''), '/login?error=auth_failed');
+assert.equal(landingAuthRedirect('?source=campaign', ''), null);
+assert.equal(landingAuthRedirect('', '#access_token=fake&refresh_token=fake&type=bearer'), null, 'An ordinary authenticated session is not a password-recovery flow');
+console.log('PASS Google/Apple root fallback routes PKCE codes to callback; explicit and legacy recovery routes preserved; non-recovery tokens never open password reset.');

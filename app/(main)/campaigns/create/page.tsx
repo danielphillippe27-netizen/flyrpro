@@ -22,7 +22,6 @@ import {
 } from '@/lib/territory/use-territory-create-phase';
 import { createClient, getClientAsync } from '@/lib/supabase/client';
 import { useTheme } from '@/lib/theme-provider';
-import { useFarmEnabled } from '@/lib/hooks/useFarmEnabled';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getIndustryCopy } from '@/lib/industry-copy';
 import { getMapboxToken, removeMapboxMapWhenSafe } from '@/lib/mapbox';
@@ -456,7 +455,6 @@ export default function CreateCampaignPage() {
   const searchParams = useSearchParams();
   const { theme } = useTheme();
   const { currentWorkspace, currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
-  const { enabled: farmEnabled } = useFarmEnabled(currentWorkspaceId);
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const copy = getIndustryCopy(isSelfServeDemo ? undefined : currentWorkspace?.industry);
   const shouldResumeSelfServeCampaign = isSelfServeDemo && searchParams.get('resumeCampaign') === '1';
@@ -2338,7 +2336,7 @@ export default function CreateCampaignPage() {
     <div className={`h-full min-h-0 flex flex-col overflow-hidden ${isSelfServeDemo ? 'bg-white' : 'bg-gray-50 dark:bg-background'}`}>
       <div className="relative min-h-0 flex-1">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
-        {!isSelfServeDemo && farmEnabled && <CampaignFarmDialog open={!!farmCreation} onOpenChange={open => { if (!open) setFarmCreation(null); }} initialBoundary={farmCreation?.boundary} initialName={farmCreation?.name} />}
+        {!isSelfServeDemo && <CampaignFarmDialog open={!!farmCreation} onOpenChange={open => { if (!open) setFarmCreation(null); }} initialBoundary={farmCreation?.boundary} initialName={farmCreation?.name} />}
         {!isSelfServeDemo ? (
           <MapInfoButton show={mapLoaded} besideContent={<div className="flex items-center gap-2">
           <StormMapsControl
@@ -2365,7 +2363,7 @@ export default function CreateCampaignPage() {
               }
             }}
           />
-          {farmEnabled ? <button type="button" disabled={!mapLoaded || loading || provisioning} onClick={() => setFarmCreation({ boundary: getDrawnPolygon(drawRef.current), name })} className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-emerald-200/60 bg-black px-3 text-xs font-semibold text-white disabled:opacity-50"><Sprout className="h-3 w-3 text-emerald-300" aria-hidden="true" />Farm</button> : null}
+          <button type="button" disabled={!mapLoaded || loading || provisioning} onClick={() => setFarmCreation({ boundary: getDrawnPolygon(drawRef.current), name })} className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-emerald-200/60 bg-black px-3 text-xs font-semibold text-white disabled:opacity-50"><Sprout className="h-3 w-3 text-emerald-300" aria-hidden="true" />Farm</button>
           </div>} />
         ) : null}
         {!isSelfServeDemo && mapLoaded && map.current && (

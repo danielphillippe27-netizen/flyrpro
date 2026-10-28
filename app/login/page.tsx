@@ -395,7 +395,7 @@ export default function LoginPage() {
       const supabase = await getClientAsync();
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo },
+        options: { redirectTo, queryParams: { prompt: 'select_account' } },
       });
       if (error) throw error;
       if (data?.url) window.location.href = data.url;

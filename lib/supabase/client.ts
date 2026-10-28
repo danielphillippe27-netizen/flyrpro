@@ -34,10 +34,8 @@ export function getClientAsync(): Promise<SupabaseClient> {
         reject(err);
       }
     };
-    if (typeof requestAnimationFrame !== 'undefined') {
-      requestAnimationFrame(() => setTimeout(run, 0));
-    } else {
-      setTimeout(run, 50);
-    }
+    // Deferring to a task still avoids hydration-time initialization, without
+    // waiting for an animation frame that hidden browser tabs may never render.
+    setTimeout(run, 0);
   });
 }

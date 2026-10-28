@@ -5,12 +5,12 @@ export type StormAddressCount = { count: number; partial: boolean; zoom: number;
 type Entry = { promise: Promise<StormAddressCount>; abort: AbortController; users: number; settled: boolean; expires: number };
 // The count display and campaign action share one scan of the same workspace/boundary.
 const scans = new Map<string, Entry>();
-function acquire(key: string, workspaceId: string, body: string): Entry {
+function acquire(key: string, workspaceId: string, body: string, endpoint: string): Entry {
   const previous = scans.get(key);
   if (previous && (!previous.settled || previous.expires > Date.now())) { previous.users++; return previous; }
   const abort = new AbortController();
   const entry: Entry = { abort, users: 1, settled: false, expires: 0, promise: Promise.resolve(null as never) };
-  entry.promise = fetch(`/api/storm-maps/intelligence/address-count?workspaceId=${encodeURIComponent(workspaceId)}`, {
+  entry.promise = fetch(`${endpoint}?workspaceId=${encodeURIComponent(workspaceId)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: abort.signal,
   }).then(async response => {
     const data = await response.json();
@@ -26,9 +26,9 @@ function acquire(key: string, workspaceId: string, body: string): Entry {
   }
   return entry;
 }
-export function useStormTerritoryAddressCount(workspaceId: string, boundary?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null) {
+export function useStormTerritoryAddressCount(workspaceId: string, boundary?: GeoJSON.Polygon | GeoJSON.MultiPolygon | null, endpoint = '/api/storm-maps/intelligence/address-count') {
   const serialized = boundary ? JSON.stringify(boundary) : '';
-  const key = `${workspaceId}:${serialized}`;
+  const key = `${endpoint}:${workspaceId}:${serialized}`;
   const [result, setResult] = useState<{ key: string; data?: StormAddressCount; error?: string }>({ key: '' });
   const [retry, setRetry] = useState(0);
   useEffect(() => {
@@ -37,7 +37,7 @@ export function useStormTerritoryAddressCount(workspaceId: string, boundary?: Ge
     let entry: Entry | undefined;
     setResult({ key });
     const timer = setTimeout(() => {
-      entry = acquire(key, workspaceId, serialized);
+      entry = acquire(key, workspaceId, serialized, endpoint);
       entry.promise.then(data => { if (active) setResult({ key, data }); })
         .catch(reason => { if (active) setResult({ key, error: reason instanceof Error ? reason.message : 'Address count unavailable.' }); });
     }, 500);
@@ -48,6 +48,6 @@ export function useStormTerritoryAddressCount(workspaceId: string, boundary?: Ge
         if (scans.get(key) === entry) scans.delete(key);
       }
     };
-  }, [key, workspaceId, serialized, retry]);
+  }, [key, workspaceId, serialized, retry, endpoint]);
   return { ...(result.key === key ? result : { key }), retry: () => setRetry(value => value + 1) };
 }

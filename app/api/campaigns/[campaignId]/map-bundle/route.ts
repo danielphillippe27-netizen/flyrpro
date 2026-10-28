@@ -1,6 +1,7 @@
 import { areaCampaignMapBundle } from '@/lib/storm-maps/intelligence/area-campaign';
 import { NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
+import { readCanonicalTileBundle } from '@/lib/services/CanonicalTileArtifacts';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import {
@@ -170,6 +171,33 @@ export async function GET(
     }
 
     const signature = clientSignature(request);
+    if (request.nextUrl.searchParams.get('format') === 'tiles-v2') {
+      const tiled = await measured('bundle', spans, () => readCanonicalTileBundle(
+        supabase, campaignId, request.nextUrl.searchParams.get('platform') ?? 'web', request.nextUrl.origin
+      ));
+      if (!tiled) {
+        return jsonResponse({ schema: 'tiles-v2', status: 'unavailable' }, {
+          status: 409, spans, startedAt,
+        });
+      }
+      const extraHeaders = { ETag: etagForSignature(tiled.asset_signature), 'X-WolfGrid-Map-Bundle-Cache': 'tiles-v2' };
+      // Mobile field tools still use exact canonical geometry for edits, routes and
+      // offline work. Keep that contract during the renderer migration; the map
+      // reads PMTiles instead of uploading these polygons to a GeoJSON source.
+      if (signature !== tiled.asset_signature && request.nextUrl.searchParams.get('include') === 'canonical') {
+        const canonical = await readCurrentCampaignMapBundle(supabase, campaignId);
+        if (!canonical || canonical.asset_signature !== tiled.canonical_signature) {
+          return jsonResponse({ schema: 'tiles-v2', status: 'unavailable' }, { status: 409, spans, startedAt });
+        }
+        return jsonResponse({ ...responseFromCampaignMapBundleRow(canonical),
+          schema: tiled.schema, asset_signature: tiled.asset_signature,
+          canonical_signature: tiled.canonical_signature, tiles: tiled.tiles,
+        }, { status: 200, spans, startedAt, extraHeaders });
+      }
+      return signature === tiled.asset_signature
+        ? emptyResponse({ status: 304, spans, startedAt, extraHeaders })
+        : jsonResponse(tiled, { status: 200, spans, startedAt, extraHeaders });
+    }
     const current = await measured(signature ? 'bundle' : 'signature', spans, () =>
       readCurrentCampaignMapBundle(supabase, campaignId)
     );

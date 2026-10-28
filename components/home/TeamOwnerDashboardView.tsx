@@ -244,7 +244,7 @@ export function TeamOwnerDashboardView() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="w-full min-w-0 px-4 sm:px-6 lg:px-8 py-6">
         <h1 className="text-2xl font-semibold text-foreground mb-4 text-center">Team dashboard</h1>
         <TeamControlsBar
           range={range}

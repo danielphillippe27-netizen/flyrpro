@@ -1,5 +1,7 @@
 'use client';
 
+import { ContactOutreach } from '@/components/outreach/ContactOutreach';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FarmActivityCalendar } from '@/components/farms/FarmActivityCalendar';
@@ -11,8 +13,6 @@ import {
   DollarSign,
   ListTodo,
   Plus,
-  MapPinned,
-  Search,
   Settings2,
   TrendingUp,
   Users,
@@ -49,6 +49,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { FarmNavigation } from '@/components/farms/FarmNavigation';
 import { Textarea } from '@/components/ui/textarea';
+import { FarmBusinessCardMetrics } from '@/components/farms/FarmBusinessCardMetrics';
 import { FarmPerformanceDashboard } from '@/components/farms/FarmPerformanceDashboard';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
 import { FarmMapView } from '@/components/farms/FarmMapView';
@@ -131,33 +132,11 @@ function formatDateLabel(value: string | null | undefined): string {
   });
 }
 
-function normalizeSearchText(value: string | null | undefined): string {
-  return value?.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() ?? '';
-}
-
 function getFarmAddressText(address: FarmAddress): string {
   if (address.house_number && address.street_name) {
     return `${address.house_number} ${address.street_name}`;
   }
   return address.formatted || '—';
-}
-
-function getFarmAddressSearchCandidates(address: FarmAddress): string[] {
-  const primaryAddress = getFarmAddressText(address);
-  const fullAddress = [
-    primaryAddress,
-    address.formatted,
-    address.locality,
-    address.region,
-    address.postal_code,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-
-  return Array.from(
-    new Set([primaryAddress, address.formatted, fullAddress].map(normalizeSearchText).filter(Boolean))
-  );
 }
 
 function formatRelativeDueLabel(daysFromNow: number | null): string {
@@ -259,7 +238,6 @@ export default function FarmPage() {
   const [configTouchTypes, setConfigTouchTypes] = useState<FarmTouchType[]>([]);
   const [configAnnualBudget, setConfigAnnualBudget] = useState('');
   const [configActive, setConfigActive] = useState(true);
-  const [homesSearchQuery, setHomesSearchQuery] = useState('');
   const [leadsSearchQuery, setLeadsSearchQuery] = useState('');
   const [createContactOpen, setCreateContactOpen] = useState(false);
   const [selectedHomeContactAddress, setSelectedHomeContactAddress] = useState<{
@@ -595,84 +573,6 @@ export default function FarmPage() {
     setPlanDrafts(plannerSlots);
   }, [plannerSlots]);
 
-  const homesWithContacts = useMemo(() => {
-    const farmAddressIdByCampaignAddressId = new Map<string, string>();
-    const farmAddressIdsByCandidate = new Map<string, Set<string>>();
-
-    for (const address of addresses) {
-      if (address.campaign_address_id) {
-        farmAddressIdByCampaignAddressId.set(address.campaign_address_id, address.id);
-      }
-
-      for (const candidate of getFarmAddressSearchCandidates(address)) {
-        const ids = farmAddressIdsByCandidate.get(candidate) ?? new Set<string>();
-        ids.add(address.id);
-        farmAddressIdsByCandidate.set(candidate, ids);
-      }
-    }
-
-    const contactsByAddressId = new Map<string, Contact[]>();
-
-    for (const contact of contacts) {
-      const matchedAddressIds = new Set<string>();
-
-      if (contact.address_id) {
-        const farmAddressId = farmAddressIdByCampaignAddressId.get(contact.address_id);
-        if (farmAddressId) {
-          matchedAddressIds.add(farmAddressId);
-        }
-      }
-
-      const normalizedContactAddress = normalizeSearchText(contact.address);
-      if (normalizedContactAddress) {
-        farmAddressIdsByCandidate.get(normalizedContactAddress)?.forEach((addressId) => {
-          matchedAddressIds.add(addressId);
-        });
-      }
-
-      matchedAddressIds.forEach((addressId) => {
-        const existing = contactsByAddressId.get(addressId) ?? [];
-        if (!existing.some((entry) => entry.id === contact.id)) {
-          existing.push(contact);
-          contactsByAddressId.set(addressId, existing);
-        }
-      });
-    }
-
-    return addresses.map((address) => ({
-      ...address,
-      matchedContacts: contactsByAddressId.get(address.id) ?? [],
-    }));
-  }, [addresses, contacts]);
-
-  const filteredHomes = useMemo(() => {
-    const query = normalizeSearchText(homesSearchQuery);
-    if (!query) return homesWithContacts;
-
-    return homesWithContacts.filter((address) => {
-      const searchText = [
-        getFarmAddressText(address),
-        address.formatted,
-        address.postal_code,
-        address.street_name,
-        address.locality,
-        address.region,
-        ...address.matchedContacts.flatMap((contact) => [
-          contact.full_name,
-          contact.phone,
-          contact.email,
-          contact.address,
-        ]),
-      ]
-        .map(normalizeSearchText)
-        .join(' ');
-
-      return searchText.includes(query);
-    });
-  }, [homesSearchQuery, homesWithContacts]);
-
-  const visibleHomes = useMemo(() => filteredHomes.slice(0, 500), [filteredHomes]);
-
   const dedupedLinkedCampaignAddresses = useMemo(() => {
     const logicalAddresses = new Map<string, CampaignAddress>();
     const addressKey = (address: CampaignAddress) =>
@@ -733,6 +633,7 @@ export default function FarmPage() {
     const rows = [
       ...contacts.map((contact) => ({
         key: `contact-${contact.id}`,
+        contactId: contact.id,
         name: contact.full_name,
         phone: contact.phone,
         email: contact.email,
@@ -742,6 +643,7 @@ export default function FarmPage() {
       })),
       ...leads.map((lead) => ({
         key: `lead-${lead.id}`,
+        contactId: undefined,
         name: lead.name,
         phone: lead.phone,
         email: lead.email,
@@ -753,6 +655,17 @@ export default function FarmPage() {
     return rows.filter((row) => !query || [row.name, row.phone, row.email, row.address]
       .some((value) => value?.toLowerCase().includes(query)));
   }, [contacts, leads, leadsSearchQuery]);
+
+  const handleDeleteFarmContact = async (contactId: string) => {
+    if (!confirm('Delete this contact?')) return;
+    try {
+      await ContactsService.deleteContact(contactId);
+      await loadData(userId);
+    } catch (error) {
+      console.error('Delete farm contact:', error);
+      alert(error instanceof Error ? error.message : 'Failed to delete contact');
+    }
+  };
 
   const handleOpenCreateContact = useCallback((address: FarmAddress) => {
     setSelectedHomeContactAddress({
@@ -1327,7 +1240,7 @@ export default function FarmPage() {
     <div className={`bg-muted/30 dark:bg-background relative ${activeTab === 'map' ? 'h-full overflow-hidden' : 'min-h-full'}`}>
       <main className={`w-full p-2 sm:p-3 ${activeTab === 'map' ? 'flex h-full flex-col' : ''}`}>
       <Tabs value={activeTab} onValueChange={setActiveTab} className={`w-full ${activeTab === 'map' ? 'min-h-0 flex-1' : ''}`}>
-        <FarmNavigation activeTab={activeTab} onSelect={setActiveTab} />
+        <FarmNavigation />
 
         <TabsContent value="overview" className="mt-1 space-y-4">
           <FarmPerformanceDashboard
@@ -1369,8 +1282,9 @@ export default function FarmPage() {
           </FarmPlanModes>
 
           <details className="rounded-2xl border border-border/60 bg-card p-5">
-            <summary className="cursor-pointer text-sm font-medium">More analytics <span className="ml-2 text-xs font-normal text-muted-foreground">Sessions, spend & cadence</span></summary>
+            <summary className="cursor-pointer text-sm font-medium">More analytics <span className="ml-2 text-xs font-normal text-muted-foreground">Cards, sessions, spend & cadence</span></summary>
             <div className="mt-5 space-y-4">
+              <FarmBusinessCardMetrics farmId={farm.id} />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div className="bg-card p-4 rounded-xl border border-border">
               <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -1570,92 +1484,6 @@ export default function FarmPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="homes" className="mt-1">
-          <div className="bg-card p-4 rounded-xl border border-border">
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <MapPinned className="w-4 h-4" />
-                  Homes In Farm
-                  <Badge variant="secondary" className="text-xs">
-                    {addresses.length}
-                  </Badge>
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Search by address, postal code, or linked contacts.
-                </p>
-              </div>
-              <div className="relative w-full max-w-md">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={homesSearchQuery}
-                  onChange={(event) => setHomesSearchQuery(event.target.value)}
-                  placeholder="Search homes, postal codes, or contacts..."
-                  className="pl-9"
-                  aria-label="Search homes"
-                />
-              </div>
-            </div>
-            {addresses.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No homes have been generated for this farm yet.</p>
-            ) : visibleHomes.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No homes match your search.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-muted-foreground">
-                      <th className="pb-2 pr-3 font-medium">Address</th>
-                      <th className="pb-2 pr-3 font-medium">Contacts</th>
-                      <th className="pb-2 pr-3 font-medium">Postal code</th>
-                      <th className="pb-2 pr-3 font-medium">Street</th>
-                      <th className="pb-2 pr-3 font-medium">Visits</th>
-                      {userId ? <th className="pb-2 pr-3 font-medium">Actions</th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleHomes.map((address) => {
-                      const contactsText =
-                        address.matchedContacts
-                          .map((contact) => contact.full_name || contact.email || contact.phone || 'Unnamed contact')
-                          .join(', ') || '—';
-
-                      return (
-                        <tr key={address.id} className="border-b border-border/50">
-                          <td className="py-2 pr-3">{address.formatted}</td>
-                          <td className="py-2 pr-3 max-w-[280px] truncate text-muted-foreground" title={contactsText}>
-                            {contactsText}
-                          </td>
-                          <td className="py-2 pr-3">{address.postal_code || '—'}</td>
-                          <td className="py-2 pr-3">{address.street_name || '—'}</td>
-                          <td className="py-2 pr-3">{address.visited_count ?? 0}</td>
-                          {userId ? (
-                            <td className="py-2 pr-3">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleOpenCreateContact(address)}
-                              >
-                                Add contact
-                              </Button>
-                            </td>
-                          ) : null}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {filteredHomes.length > visibleHomes.length ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Showing the first {visibleHomes.length} matching homes.
-              </p>
-            ) : null}
-          </div>
-        </TabsContent>
-
         <TabsContent value="leads" className="mt-1">
           <div className="bg-card p-4 rounded-xl border border-border">
             <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -1671,6 +1499,7 @@ export default function FarmPage() {
                 Add contact
               </Button>
             </div>
+            <div className="mb-4"><ContactOutreach contacts={contacts} /></div>
             <div className="relative mb-4">
               <input
                 type="text"
@@ -1698,6 +1527,7 @@ export default function FarmPage() {
                       <th className="pb-2 pr-3 font-medium">Address</th>
                       <th className="pb-2 pr-3 font-medium">Last contacted</th>
                       <th className="pb-2 pr-3 font-medium">Status</th>
+                      <th className="pb-2 w-16 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1707,8 +1537,20 @@ export default function FarmPage() {
                         <td className="py-2 pr-3 text-foreground">{lead.phone || '—'}</td>
                         <td className="py-2 pr-3 text-foreground">{lead.email || '—'}</td>
                         <td className="py-2 pr-3 text-foreground max-w-[180px] truncate" title={lead.address || undefined}>{lead.address || '—'}</td>
-                        <td className="py-2 pr-3 text-foreground">{formatDateLabel(lead.lastContacted)}</td>
+                        <td className="py-2 pr-3 text-foreground">{lead.lastContacted ? formatDateLabel(lead.lastContacted) : '—'}</td>
                         <td className="py-2 pr-3 text-foreground">{lead.status || '—'}</td>
+                        <td className="py-2">
+                          {lead.contactId ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteFarmContact(lead.contactId!)}
+                              className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-muted text-xs"
+                              aria-label={`Delete ${lead.name || 'contact'}`}
+                            >
+                              Delete
+                            </button>
+                          ) : '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

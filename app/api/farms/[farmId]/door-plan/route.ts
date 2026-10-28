@@ -42,7 +42,9 @@ export async function PUT(request: NextRequest, context: Context) {
       await result.admin.from('farm_addresses').select('id, formatted, street_name, house_number, last_outcome_status')
         .eq('farm_id', result.farm.id).order('id').range(from, to));
     if (!homes.length) return NextResponse.json({ error: 'Import farm homes before saving a door plan.' }, { status: 409 });
-    const plan = buildFarmDoorPlan(homes, body.startDate, body.doorsPerDay);
+    let plan;
+    try { plan = buildFarmDoorPlan(homes, body.startDate, body.doorsPerDay, body.calendar); }
+    catch (error) { return NextResponse.json({ error: formatApiError(error) }, { status: 400 }); }
     const { error } = await result.admin.from('farms').update({ door_plan: plan }).eq('id', result.farm.id);
     if (error) throw error;
     return NextResponse.json({ plan });

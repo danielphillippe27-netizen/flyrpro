@@ -12,6 +12,8 @@ import {
   type AnnualCoveragePlan,
   type AnnualCoverageSettings,
 } from "@/lib/farms/annual-coverage";
+import { FarmOutreachQuestions } from './FarmOutreachQuestions';
+import { defaultOutreachSettings, forecastOutreach } from '@/lib/farms/outreach-schedule';
 import { validPlanDate } from "@/lib/farms/door-plan";
 import type {
   FarmAddress,
@@ -35,6 +37,7 @@ function settingsKey(settings: AnnualCoverageSettings) {
     settings.homesPerWeek,
     settings.weeksInPlan,
     [...settings.weeksOff].sort(),
+    settings.outreach ?? null,
   ]);
 }
 
@@ -56,6 +59,7 @@ export function FarmAnnualCoveragePlan({
     homesPerWeek: 100,
     weeksInPlan: 52,
     weeksOff: [],
+    outreach: defaultOutreachSettings(),
   }));
   const [saved, setSaved] = useState<AnnualCoveragePlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,6 +90,7 @@ export function FarmAnnualCoveragePlan({
             homesPerWeek: data.plan.homesPerWeek,
             weeksInPlan: data.plan.weeksInPlan,
             weeksOff: data.plan.weeksOff,
+            outreach: data.plan.outreach,
           });
       } catch (reason) {
         if (!signal.aborted) {
@@ -153,6 +158,9 @@ export function FarmAnnualCoveragePlan({
   );
   const selected = plan?.weeks.find((week) => week.startDate === selectedWeek);
   const workingWeeks = settings.weeksInPlan - settings.weeksOff.length;
+  const dailyForecast = useMemo(() => {
+    try { return settings.outreach && plan ? forecastOutreach(plan.totalHomes, settings.startDate, settings.weeksInPlan, settings.outreach, settings.weeksOff) : null; } catch { return null; }
+  }, [settings, plan]);
   const shortfall = plan?.unassignedAddressIds.length ?? 0;
   const coverage = plan?.totalHomes ? visits.size / plan.totalHomes : 0;
   const now = new Date();
@@ -208,11 +216,13 @@ export function FarmAnnualCoveragePlan({
       if (!response.ok)
         throw new Error(data.error || "Unable to save your annual plan.");
       setSaved(data.plan);
+      window.dispatchEvent(new CustomEvent('flyr-farm-door-plan-refresh'));
       setSettings({
         startDate: data.plan.startDate,
         homesPerWeek: data.plan.homesPerWeek,
         weeksInPlan: data.plan.weeksInPlan,
         weeksOff: data.plan.weeksOff,
+            outreach: data.plan.outreach,
       });
       setMessage("Annual coverage plan saved for this farm.");
     } catch (reason) {
@@ -260,7 +270,7 @@ export function FarmAnnualCoveragePlan({
         aria-labelledby="annual-plan-title"
       >
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          One farm. One complete pass.
+          Your farm. Your pace.
         </p>
         <h2
           id="annual-plan-title"
@@ -269,9 +279,12 @@ export function FarmAnnualCoveragePlan({
           Annual farm coverage
         </h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Reach every eligible home within a year. Set your weekly pace and keep
-          holiday weeks free.
+          Choose your door-knocking and calling rounds, working days and time off. See exactly how much time your plan needs.
         </p>
+        <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Plan pace">
+          <Button type="button" variant={settings.outreach ? 'secondary' : 'ghost'} aria-pressed={!!settings.outreach} disabled={loading || busy} onClick={() => update({ ...settings, outreach: settings.outreach ?? defaultOutreachSettings() })}>Daily pace</Button>
+          <Button type="button" variant={!settings.outreach ? 'secondary' : 'ghost'} aria-pressed={!settings.outreach} disabled={loading || busy} onClick={() => update({ ...settings, outreach: undefined })}>Weekly target</Button>
+        </div>
         <fieldset
           disabled={loading || busy}
           className="mt-6 grid min-w-0 gap-4 sm:grid-cols-3"
@@ -285,7 +298,7 @@ export function FarmAnnualCoveragePlan({
               onChange={(event) => changeStart(event.target.value)}
             />
           </div>
-          <div className="space-y-2">
+          {!settings.outreach && <div className="space-y-2">
             <Label htmlFor="annual-target">Homes per week</Label>
             <Input
               id="annual-target"
@@ -301,7 +314,7 @@ export function FarmAnnualCoveragePlan({
                 })
               }
             />
-          </div>
+          </div>}
           <div className="space-y-2">
             <Label htmlFor="annual-length">Plan length (weeks)</Label>
             <Input
@@ -328,6 +341,7 @@ export function FarmAnnualCoveragePlan({
             </p>
           </div>
         </fieldset>
+        {settings.outreach && <fieldset disabled={loading || busy} className="mt-6 min-w-0"><FarmOutreachQuestions value={settings.outreach} onChange={outreach => update({ ...settings, outreach, homesPerWeek: Math.max(1, outreach.doorsPerDay * outreach.workingDays.length) })} totalHomes={plan?.totalHomes ?? null} startDate={settings.startDate} weeks={settings.weeksInPlan} weeksOff={settings.weeksOff} /></fieldset>}
         <details className="mt-5 rounded-xl border border-border bg-muted/20 p-4">
           <summary className="cursor-pointer text-sm font-medium">
             <Palmtree className="mr-2 inline h-4 w-4 text-muted-foreground" />
@@ -382,6 +396,7 @@ export function FarmAnnualCoveragePlan({
               busy ||
               !plan?.totalHomes ||
               shortfall > 0 ||
+              (dailyForecast !== null && !dailyForecast.fits) ||
               !changed
             }
             onClick={() => void save()}
@@ -398,6 +413,7 @@ export function FarmAnnualCoveragePlan({
                   homesPerWeek: saved.homesPerWeek,
                   weeksInPlan: saved.weeksInPlan,
                   weeksOff: saved.weeksOff,
+                  outreach: saved.outreach,
                 });
                 setError("");
               }}
@@ -447,7 +463,7 @@ export function FarmAnnualCoveragePlan({
             assignments.
           </p>
         )}
-        {!!shortfall && (
+        {!!shortfall && !settings.outreach && (
           <div
             role="alert"
             className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm"
@@ -489,7 +505,7 @@ export function FarmAnnualCoveragePlan({
                   Your year at a glance
                 </h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Planned coverage and recorded door visits.
+                  First-pass door assignments and recorded visits. Extra door rounds and call goals are included in your pace summary.
                 </p>
               </div>
               <span className="text-xs text-muted-foreground">

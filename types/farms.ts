@@ -31,6 +31,7 @@ export {
 export interface CreateFarmPayload {
   name: string;
   campaign_name?: string;
+  coverage_settings?: import('@/lib/farms/annual-coverage').AnnualCoverageSettings;
   description?: string;
   polygon?: string; // GeoJSON
   start_date: string;

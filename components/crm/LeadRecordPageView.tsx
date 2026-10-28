@@ -1,5 +1,9 @@
 'use client';
 
+import { PrivateMessages } from '@/components/crm-ai/PrivateMessages';
+
+import { ContactOutreach } from '@/components/outreach/ContactOutreach';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -882,6 +886,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
       </header>
 
       <main className="mx-auto w-full max-w-[1500px] px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mb-4"><PrivateMessages contactId={contact.id} /></div>
         <div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
@@ -925,30 +930,12 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={() => focusComposer('text')}>
-                    <MessageSquare className="mr-1 h-3.5 w-3.5" />
-                    Message
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={() => focusComposer('email')}>
-                    <Mail className="mr-1 h-3.5 w-3.5" />
-                    Email
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 px-2 text-xs"
-                    onClick={async () => {
-                      if (!device.isReady) {
-                        setMessage(null);
-                        await device.initialize(currentWorkspaceId ?? '', tabIdRef.current);
-                        return;
-                      }
-                      await handleCallCurrentPerson();
-                    }}
-                    disabled={!currentWorkspaceId || !contact.phone?.trim() || startingCall || device.isInCall || device.setupState === 'initializing'}
-                  >
-                    {startingCall ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Phone className="mr-1 h-3.5 w-3.5" />}
-                    Call
+                  <div className="col-span-2"><ContactOutreach contacts={[contact]} compact /></div>
+                  <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={async () => {
+                    if (!device.isReady) { await device.initialize(currentWorkspaceId ?? '', tabIdRef.current); return; }
+                    await handleCallCurrentPerson();
+                  }} disabled={!currentWorkspaceId || !contact.phone?.trim() || startingCall || device.isInCall || device.setupState === 'initializing'}>
+                    <Phone className="mr-1 h-3.5 w-3.5" />Internet call
                   </Button>
                   <Button variant="outline" size="sm" className="h-9 px-2 text-xs" onClick={handleQuickFollowUp} disabled={saving}>
                     <Clock3 className="mr-1 h-3.5 w-3.5" />

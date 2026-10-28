@@ -76,3 +76,6 @@ ROADMAP.md
 .graphifyignore
 graphify-out/
 kimi-cli/templates/**/node_modules/
+
+# Private local verification evidence; preserve outside the public repository
+/docs/mac-companion/verification/

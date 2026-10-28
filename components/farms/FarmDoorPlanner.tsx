@@ -33,7 +33,7 @@ export function FarmDoorPlanner({ farmId, addresses, onHomesImported, onAddConta
   const [preview, setPreview] = useState(false);
   useEffect(() => {
     let active = true;
-    fetch(`/api/farms/${farmId}/door-plan`).then(async response => {
+    const load = () => fetch(`/api/farms/${farmId}/door-plan`).then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to load door plan.');
       if (active && data.plan) {
@@ -41,11 +41,13 @@ export function FarmDoorPlanner({ farmId, addresses, onHomesImported, onAddConta
       }
     }).catch(reason => { if (active) setError(reason.message); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    void load();
+    window.addEventListener('flyr-farm-door-plan-refresh', load);
+    return () => { active = false; window.removeEventListener('flyr-farm-door-plan-refresh', load); };
   }, [farmId]);
   const draft = useMemo(() => {
-    try { return buildFarmDoorPlan(addresses, startDate, doorsPerDay); } catch { return null; }
-  }, [addresses, startDate, doorsPerDay]);
+    try { return buildFarmDoorPlan(addresses, startDate, doorsPerDay, saved?.calendar); } catch { return null; }
+  }, [addresses, startDate, doorsPerDay, saved?.calendar]);
   const plan = preview || !saved ? draft : saved;
   const homeById = useMemo(() => new Map(addresses.map(home => [home.id, home])), [addresses]);
   const plannedIds = useMemo(() => new Set(saved?.days.flatMap(day => day.addressIds) ?? []), [saved]);
@@ -62,11 +64,11 @@ export function FarmDoorPlanner({ farmId, addresses, onHomesImported, onAddConta
     setBusy(true); setError(''); setMessage('');
     try {
       const response = await fetch(`/api/farms/${farmId}/door-plan`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startDate, doorsPerDay }),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startDate, doorsPerDay, calendar: saved?.calendar }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to save plan.');
-      setSaved(data.plan); setPreview(false); setPage(0); setSelectedDate(null); setMessage('Weekday plan saved for this farm.');
+      setSaved(data.plan); setPreview(false); setPage(0); setSelectedDate(null); setMessage('Daily plan saved for this farm.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to save plan.'); }
     finally { setBusy(false); }
   }
@@ -89,14 +91,14 @@ export function FarmDoorPlanner({ farmId, addresses, onHomesImported, onAddConta
   }
   return <section className="space-y-4 rounded-xl border border-border bg-card p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="font-semibold">Monday–Friday door plan</h2><p className="mt-1 text-sm text-muted-foreground">Cover the whole farm in daily lists, grouped by street. Weekends are skipped. Contacts remain in the farm.</p></div>
+      <div><h2 className="font-semibold">Daily door assignments</h2><p className="mt-1 text-sm text-muted-foreground">Cover the whole farm in daily lists, grouped by street. Your saved working days and holidays are respected. Without a custom schedule, Monday–Friday is used. Contacts remain in the farm.</p></div>
       <Button variant="outline" onClick={() => void importHomes()} disabled={busy || loading}>{busy ? 'Working…' : 'Import / refresh farm homes'}</Button>
     </div>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div className="space-y-2"><Label htmlFor="door-plan-start">Start date</Label><Input id="door-plan-start" type="date" value={startDate} disabled={loading || busy} onChange={event => setStartDate(event.target.value)} /></div>
       <div className="space-y-2"><Label htmlFor="door-plan-capacity">Doors per day</Label><Input id="door-plan-capacity" type="number" min={1} max={1000} value={doorsPerDay || ''} disabled={loading || busy} onChange={event => setDoorsPerDay(Number(event.target.value))} /></div>
       <div className="flex items-end"><Button variant="outline" disabled={!draft || loading || busy} onClick={() => { setPreview(true); setPage(0); setSelectedDate(null); }}>Preview plan</Button></div>
-      <div className="flex items-end"><Button disabled={!draft || !addresses.length || loading || busy} onClick={() => void save()}>{busy ? 'Saving…' : saved ? 'Replace saved plan' : 'Save weekday plan'}</Button></div>
+      <div className="flex items-end"><Button disabled={!draft || !addresses.length || loading || busy} onClick={() => void save()}>{busy ? 'Saving…' : saved ? 'Replace saved plan' : 'Save daily plan'}</Button></div>
     </div>
     <div aria-live="polite" className="text-sm">
       {loading ? <p>Loading saved plan…</p> : null}

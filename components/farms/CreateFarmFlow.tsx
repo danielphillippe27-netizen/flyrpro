@@ -34,12 +34,16 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import MapboxDraw from '@mapbox/mapbox-gl-draw';
 import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { AddressAutocomplete } from '@/components/address/AddressAutocomplete';
+import { FarmOutreachQuestions } from './FarmOutreachQuestions';
+import { defaultOutreachSettings, forecastOutreach } from '@/lib/farms/outreach-schedule';
+import { FarmBoundaryAddressCount } from './FarmBoundaryAddressCount';
 import { MapInfoButton } from '@/components/map/MapInfoButton';
 import { UserLocationLayer } from '@/components/map/UserLocationLayer';
 import type { AddressSuggestion } from '@/lib/services/MapboxAutocompleteService';
 import { CircleAlert, Map, Pencil, Satellite, Search, Trash2, TriangleAlert } from 'lucide-react';
 import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
+import { FarmTouchService } from '@/lib/services/FarmService';
 import { useStormTerritoryAddressCount } from '@/components/storm-maps/useStormTerritoryAddressCount';
 
 const DEFAULT_HOME_LIMIT = 5000;
@@ -74,7 +78,8 @@ function getErrorMessage(error: unknown): string {
   return 'Failed to create farm';
 }
 
-export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
+export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCreated }: {
+  onCreated?: () => void;
   onBack?: () => void;
   initialBoundary?: GeoJSON.Polygon | null;
   initialName?: string;
@@ -88,9 +93,12 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
     [mapPreset, theme],
   );
   const [farmName, setFarmName] = useState(initialName);
-  const [doorsPerDay, setDoorsPerDay] = useState(100);
+  const [nameValidationAttempted, setNameValidationAttempted] = useState(false);
+  const farmNameInput = useRef<HTMLInputElement>(null);
+  const [outreach, setOutreach] = useState(defaultOutreachSettings);
+  const [planWeeks, setPlanWeeks] = useState(52);
   const [boundary, setBoundary] = useState<GeoJSON.Polygon | null>(null);
-  const homeCount = useStormTerritoryAddressCount(currentWorkspaceId ?? '', boundary);
+  const homeCount = useStormTerritoryAddressCount(currentWorkspaceId ?? '', boundary, '/api/farms/address-count');
   const description =
     'Repeat this area for doorknocks, flyers, Canada Post, pop-bys, or letters.';
   const [startDate, setStartDate] = useState(() => formatDateInput(new Date()));
@@ -540,10 +548,20 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
 
   const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
     e?.preventDefault();
-    if (!userId) return;
-    if (!farmName.trim()) return;
-    if (!Number.isInteger(doorsPerDay) || doorsPerDay < 1 || doorsPerDay > 1000) {
-      await showFeedbackDialog({ title: 'Daily target required', description: 'Choose 1–1,000 doors per day.', tone: 'warning' });
+    if (!userId) {
+      await showFeedbackDialog({ title: 'Sign in required', description: 'Sign in before creating a farm.', tone: 'warning' });
+      return;
+    }
+    setNameValidationAttempted(true);
+    if (!farmName.trim()) {
+      farmNameInput.current?.focus();
+      return;
+    }
+    try {
+      const forecast = forecastOutreach(homeCount.data?.count ?? 0, startDate, planWeeks, outreach);
+      if (homeCount.data && !forecast.fits) throw Error(`This plan needs ${forecast.daysNeeded} working days, but only ${forecast.availableDays} are available. Increase your daily targets, reduce rounds, or adjust time off.`);
+    } catch (error) {
+      await showFeedbackDialog({ title: 'Check your plan', description: getErrorMessage(error), tone: 'warning' });
       return;
     }
     if (!startDate) {
@@ -591,9 +609,10 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
           touches_per_interval: 1,
           touches_interval: 'month',
           goal_type: 'homes_per_cycle',
-          goal_target: homeCount.data?.count ?? doorsPerDay,
+          goal_target: homeCount.data?.count ?? outreach.doorsPerDay,
           cycle_completion_window_days: null,
-          touch_types: ['doorknock'],
+          touch_types: [...(outreach.doorPasses ? ['doorknock'] : []), ...(outreach.callPasses ? ['phone_call'] : [])],
+          coverage_settings: { startDate, weeksInPlan: planWeeks, homesPerWeek: outreach.doorsPerDay * outreach.workingDays.length, weeksOff: [], outreach },
           annual_budget_cents: null,
           workspace_id: currentWorkspaceId ?? undefined,
           area_label: bbox ? `Area ${bbox[1].toFixed(3)}, ${bbox[0].toFixed(3)}` : undefined,
@@ -615,16 +634,34 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
       const importResponse = await fetch(`/api/farms/${farm.id}/import-homes`, { method: 'POST' });
       const imported = await importResponse.json();
       if (!importResponse.ok) {
-        await showFeedbackDialog({ title: 'Farm saved — homes need importing', description: imported.error || 'Retry importing homes from the farm Plan tab.', tone: 'warning' });
+        await showFeedbackDialog({ title: 'Farm saved — homes need importing', description: imported.error || 'Retry importing homes from the Dashboard.', tone: 'warning' });
       } else if (imported.totalCount > 0) {
-        const planResponse = await fetch(`/api/farms/${farm.id}/door-plan`, {
+        const planResponse = await fetch(`/api/farms/${farm.id}/annual-coverage`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ startDate, doorsPerDay }),
+          body: JSON.stringify({ startDate, weeksInPlan: planWeeks, homesPerWeek: outreach.doorsPerDay * outreach.workingDays.length, weeksOff: [], outreach }),
         });
         if (!planResponse.ok) {
-          await showFeedbackDialog({ title: 'Farm and homes saved', description: 'The weekday plan could not be saved. Open Plan to retry.', tone: 'warning' });
+          const result = await planResponse.json().catch(() => ({}));
+          await showFeedbackDialog({ title: 'Farm saved — review your plan', description: result.error || 'Open Annual farm coverage on the Dashboard to finish the plan.', tone: 'warning' });
         }
       }
+      if (importResponse.ok && imported.totalCount > 0 && forecastOutreach(imported.totalCount, startDate, planWeeks, outreach).fits) {
+        const schedule = forecastOutreach(imported.totalCount, startDate, planWeeks, outreach);
+        try {
+          const rounds = [
+            ...schedule.doorRoundDates.map((date, index) => ({ date, mode: 'doorknock' as const, title: `Door-knocking round ${index + 1}` })),
+            ...schedule.callRoundDates.map((date, index) => ({ date, mode: 'phone_call' as const, title: `Calling round ${index + 1}` })),
+          ].filter(round => round.date).sort((a, b) => a.date!.localeCompare(b.date!));
+          for (const [index, round] of rounds.entries()) {
+            await FarmTouchService.createSession({ farmId: farm.id, workspaceId: farm.workspace_id ?? currentWorkspaceId, mode: round.mode, title: round.title,
+              cycleNumber: index + 1, scheduledDate: `${round.date}T12:00:00`, homesTarget: imported.totalCount });
+          }
+        } catch (error) {
+          await showFeedbackDialog({ title: 'Farm saved — touchpoints need attention', description: `Your plan is saved. Add any missing touchpoints on the Dashboard. ${getErrorMessage(error)}`, tone: 'warning' });
+        }
+      }
+      try { localStorage.setItem(`wolfgrid:farm-plan-mode:${farm.id}`, 'annual'); } catch {}
+      onCreated?.();
 
       router.push(`/farms/${farm.id}?tab=plan`);
       window.dispatchEvent(new CustomEvent('flyr-farms-refresh'));
@@ -700,19 +737,24 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
                     <Label htmlFor="farm-name">Farm name</Label>
                     <Input
                       id="farm-name"
+                      ref={farmNameInput}
+                      required
+                      aria-invalid={nameValidationAttempted && !farmName.trim()}
+                      aria-describedby={nameValidationAttempted && !farmName.trim() ? "farm-name-error" : undefined}
                       value={farmName}
                       onChange={(e) => setFarmName(e.target.value)}
                       placeholder="Downtown Repeat Farm"
                       className="h-11 bg-background"
                     />
+                    {nameValidationAttempted && !farmName.trim() && <p id="farm-name-error" role="alert" className="text-sm text-destructive">Enter a farm name.</p>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2"><Label htmlFor="farm-start">Start date</Label>
                       <Input id="farm-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
-                    <div className="space-y-2"><Label htmlFor="farm-daily">Doors per day</Label>
-                      <Input id="farm-daily" type="number" min={1} max={1000} value={doorsPerDay || ''} onChange={e => setDoorsPerDay(Number(e.target.value))} /></div>
+                    <div className="space-y-2"><Label htmlFor="farm-weeks">Plan length (weeks)</Label>
+                      <Input id="farm-weeks" type="number" min={1} max={52} value={planWeeks || ''} onChange={e => setPlanWeeks(Number(e.target.value))} /></div>
                   </div>
-                  <p className="text-xs text-muted-foreground">Monday–Friday. Homes are grouped by street into daily lists. Contacts stay with this farm.</p>
+                  <FarmOutreachQuestions value={outreach} onChange={setOutreach} totalHomes={homeCount.data?.count ?? null} startDate={startDate} weeks={planWeeks} estimated />
                   <button
                     type="button"
                     onClick={handleNamingBack}
@@ -724,11 +766,6 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
                 </div>
               ) : null}
 
-              {boundary ? <div className="rounded-xl border border-border bg-card p-3" aria-live="polite">
-                <p className="text-sm font-semibold">{homeCount.data ? `${homeCount.data.partial ? 'At least ' : ''}${homeCount.data.count.toLocaleString()} addresses in farm` : homeCount.error || 'Counting addresses…'}</p>
-                <p className="mt-1 text-xs text-muted-foreground">Available address records; buildings and occupied homes may differ. Final plan uses imported addresses.</p>
-                {homeCount.error ? <Button size="sm" variant="outline" onClick={homeCount.retry}>Retry count</Button> : null}
-              </div> : null}
               <div className="space-y-2">
                 <Label htmlFor="farm-map-search" className="flex items-center gap-2">
                   <Search className="h-4 w-4" />
@@ -772,6 +809,8 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '' }: {
                 <Trash2 className="h-5 w-5" />
                 <span>Clear boundary</span>
               </button>
+
+              <FarmBoundaryAddressCount map={map} draw={drawRef} mapLoaded={mapLoaded} workspaceId={currentWorkspaceId} />
             </div>
           </div>
         ) : null}

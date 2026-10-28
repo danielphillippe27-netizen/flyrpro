@@ -9,11 +9,13 @@ const dom = new JSDOM('<div id="root"></div>', { url: 'https://wolfgrid.app/logi
 global.window = dom.window; global.document = dom.window.document;
 global.navigator = dom.window.navigator; global.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = require(root + '/node_modules/react-dom/client');
+let oauthOptions;
 let calls = [], authError = { status: 400, code: 'invalid_credentials', message: 'Invalid login credentials' };
 const client = { auth: {
   getSession: async () => ({ data: { session: null } }),
   getUser: async () => ({ data: { user: null }, error: null }),
   signInWithPassword: async () => { calls.push('sign-in'); return { data: {}, error: authError }; },
+  signInWithOAuth: async options => { oauthOptions=options;return {data:{},error:{message:'Fixture OAuth stop'}}; },
   signUp: async () => { calls.push('sign-up'); return { data: { user: { identities: [{}] } }, error: null }; },
   resetPasswordForEmail: async () => { calls.push('recovery'); return { error: null }; },
 }};
@@ -46,11 +48,18 @@ async function submit(twice=false) { await React.act(async () => { const f=docum
  await submit();assert.deepEqual(calls,['sign-in']);assert.match(document.body.textContent,/not provided an exact retry time/);assert.doesNotMatch(document.body.textContent,/60 seconds/);console.log('PASS rate limit does not claim an invented cooldown');
  calls=[];await clickText('New to WolfGrid');await submit();assert.deepEqual(calls,['sign-up']);assert.match(document.body.textContent,/Check your email/);console.log('PASS explicit account creation only calls sign-up');
  await clickText('Already have an account');calls=[];await clickText('Forgot password');await submit();assert.deepEqual(calls,[]);console.log('PASS recovery validates email without trying sign-in or sign-up');
+ await clickText('Back to sign in');await clickText('Continue with Google');assert.equal(oauthOptions.provider,'google');assert.equal(oauthOptions.options.queryParams.prompt,'select_account');console.log('PASS Google opens account chooser instead of silently reusing another account');
  let refreshes=0;mocks['next/server']={NextResponse:{next:()=>({cookies:{set(){}}}),redirect:()=>({})}};
- mocks['@supabase/ssr']={createServerClient:()=>({auth:{getSession:async()=>{refreshes++}}})};
+ mocks['@supabase/ssr']={createServerClient:()=>({auth:{getSession:async()=>{refreshes++;return {data:{session:null}}}}})};
  mocks['@/lib/supabase/env']={getSupabaseUrl:()=>'',getSupabaseAnonKey:()=>''};
+ mocks['@/lib/auth/landing-redirect']=load('lib/auth/landing-redirect.ts');
  const {middleware}=load('middleware.ts');
  for(const pathname of ['/auth/callback','/login','/reset-password']) await middleware({nextUrl:{hostname:'wolfgrid.app',pathname}});
+ const rootDestination=[];mocks['next/server'].NextResponse.redirect=url=>{rootDestination.push(String(url));return{}};
+ await middleware({url:'http://localhost:3000/?code=fixture-google',nextUrl:new URL('http://localhost:3000/?code=fixture-google')});
+ assert.equal(rootDestination[0],'http://localhost:3000/auth/callback?code=fixture-google&next=%2Fhome');
+ await middleware({url:'http://localhost:3000/?code=fixture-recovery&type=recovery',nextUrl:new URL('http://localhost:3000/?code=fixture-recovery&type=recovery')});
+ assert.equal(rootDestination[1],'http://localhost:3000/reset-password?code=fixture-recovery&type=recovery');
  assert.equal(refreshes,0);await middleware({nextUrl:{hostname:'wolfgrid.app',pathname:'/home'},cookies:{getAll:()=>[]}});assert.equal(refreshes,1);console.log('PASS callback preserves verifier; protected pages still refresh sessions');
  await React.act(async()=>mount.unmount());
 })().catch(e=>{console.error(e);process.exitCode=1});

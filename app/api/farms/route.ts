@@ -1,3 +1,4 @@
+import { buildAnnualCoveragePlan, validateAnnualCoverageSettings } from '@/lib/farms/annual-coverage';
 import { NextRequest, NextResponse } from 'next/server';
 import * as turf from '@turf/turf';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -170,6 +171,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let coverageSettings;
+    if (body.coverage_settings !== undefined) {
+      try { coverageSettings = validateAnnualCoverageSettings(body.coverage_settings); }
+      catch (error) { return NextResponse.json({ error: formatApiError(error) }, { status: 400 }); }
+    }
+
     const requestedWorkspaceId =
       typeof body.workspace_id === 'string' && body.workspace_id.trim()
         ? body.workspace_id.trim()
@@ -221,6 +228,7 @@ export async function POST(request: NextRequest) {
     });
 
     const basePayload: Record<string, unknown> = {
+      ...(coverageSettings ? { annual_coverage_plan: buildAnnualCoveragePlan([], coverageSettings) } : {}),
       owner_id: requestUser.id,
       workspace_id: targetWorkspaceId,
       name: body.name.trim(),

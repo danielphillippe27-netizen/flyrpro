@@ -1,5 +1,7 @@
 'use client';
 
+import { ContactOutreach } from '@/components/outreach/ContactOutreach';
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronRight, Plus, Search, Upload } from 'lucide-react';
@@ -191,6 +193,8 @@ export function CrmContactsHub() {
             ))}
           </div>
         </div>
+
+        <ContactOutreach contacts={filtered.filter(c => selectedContactIds.length === 0 || selectedContactIds.includes(c.id))} />
 
         <section aria-label={copy.nouns.leadPlural} aria-busy={loading} className="overflow-hidden rounded-xl border border-border bg-card">
           {loading ? (

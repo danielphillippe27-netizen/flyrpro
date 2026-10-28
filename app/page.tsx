@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { PublicSiteFooter } from '@/components/landing/PublicSiteFooter';
 import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
+import { landingAuthRedirect } from '@/lib/auth/landing-redirect';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -27,37 +28,8 @@ export default function LandingPage() {
       if (value) tracking.set(key, value);
     }
     setDemoTrackingQuery(tracking.toString());
-    const code = params.get('code');
-    const error = params.get('error');
-    const errorCode = params.get('error_code');
-    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const fragment = new URLSearchParams(hash);
-    const type = params.get('type') ?? fragment.get('type');
-    const hasRecoverySignal = ['code', 'token', 'token_hash', 'access_token', 'refresh_token'].some(
-      (key) => params.has(key) || fragment.has(key),
-    );
-
-    if (type === 'recovery' || hasRecoverySignal) {
-      const resetUrl = new URL('/reset-password', window.location.origin);
-      resetUrl.search = window.location.search;
-      resetUrl.hash = window.location.hash;
-      router.replace(`${resetUrl.pathname}${resetUrl.search}${resetUrl.hash}`);
-      return;
-    }
-
-    if (code) {
-      const callbackURL = new URL('/auth/callback', window.location.origin);
-      callbackURL.search = params.toString();
-      if (!callbackURL.searchParams.has('next')) callbackURL.searchParams.set('next', '/home');
-      router.replace(`${callbackURL.pathname}${callbackURL.search}`);
-      return;
-    }
-
-    if (error === 'access_denied' && errorCode) {
-      const loginURL = new URL('/login', window.location.origin);
-      loginURL.searchParams.set('error', errorCode === 'otp_expired' ? 'reset_link_invalid' : 'auth_failed');
-      router.replace(`${loginURL.pathname}${loginURL.search}`);
-    }
+    const destination = landingAuthRedirect(window.location.search, window.location.hash);
+    if (destination) router.replace(destination);
   }, [router]);
 
   return (

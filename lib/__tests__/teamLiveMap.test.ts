@@ -17,11 +17,20 @@ function client(tables: Record<string, Row[]>, failTable?: string) {
   return { from(table: string) {
     let rows = [...(tables[table] ?? [])];
     const query = {
-      select() { return query; },
-      eq(key: string, value: unknown) { rows = rows.filter(row => row[key] === value); return query; },
+      select(columns: string) {
+        if (table === 'campaign_presence') {
+          assert.ok(columns.includes('campaigns!inner('));
+          rows = rows.flatMap(row => {
+            const campaign = tables.campaigns.find(campaign => campaign.id === row.campaign_id);
+            return campaign ? [{ ...row, campaigns: campaign }] : [];
+          });
+        }
+        return query;
+      },
+      eq(key: string, value: unknown) { rows = rows.filter(row => key === 'campaigns.workspace_id' ? (row.campaigns as Row)?.workspace_id === value : row[key] === value); return query; },
       neq(key: string, value: unknown) { rows = rows.filter(row => row[key] !== value); return query; },
       is(key: string, value: unknown) { return query.eq(key, value); },
-      in(key: string, values: unknown[]) { rows = rows.filter(row => values.includes(row[key])); return query; },
+      in(key: string, values: unknown[]) { assert.notEqual(key, 'campaign_id', 'presence must not enumerate campaign history in the URL'); rows = rows.filter(row => values.includes(row[key])); return query; },
       gte(key: string, value: string) { rows = rows.filter(row => typeof row[key] === 'string' && row[key] >= value); return query; },
       order(key: string, options: { ascending: boolean }) {
         rows.sort((a, b) => String(a[key]).localeCompare(String(b[key])) * (options.ascending ? 1 : -1)); return query;
@@ -90,7 +99,7 @@ test('missing profile retains Member fallback', async () => {
   const tables = fixture(); tables.user_profiles = [];
   assert.equal((await load(tables)).livePresence[0].display_name, 'Member');
 });
-for (const table of ['workspace_members', 'user_profiles', 'campaigns', 'campaign_presence', 'sessions']) {
+for (const table of ['workspace_members', 'user_profiles', 'campaign_presence', 'sessions']) {
   test(`${table} failure is reported instead of a misleading empty map`, async () => {
     await assert.rejects(() => loadLivePresence(client(fixture(), table), 'team'), new RegExp(`${table} unavailable`));
   });
@@ -101,4 +110,15 @@ test('profile photos reach both roster and live markers', async () => {
   const result = await load(tables);
   assert.equal(result.members[0].avatar_url, 'https://example.com/alex.jpg');
   assert.equal(result.livePresence[0].avatar_url, result.members[0].avatar_url);
+});
+
+
+test('large campaign history does not create an oversized presence request', async () => {
+  const tables = fixture();
+  for (let index = 0; index < 1500; index++) {
+    tables.campaigns.unshift({ workspace_id: 'team', id: `old-${index}`, title: 'Old campaign', name: null });
+  }
+  const result = await load(tables);
+  assert.equal(result.livePresence.length, 1);
+  assert.equal(result.livePresence[0].campaign_name, 'North Oshawa');
 });

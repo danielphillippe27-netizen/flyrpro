@@ -51,25 +51,13 @@ export async function loadLivePresence(
   const members = await loadTeamMembers(supabase, workspaceId);
   const memberByUserId = new Map(members.map((member) => [member.user_id, member]));
 
-  const { data: campaigns, error: campaignsError } = await supabase
-    .from('campaigns')
-    .select('id, title, name')
-    .eq('workspace_id', workspaceId);
-
-  if (campaignsError) throw campaignsError;
-
-  const campaignRows = (campaigns ?? []) as Array<{ id: string; title: string | null; name: string | null }>;
-  const campaignIds = campaignRows.map((campaign) => campaign.id);
-  if (campaignIds.length === 0) {
-    return { members, livePresence: [] };
-  }
-
-  const campaignById = new Map(campaignRows.map((campaign) => [campaign.id, campaign]));
   const freshnessCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const { data: presenceRows, error: presenceError } = await supabase
     .from('campaign_presence')
-    .select('campaign_id, user_id, session_id, lat, lng, status, updated_at')
-    .in('campaign_id', campaignIds)
+    // Filter through the campaign relationship instead of putting every campaign
+    // ID in the URL, which exceeds gateway limits for established teams.
+    .select('campaign_id, user_id, session_id, lat, lng, status, updated_at, campaigns!inner(workspace_id, title, name)')
+    .eq('campaigns.workspace_id', workspaceId)
     .gte('updated_at', freshnessCutoff)
     .neq('status', 'inactive')
     .order('updated_at', { ascending: false });
@@ -78,6 +66,7 @@ export async function loadLivePresence(
 
   const validPresence = ((presenceRows ?? []) as Array<{
     campaign_id: string;
+    campaigns: { workspace_id: string; title: string | null; name: string | null };
     user_id: string;
     session_id: string | null;
     lat: number | null;
@@ -124,7 +113,7 @@ export async function loadLivePresence(
     members,
     livePresence: presenceWithActiveSession.map((row) => {
       const member = memberByUserId.get(row.user_id);
-      const campaign = campaignById.get(row.campaign_id);
+      const campaign = row.campaigns;
       const session = row.session_id ? sessionById.get(row.session_id) : null;
       return {
         user_id: row.user_id,

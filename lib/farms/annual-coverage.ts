@@ -1,3 +1,4 @@
+import { forecastOutreach, validateOutreachSettings, type OutreachSettings } from './outreach-schedule';
 import {
   eligibleFarmDoorHomes,
   validPlanDate,
@@ -10,6 +11,7 @@ export type AnnualCoverageSettings = {
   homesPerWeek: number;
   weeksInPlan: number;
   weeksOff: string[];
+  outreach?: OutreachSettings;
 };
 export type AnnualCoverageWeek = {
   number: number;
@@ -77,6 +79,7 @@ export function validateAnnualCoverageSettings(
     homesPerWeek: settings.homesPerWeek!,
     weeksInPlan: settings.weeksInPlan!,
     weeksOff,
+    ...(settings.outreach ? { outreach: validateOutreachSettings(settings.outreach) } : {}),
   };
 }
 export function buildAnnualCoveragePlan(
@@ -86,14 +89,17 @@ export function buildAnnualCoveragePlan(
   const settings = validateAnnualCoverageSettings(input);
   const { eligible, excludedDoNotKnock } = eligibleFarmDoorHomes(homes);
   const off = new Set(settings.weeksOff);
+  const daily = settings.outreach ? forecastOutreach(eligible.length, settings.startDate, settings.weeksInPlan, settings.outreach, settings.weeksOff) : null;
   let offset = 0;
   const weeks = Array.from({ length: settings.weeksInPlan }, (_, index) => {
     const startDate = annualPlanDate(settings.startDate, index * 7);
-    const isOff = off.has(startDate);
+    const workDays = daily?.workingDates.filter(date => date >= startDate && date <= annualPlanDate(startDate, 6)).length;
+    const isOff = off.has(startDate) || workDays === 0;
+    const capacity = daily ? (daily.doorPasses ? (workDays ?? 0) * daily.doorsPerDay : 0) : settings.homesPerWeek;
     const addressIds = isOff
       ? []
       : eligible
-          .slice(offset, offset + settings.homesPerWeek)
+          .slice(offset, offset + capacity)
           .map((home) => home.id);
     offset += addressIds.length;
     return {
@@ -113,9 +119,9 @@ export function buildAnnualCoveragePlan(
     minimumHomesPerWeek: Math.ceil(
       eligible.length / (settings.weeksInPlan - settings.weeksOff.length),
     ),
-    unassignedAddressIds: eligible.slice(offset).map((home) => home.id),
+    unassignedAddressIds: daily && !daily.doorPasses ? [] : eligible.slice(offset).map((home) => home.id),
     finishDate:
-      offset === eligible.length
+      daily ? daily.finishDate : offset === eligible.length
         ? ([...weeks].reverse().find((week) => week.addressIds.length)
             ?.endDate ?? null)
         : null,

@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env';
 import { withSharedWolfGridCookie } from '@/lib/supabase/shared-cookie';
+import { landingAuthRedirect } from '@/lib/auth/landing-redirect';
 
 let loggedConfigError = false;
 
@@ -21,6 +22,14 @@ export async function middleware(req: NextRequest) {
     redirectURL.hostname = CANONICAL_HOST;
     redirectURL.port = '';
     return NextResponse.redirect(redirectURL, 308);
+  }
+
+  // Providers can fall back to the configured site root. Forward the code
+  // before rendering or refreshing auth, so callback exchange never depends
+  // on client hydration and retains the initiating verifier cookie.
+  if (req.nextUrl.pathname === '/' && req.nextUrl.searchParams.has('code')) {
+    const destination = landingAuthRedirect(req.nextUrl.search, '');
+    if (destination) return NextResponse.redirect(new URL(destination, req.url));
   }
 
   // Public auth pages must not repeatedly refresh an already-invalid token.
@@ -61,7 +70,14 @@ export async function middleware(req: NextRequest) {
     );
     
     // Just refresh the session - don't redirect or make DB calls
-    await supabase.auth.getSession();
+    const { data: { session } } = await supabase.auth.getSession();
+    // Redirect before the main client layout can hide a streamed redirect.
+    if (req.nextUrl.pathname === '/settings/mac' && !session) {
+      const login = req.nextUrl.clone();
+      login.pathname = '/login';
+      login.search = '?next=/settings/mac';
+      return NextResponse.redirect(login);
+    }
   } catch (error) {
     // Avoid 500s if env vars are missing, but log once so misconfig is visible.
     if (!loggedConfigError) {

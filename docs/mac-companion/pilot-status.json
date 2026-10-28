@@ -1,0 +1,66 @@
+{
+  "updated_at": "2026-10-28T01:56:39.300479+00:00",
+  "release": "Daniel private pilot; production domain unchanged",
+  "deployment": {
+    "id": "dpl_EhjwPBsSbbqHWLQ8T8BEzRrcXk5B",
+    "url": "https://flyrpro-fdd356nix-danielphillippe27-netizens-projects.vercel.app",
+    "state": "READY",
+    "protection": "Vercel Deployment Protection retained; app uses temporary share entry, then normal WolfGrid sign-in"
+  },
+  "migrations_applied": [
+    "20261028020000_mac_companion.sql",
+    "20261028030000_mac_crm_release.sql"
+  ],
+  "pilot_allowlist": "Daniel existing account only",
+  "native": {
+    "installed_path": "/Users/danielphillippe/Applications/WolfGrid Mac Preview.app",
+    "macos_minimum": "15.0",
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "signature": "Apple Development: JOSEPH DANIEL PHILLIPPE (B8K32UV629)",
+    "hardened_runtime": true,
+    "notarized": false,
+    "zip": "/Volumes/Samsung SSD/WolfGrid/Wolfgrid-WEB/apps/mac/build/WolfGrid-Mac-Preview.zip",
+    "sha256": "4af7f826684436d11e98fc02b94d9c4ca4f02e0a10abc7c488c078da4e35e01d"
+  },
+  "verification": {
+    "selected_contact": "Daniel Phillippe in workspace 22; identifiers made unique as authorized",
+    "development_reader_rows": 2,
+    "live_private_import_rows_after_replay": 2,
+    "other_workspace_member_visible_rows": 0,
+    "authenticated_api_status": 200,
+    "personal_key_connected": false,
+    "sync_enabled_after_test": false,
+    "ai_message_consent_after_test": false,
+    "installed_fresh_signin": "Verified visible final deployment email/password login; email prefilled, no password entered",
+    "installed_messages_permission": "authorization denied from exact signed app; user grant pending",
+    "tests_passed": [
+      "native synthetic Messages reader",
+      "release database, private RLS and 1502 contacts",
+      "authenticated API boundary fixtures",
+      "AI route and connection fixtures with provider mocked",
+      "sync runtime, offline recovery and overlapping polls",
+      "current React UI in browser fixtures",
+      "Mac auth redirect and hidden-window initialization",
+      "focused TypeScript",
+      "scoped ESLint",
+      "isolated cloud production-mode build"
+    ]
+  },
+  "remaining_acceptance": [
+    "User grants Full Disk Access to installed app and signs in",
+    "User connects personal OpenAI API key",
+    "Installed authenticated polling, pause/resume and real summary/draft",
+    "Pilot expansion and monitoring",
+    "Developer ID Application signing, notarization, Intel device installation and update validation before public release"
+  ],
+  "limitations": [
+    "No real OpenAI generation performed",
+    "Full repository type-check has unrelated existing errors",
+    "No public download or production domain promotion",
+    "Temporary preview access link expires; not a public distribution package"
+  ],
+  "recovery": "Private identifier snapshot and encryption recovery remain outside deployment source with restricted permissions; no secrets stored in this file"
+}
