@@ -1,5 +1,7 @@
 # Farm performance dashboard
 
+Layout update: Dashboard now contains the overview/KPI cards followed by the planning modes. The two activity/coverage time-series graphs have been removed from the UI. Touchpoint Progress over time and its timeline occupy that space; the touchpoint editor remains collapsed below. Annual coverage and daily assignments are also available inside Dashboard. The dedicated Plan tab is removed, and legacy `?tab=plan` links open Dashboard.
+
 Implemented in the existing `/farms/[id]` Dashboard tab. No new routes, chart dependencies, database migrations, or production fixtures. The dedicated Map tab is outside this change.
 
 ## Data definitions
@@ -18,7 +20,7 @@ Implemented in the existing `/farms/[id]` Dashboard tab. No new routes, chart de
 ## Verification
 
 - `npx tsx lib/farms/__tests__/performance.test.ts`: passes deduplication/revisions, active sessions, revisits, modes, cycles, leads, range grouping, cumulative baseline and empty-state tests.
-- `node scripts/test-farm-performance-browser.cjs`: isolated local fixture browser checks pass time ranges, scope switching, keyboard arrows/Enter, session callback, touch inspection, empty states, dark/light, reduced motion, and no overflow at 320/390/768/1440px. Test data exists only in the test harness.
+- `node scripts/test-farm-performance-browser.cjs`: isolated local fixture browser checks pass scope switching, overview/KPI values, removal of the old graphs, empty states, dark/light, reduced motion, and no overflow at 320/390/768/1440px. Test data exists only in the test harness.
 - ESLint: no errors in changed files; existing image warning in the farm page.
 - Repository-wide TypeScript check has unrelated existing errors (settings integrations, field-recording modules and other areas). No diagnostics in the new dashboard/model, farm page or FarmService at time of check.
 - Browser checks are component-level, not a signed-in live farm integration test. No deployment performed.

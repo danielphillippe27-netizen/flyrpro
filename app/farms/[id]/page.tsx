@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ActivityPageView } from '@/components/activity/ActivityPageView';
+import { FarmActivityCalendar } from '@/components/farms/FarmActivityCalendar';
 import { useParams } from 'next/navigation';
 import {
   BarChart3,
@@ -10,7 +10,7 @@ import {
   Clock3,
   DollarSign,
   ListTodo,
-  Mailbox,
+  Plus,
   MapPinned,
   Search,
   Settings2,
@@ -46,7 +46,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { FarmNavigation } from '@/components/farms/FarmNavigation';
 import { Textarea } from '@/components/ui/textarea';
 import { FarmPerformanceDashboard } from '@/components/farms/FarmPerformanceDashboard';
 import { FarmTouchTypePicker } from '@/components/farms/FarmTouchTypePicker';
@@ -223,12 +224,11 @@ export default function FarmPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('plan');
+    if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('overview');
   }, []);
   const [overviewScope, setOverviewScope] = useState<DashboardScope>('current_cycle');
   const [chartSessionIds, setChartSessionIds] = useState<string[] | null>(null);
   const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
-  const [showMapContactsOverlay, setShowMapContactsOverlay] = useState(true);
   const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
@@ -260,6 +260,7 @@ export default function FarmPage() {
   const [configAnnualBudget, setConfigAnnualBudget] = useState('');
   const [configActive, setConfigActive] = useState(true);
   const [homesSearchQuery, setHomesSearchQuery] = useState('');
+  const [leadsSearchQuery, setLeadsSearchQuery] = useState('');
   const [createContactOpen, setCreateContactOpen] = useState(false);
   const [selectedHomeContactAddress, setSelectedHomeContactAddress] = useState<{
     address: string;
@@ -726,6 +727,32 @@ export default function FarmPage() {
         .slice(0, 10),
     [dedupedLinkedCampaignAddresses]
   );
+
+  const filteredFarmLeads = useMemo(() => {
+    const query = leadsSearchQuery.trim().toLowerCase();
+    const rows = [
+      ...contacts.map((contact) => ({
+        key: `contact-${contact.id}`,
+        name: contact.full_name,
+        phone: contact.phone,
+        email: contact.email,
+        address: contact.address,
+        lastContacted: contact.last_contacted,
+        status: contact.status,
+      })),
+      ...leads.map((lead) => ({
+        key: `lead-${lead.id}`,
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        address: lead.address,
+        lastContacted: undefined,
+        status: undefined,
+      })),
+    ];
+    return rows.filter((row) => !query || [row.name, row.phone, row.email, row.address]
+      .some((value) => value?.toLowerCase().includes(query)));
+  }, [contacts, leads, leadsSearchQuery]);
 
   const handleOpenCreateContact = useCallback((address: FarmAddress) => {
     setSelectedHomeContactAddress({
@@ -1298,22 +1325,11 @@ export default function FarmPage() {
 
   return (
     <div className={`bg-muted/30 dark:bg-background relative ${activeTab === 'map' ? 'h-full overflow-hidden' : 'min-h-full'}`}>
-      <main className={activeTab === 'map' ? 'flex h-full w-full flex-col p-2 sm:p-3' : 'w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6'}>
+      <main className={`w-full p-2 sm:p-3 ${activeTab === 'map' ? 'flex h-full flex-col' : ''}`}>
       <Tabs value={activeTab} onValueChange={setActiveTab} className={`w-full ${activeTab === 'map' ? 'min-h-0 flex-1' : ''}`}>
-        <TabsList className="max-w-full shrink-0 justify-start overflow-x-auto">
-          <TabsTrigger value="overview">Dashboard</TabsTrigger>
-          <TabsTrigger value="plan">Plan</TabsTrigger>
-          <TabsTrigger value="map">Map</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
-          <TabsTrigger value="homes">Homes</TabsTrigger>
-          <TabsTrigger value="leads">Contacts</TabsTrigger>
-          <TabsTrigger value="finance">Finance</TabsTrigger>
-          <TabsTrigger value="qr">QR Codes</TabsTrigger>
-          <TabsTrigger value="notes">Notes</TabsTrigger>
-          <TabsTrigger value="configure">Settings</TabsTrigger>
-        </TabsList>
+        <FarmNavigation activeTab={activeTab} onSelect={setActiveTab} />
 
-        <TabsContent value="overview" className="mt-4 space-y-4">
+        <TabsContent value="overview" className="mt-1 space-y-4">
           <FarmPerformanceDashboard
             name={farm.name}
             addresses={addresses}
@@ -1323,8 +1339,35 @@ export default function FarmPage() {
             currentCycle={analytics.currentCycleNumber}
             scope={overviewScope}
             onScopeChange={setOverviewScope}
-            onSessions={(ids) => { setChartSessionIds(ids); setActiveTab('activity'); }}
           />
+          <FarmPlanModes farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
+          <FarmTouchPlan
+            drafts={planDrafts}
+            touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
+            saving={savingPlan}
+            message={planMessage}
+            error={planError}
+            onChange={handlePlanDraftChange}
+            onReset={handleResetPlan}
+            onSave={handleSavePlan}
+            onRemove={(slotId) => { setPlanMessage(''); setPlanError(''); setPlanDrafts(current => current.filter(draft => draft.slotId !== slotId)); }}
+            onAdd={() => {
+              setPlanMessage('');
+              setPlanError('');
+              setPlanDrafts(current => {
+                const cycle = Math.max(0, ...resolvedTouches.map(touch => touch.resolvedCycleNumber), ...current.map(draft => draft.cycleNumber)) + 1;
+                const date = localPlanDate();
+                return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
+                  suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
+              });
+            }}
+          />
+          <details className="rounded-xl border border-border bg-card p-4">
+            <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
+            <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
+          </details>
+          </FarmPlanModes>
+
           <details className="rounded-2xl border border-border/60 bg-card p-5">
             <summary className="cursor-pointer text-sm font-medium">More analytics <span className="ml-2 text-xs font-normal text-muted-foreground">Sessions, spend & cadence</span></summary>
             <div className="mt-5 space-y-4">
@@ -1441,35 +1484,7 @@ export default function FarmPage() {
 
         </TabsContent>
 
-        <TabsContent value="plan" className="mt-4 space-y-4">
-          <FarmPlanModes farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
-          <FarmTouchPlan
-            drafts={planDrafts}
-            touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
-            saving={savingPlan}
-            message={planMessage}
-            error={planError}
-            onChange={handlePlanDraftChange}
-            onReset={handleResetPlan}
-            onSave={handleSavePlan}
-            onRemove={(slotId) => { setPlanMessage(''); setPlanError(''); setPlanDrafts(current => current.filter(draft => draft.slotId !== slotId)); }}
-            onAdd={() => {
-              setPlanMessage('');
-              setPlanError('');
-              setPlanDrafts(current => {
-                const cycle = Math.max(0, ...resolvedTouches.map(touch => touch.resolvedCycleNumber), ...current.map(draft => draft.cycleNumber)) + 1;
-                const date = localPlanDate();
-                return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
-                  suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
-              });
-            }}
-          />
-          <details className="rounded-xl border border-border bg-card p-4">
-            <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
-            <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
-          </details>
-          </FarmPlanModes>
-        </TabsContent>
+
 
         <TabsContent value="map" className="mt-1 min-h-0 overflow-hidden rounded-xl border border-border bg-card">
             <FarmMapView
@@ -1482,7 +1497,6 @@ export default function FarmPage() {
               cycleTouchIds={selectedMapCycleTouchIds}
               touchOutcomes={touchOutcomes}
               contacts={contacts}
-              showContactsOverlay={showMapContactsOverlay}
               onDataChanged={() => loadData(userId)}
               className="h-full rounded-none border-0"
               toolbarContent={
@@ -1527,23 +1541,13 @@ export default function FarmPage() {
                     </SelectContent>
                   </Select>
                 ) : null}
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2">
-                  <Switch
-                    id="farm-map-contacts-overlay"
-                    checked={showMapContactsOverlay}
-                    onCheckedChange={setShowMapContactsOverlay}
-                  />
-                  <Label htmlFor="farm-map-contacts-overlay" className="cursor-pointer text-sm">
-                    Contact overlay
-                  </Label>
-                </div>
                 </div>
               }
               showOutcomeControls={false}
             />
         </TabsContent>
 
-        <TabsContent value="activity" className="mt-4 space-y-4">
+        <TabsContent value="activity" className="mt-1 space-y-4">
           {chartSessionIds && <section className="rounded-xl border border-border bg-card p-5 space-y-4" aria-label="Sessions from selected chart period">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm font-semibold">Sessions from selected chart period</h2>
@@ -1557,27 +1561,16 @@ export default function FarmPage() {
           <div className="bg-card p-4 rounded-xl border border-border space-y-4">
             <div>
               <h2 className="text-sm font-semibold text-foreground mb-1">Farm activity</h2>
-              <p className="text-sm text-muted-foreground">Canvassing sessions for this farm.</p>
+              <p className="text-sm text-muted-foreground">Your daily canvassing habit, one square at a time.</p>
               <Link href="/activity" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline mt-2">
                 View all workspace activity
               </Link>
             </div>
-            {linkedCampaignId ? (
-              <ActivityPageView
-                key={linkedCampaignId}
-                campaignId={linkedCampaignId}
-                forcedTypeFilter="session_completed"
-                hideFilterControls
-                defaultRangePreset="all"
-                emptyMessage="No sessions for this farm yet."
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">No sessions for this farm yet.</p>
-            )}
+            <FarmActivityCalendar campaignId={linkedCampaignId} createdAt={farm.created_at} />
           </div>
         </TabsContent>
 
-        <TabsContent value="homes" className="mt-4">
+        <TabsContent value="homes" className="mt-1">
           <div className="bg-card p-4 rounded-xl border border-border">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-1">
@@ -1663,53 +1656,69 @@ export default function FarmPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="leads" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Mailbox className="w-4 h-4" />
-                Farm Leads
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {leads.length === 0 && contacts.length === 0 ? (
+        <TabsContent value="leads" className="mt-1">
+          <div className="bg-card p-4 rounded-xl border border-border">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-foreground">Farm Leads</h2>
+                <Badge variant="secondary" className="text-xs">{leads.length + contacts.length}</Badge>
+              </div>
+              <Button size="sm" disabled={!userId} onClick={() => {
+                setSelectedHomeContactAddress(null);
+                setCreateContactOpen(true);
+              }}>
+                <Plus className="w-4 h-4 mr-1" />
+                Add contact
+              </Button>
+            </div>
+            <div className="relative mb-4">
+              <input
+                type="text"
+                aria-label="Search farm leads"
+                placeholder="Search by name, phone, email, or address..."
+                value={leadsSearchQuery}
+                onChange={(event) => setLeadsSearchQuery(event.target.value)}
+                className="w-full pl-3 pr-3 py-2 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            {filteredFarmLeads.length === 0 ? (
+              <div className="text-center py-8">
                 <p className="text-sm text-muted-foreground">
-                  No contacts linked to this farm yet. Contacts are created when field agents interact with addresses during sessions, or you can add them manually from the Contacts page.
+                  {leadsSearchQuery.trim() ? 'No contacts match your search.' : 'No contacts yet. Add a contact to get started.'}
                 </p>
-              ) : null}
-
-              {leads.length > 0 ? (
-                <div className="space-y-3">
-                  {leads.map((lead) => (
-                    <div key={lead.id} className="rounded-xl border border-border p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-medium">{lead.name || 'Unnamed lead'}</p>
-                          <p className="text-sm text-muted-foreground">Source: {lead.lead_source}</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{new Date(lead.created_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {contacts.length > 0 ? (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-foreground">Contacts</p>
-                  {contacts.map((contact) => (
-                    <div key={contact.id} className="rounded-xl border border-border p-4">
-                      <p className="font-medium">{contact.full_name}</p>
-                      <p className="text-sm text-muted-foreground">{contact.address || 'No address provided'}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="pb-2 pr-3 font-medium">Name</th>
+                      <th className="pb-2 pr-3 font-medium">Phone</th>
+                      <th className="pb-2 pr-3 font-medium">Email</th>
+                      <th className="pb-2 pr-3 font-medium">Address</th>
+                      <th className="pb-2 pr-3 font-medium">Last contacted</th>
+                      <th className="pb-2 pr-3 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFarmLeads.map((lead) => (
+                      <tr key={lead.key} className="border-b border-border/50">
+                        <td className="py-2 pr-3 text-foreground">{lead.name || '—'}</td>
+                        <td className="py-2 pr-3 text-foreground">{lead.phone || '—'}</td>
+                        <td className="py-2 pr-3 text-foreground">{lead.email || '—'}</td>
+                        <td className="py-2 pr-3 text-foreground max-w-[180px] truncate" title={lead.address || undefined}>{lead.address || '—'}</td>
+                        <td className="py-2 pr-3 text-foreground">{formatDateLabel(lead.lastContacted)}</td>
+                        <td className="py-2 pr-3 text-foreground">{lead.status || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </TabsContent>
 
-        <TabsContent value="finance" className="mt-4 space-y-4">
+        <TabsContent value="finance" className="mt-1 space-y-4">
           <FinancePanel
             targetType="farm"
             targetId={farm.id}
@@ -1718,7 +1727,7 @@ export default function FarmPage() {
           />
         </TabsContent>
 
-        <TabsContent value="qr" className="mt-4 space-y-4">
+        <TabsContent value="qr" className="mt-1 space-y-4">
           {!linkedCampaignId ? (
             <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div>
@@ -1884,7 +1893,7 @@ export default function FarmPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="notes" className="mt-4 space-y-4">
+        <TabsContent value="notes" className="mt-1 space-y-4">
           {!linkedCampaignId ? (
             <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div>
@@ -1985,7 +1994,7 @@ export default function FarmPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="configure" className={`mt-4 space-y-4 ${settingsStyles.settings}`}>
+        <TabsContent value="configure" className={`mt-1 space-y-4 ${settingsStyles.settings}`}>
           <Card>
             <CardHeader className="border-b border-border pb-5">
               <CardTitle className="flex items-center gap-2 text-2xl">
