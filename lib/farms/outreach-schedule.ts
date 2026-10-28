@@ -7,6 +7,11 @@ export type OutreachSettings = {
   callPasses: number;
   callsPerDay: number;
   holidays: string[];
+  holidaysEnabled?: boolean;
+  holidayCountry?: string;
+  holidayRegion?: string;
+  publicHolidays?: string[];
+  extraDaysOff?: string[];
 };
 export const defaultOutreachSettings = (): OutreachSettings => ({ doorsPerDay: 50, workingDays: [1, 2, 3, 4, 5, 6], doorPasses: 1, callPasses: 0, callsPerDay: 50, holidays: [] });
 export function outreachDate(date: string, days: number) {
@@ -23,8 +28,16 @@ export function validateOutreachSettings(raw: unknown): OutreachSettings {
     if (!Number.isInteger(value[key]) || value[key] < 0 || value[key] > 12) throw Error('Choose between 0 and 12 rounds per channel.');
   if (!value.doorPasses && !value.callPasses) throw Error('Choose at least one door-knocking or calling round.');
   if (!Array.isArray(value.workingDays) || !value.workingDays.length || value.workingDays.length > 7 || value.workingDays.some(day => !Number.isInteger(day) || day < 0 || day > 6)) throw Error('Choose at least one working day.');
-  if (!Array.isArray(value.holidays) || value.holidays.length > 366 || value.holidays.some(date => typeof date !== 'string' || !validPlanDate(date))) throw Error('Choose valid holiday dates.');
-  return { doorsPerDay: value.doorsPerDay, callsPerDay: value.callsPerDay, doorPasses: value.doorPasses, callPasses: value.callPasses, workingDays: [...new Set(value.workingDays)].sort(), holidays: [...new Set(value.holidays)].sort() };
+  if (!Array.isArray(value.holidays) || value.holidays.length > 732 || value.holidays.some(date => typeof date !== 'string' || !validPlanDate(date))) throw Error('Choose valid holiday dates.');
+  for (const dates of [value.publicHolidays, value.extraDaysOff]) {
+    if (dates !== undefined && (!Array.isArray(dates) || dates.length > 366 || dates.some(date => typeof date !== 'string' || !validPlanDate(date)))) throw Error('Choose valid days off.');
+  }
+  if (value.holidaysEnabled !== undefined && typeof value.holidaysEnabled !== 'boolean') throw Error('Choose a valid holiday setting.');
+  for (const code of [value.holidayCountry, value.holidayRegion]) if (code !== undefined && (typeof code !== 'string' || !/^[A-Z]{2,3}$/.test(code))) throw Error('Choose a valid holiday region.');
+  const extraDaysOff = value.extraDaysOff === undefined ? undefined : [...new Set(value.extraDaysOff)].sort();
+  const publicHolidays = value.publicHolidays === undefined ? undefined : [...new Set(value.publicHolidays)].sort();
+  const holidays = extraDaysOff === undefined ? [...new Set(value.holidays)].sort() : [...new Set([...extraDaysOff, ...(value.holidaysEnabled ? publicHolidays ?? [] : [])])].sort();
+  return { doorsPerDay: value.doorsPerDay, callsPerDay: value.callsPerDay, doorPasses: value.doorPasses, callPasses: value.callPasses, workingDays: [...new Set(value.workingDays)].sort(), holidays, ...(extraDaysOff === undefined ? {} : { extraDaysOff }), ...(publicHolidays === undefined ? {} : { publicHolidays }), ...(value.holidaysEnabled === undefined ? {} : { holidaysEnabled: value.holidaysEnabled }), ...(value.holidayCountry ? { holidayCountry: value.holidayCountry } : {}), ...(value.holidayRegion ? { holidayRegion: value.holidayRegion } : {}) };
 }
 export function forecastOutreach(totalHomes: number, startDate: string, weeks: number, raw: OutreachSettings, weeksOff: string[] = []) {
   const settings = validateOutreachSettings(raw);

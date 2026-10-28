@@ -96,8 +96,14 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
   const [nameValidationAttempted, setNameValidationAttempted] = useState(false);
   const farmNameInput = useRef<HTMLInputElement>(null);
   const [outreach, setOutreach] = useState(defaultOutreachSettings);
+  const [holidayLoading, setHolidayLoading] = useState(false);
   const [planWeeks, setPlanWeeks] = useState(52);
   const [boundary, setBoundary] = useState<GeoJSON.Polygon | null>(null);
+  const farmLocation = useMemo(() => {
+    if (!boundary) return null;
+    try { const [longitude, latitude] = turf.pointOnFeature(turf.polygon(boundary.coordinates)).geometry.coordinates; return { latitude, longitude }; }
+    catch { return null; }
+  }, [boundary]);
   const homeCount = useStormTerritoryAddressCount(currentWorkspaceId ?? '', boundary, '/api/farms/address-count');
   const description =
     'Repeat this area for doorknocks, flyers, Canada Post, pop-bys, or letters.';
@@ -558,8 +564,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
       return;
     }
     try {
-      const forecast = forecastOutreach(homeCount.data?.count ?? 0, startDate, planWeeks, outreach);
-      if (homeCount.data && !forecast.fits) throw Error(`This plan needs ${forecast.daysNeeded} working days, but only ${forecast.availableDays} are available. Increase your daily targets, reduce rounds, or adjust time off.`);
+      forecastOutreach(homeCount.data?.count ?? 0, startDate, planWeeks, outreach);
     } catch (error) {
       await showFeedbackDialog({ title: 'Check your plan', description: getErrorMessage(error), tone: 'warning' });
       return;
@@ -644,8 +649,11 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
           const result = await planResponse.json().catch(() => ({}));
           await showFeedbackDialog({ title: 'Farm saved — review your plan', description: result.error || 'Open Annual farm coverage on the Dashboard to finish the plan.', tone: 'warning' });
         }
+        if (homeCount.data && imported.totalCount !== homeCount.data.count) {
+          await showFeedbackDialog({ title: 'Farm plan updated', description: `The map estimated ${homeCount.data.count.toLocaleString()} addresses; ${imported.totalCount.toLocaleString()} were imported. Your saved plan uses the imported homes.`, tone: 'warning' });
+        }
       }
-      if (importResponse.ok && imported.totalCount > 0 && forecastOutreach(imported.totalCount, startDate, planWeeks, outreach).fits) {
+      if (importResponse.ok && imported.totalCount > 0) {
         const schedule = forecastOutreach(imported.totalCount, startDate, planWeeks, outreach);
         try {
           const rounds = [
@@ -721,7 +729,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
         {mapLoaded ? (
           <div className="absolute right-5 top-5 z-20 max-h-[calc(100%-2.5rem)] w-[min(22rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/10 bg-background/92 shadow-2xl backdrop-blur-md">
             <div className="space-y-4 p-4">
-              <button
+              {phase !== 'naming' && <button
                 type="button"
                 disabled={isBusy}
                 onClick={() => void handlePrimaryCreateAction()}
@@ -729,7 +737,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
               >
                 <span className="text-2xl leading-none">+</span>
                 <span>{isBusy ? 'Creating...' : 'Create farm'}</span>
-              </button>
+              </button>}
 
               {phase === 'naming' ? (
                 <div className="space-y-4">
@@ -748,13 +756,15 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
                     />
                     {nameValidationAttempted && !farmName.trim() && <p id="farm-name-error" role="alert" className="text-sm text-destructive">Enter a farm name.</p>}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-medium">Plan dates</summary><div className="mt-3 grid grid-cols-2 gap-3">
                     <div className="space-y-2"><Label htmlFor="farm-start">Start date</Label>
                       <Input id="farm-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} /></div>
                     <div className="space-y-2"><Label htmlFor="farm-weeks">Plan length (weeks)</Label>
                       <Input id="farm-weeks" type="number" min={1} max={52} value={planWeeks || ''} onChange={e => setPlanWeeks(Number(e.target.value))} /></div>
-                  </div>
-                  <FarmOutreachQuestions value={outreach} onChange={setOutreach} totalHomes={homeCount.data?.count ?? null} startDate={startDate} weeks={planWeeks} estimated />
+                  </div></details>
+                  <FarmOutreachQuestions value={outreach} onChange={setOutreach} totalHomes={homeCount.data?.count ?? null} startDate={startDate} weeks={planWeeks} estimated location={farmLocation} onHolidayLoadingChange={setHolidayLoading} />
+                  {homeCount.error && <div className="text-sm text-amber-500" role="alert">Address count unavailable. <button type="button" onClick={homeCount.retry} className="underline">Retry</button></div>}
+                  <button type="button" disabled={isBusy || holidayLoading || !homeCount.data} onClick={() => void handlePrimaryCreateAction()} className="flex h-12 w-full items-center justify-center rounded-xl bg-[#FA263C] px-5 font-semibold text-white hover:bg-red-600 disabled:opacity-50">{isBusy ? 'Creating…' : 'Create farm'}</button>
                   <button
                     type="button"
                     onClick={handleNamingBack}
@@ -766,7 +776,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
                 </div>
               ) : null}
 
-              <div className="space-y-2">
+              {phase !== 'naming' && <><div className="space-y-2">
                 <Label htmlFor="farm-map-search" className="flex items-center gap-2">
                   <Search className="h-4 w-4" />
                   Search address
@@ -810,7 +820,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
                 <span>Clear boundary</span>
               </button>
 
-              <FarmBoundaryAddressCount map={map} draw={drawRef} mapLoaded={mapLoaded} workspaceId={currentWorkspaceId} />
+              <FarmBoundaryAddressCount map={map} draw={drawRef} mapLoaded={mapLoaded} workspaceId={currentWorkspaceId} /></>}
             </div>
           </div>
         ) : null}

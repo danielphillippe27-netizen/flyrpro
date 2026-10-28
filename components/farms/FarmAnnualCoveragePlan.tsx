@@ -13,7 +13,7 @@ import {
   type AnnualCoverageSettings,
 } from "@/lib/farms/annual-coverage";
 import { FarmOutreachQuestions } from './FarmOutreachQuestions';
-import { defaultOutreachSettings, forecastOutreach } from '@/lib/farms/outreach-schedule';
+import { defaultOutreachSettings } from '@/lib/farms/outreach-schedule';
 import { validPlanDate } from "@/lib/farms/door-plan";
 import type {
   FarmAddress,
@@ -65,6 +65,7 @@ export function FarmAnnualCoveragePlan({
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [holidayLoading, setHolidayLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [page, setPage] = useState(0);
@@ -141,7 +142,8 @@ export function FarmAnnualCoveragePlan({
   );
   const farmChanged = useMemo(() => {
     if (!saved) return false;
-    const savedIds = saved.weeks.flatMap((week) => week.addressIds);
+    if (saved.outreach && !saved.outreach.doorPasses) return saved.totalHomes !== currentHomeIds.size;
+    const savedIds = [...saved.weeks.flatMap((week) => week.addressIds), ...(saved.unassignedAddressIds ?? [])];
     return (
       savedIds.length !== currentHomeIds.size ||
       savedIds.some((id) => !currentHomeIds.has(id))
@@ -158,9 +160,6 @@ export function FarmAnnualCoveragePlan({
   );
   const selected = plan?.weeks.find((week) => week.startDate === selectedWeek);
   const workingWeeks = settings.weeksInPlan - settings.weeksOff.length;
-  const dailyForecast = useMemo(() => {
-    try { return settings.outreach && plan ? forecastOutreach(plan.totalHomes, settings.startDate, settings.weeksInPlan, settings.outreach, settings.weeksOff) : null; } catch { return null; }
-  }, [settings, plan]);
   const shortfall = plan?.unassignedAddressIds.length ?? 0;
   const coverage = plan?.totalHomes ? visits.size / plan.totalHomes : 0;
   const now = new Date();
@@ -224,7 +223,7 @@ export function FarmAnnualCoveragePlan({
         weeksOff: data.plan.weeksOff,
             outreach: data.plan.outreach,
       });
-      setMessage("Annual coverage plan saved for this farm.");
+      setMessage("Farm plan saved. Existing touchpoints keep their dates; review them separately if your pace or rounds changed.");
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -341,7 +340,7 @@ export function FarmAnnualCoveragePlan({
             </p>
           </div>
         </fieldset>
-        {settings.outreach && <fieldset disabled={loading || busy} className="mt-6 min-w-0"><FarmOutreachQuestions value={settings.outreach} onChange={outreach => update({ ...settings, outreach, homesPerWeek: Math.max(1, outreach.doorsPerDay * outreach.workingDays.length) })} totalHomes={plan?.totalHomes ?? null} startDate={settings.startDate} weeks={settings.weeksInPlan} weeksOff={settings.weeksOff} /></fieldset>}
+        {settings.outreach && <fieldset disabled={loading || busy} className="mt-6 min-w-0"><FarmOutreachQuestions value={settings.outreach} onChange={outreach => update({ ...settings, outreach, homesPerWeek: Math.max(1, outreach.doorsPerDay * outreach.workingDays.length) })} totalHomes={plan?.totalHomes ?? null} startDate={settings.startDate} weeks={settings.weeksInPlan} weeksOff={settings.weeksOff} onHolidayLoadingChange={setHolidayLoading} /></fieldset>}
         <details className="mt-5 rounded-xl border border-border bg-muted/20 p-4">
           <summary className="cursor-pointer text-sm font-medium">
             <Palmtree className="mr-2 inline h-4 w-4 text-muted-foreground" />
@@ -394,9 +393,9 @@ export function FarmAnnualCoveragePlan({
               loading ||
               loadFailed ||
               busy ||
+              (settings.outreach && holidayLoading) ||
               !plan?.totalHomes ||
-              shortfall > 0 ||
-              (dailyForecast !== null && !dailyForecast.fits) ||
+              (!settings.outreach && shortfall > 0) ||
               !changed
             }
             onClick={() => void save()}

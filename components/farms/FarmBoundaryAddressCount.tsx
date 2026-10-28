@@ -37,8 +37,8 @@ export function FarmBoundaryAddressCount({ map, draw, mapLoaded, workspaceId }: 
       <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide"><Building2 className="h-4 w-4" aria-hidden="true" />Address pins</span>
       <span className="text-lg font-bold tabular-nums">{!boundary ? '0' : current.data ? `${current.data.partial ? 'At least ' : ''}${current.data.count.toLocaleString()}` : current.error ? 'Unavailable' : 'Counting…'}</span>
     </div>
-    <p className="mt-1 text-xs text-muted-foreground">{boundary ? 'Unique mapped addresses across the entire boundary, including off-screen pins.' : 'Draw a boundary to count its addresses.'}</p>
-    {current.data && <p className="mt-1 text-xs text-muted-foreground">Mapped-address estimate; coverage may omit addresses or include businesses.{current.data.partial ? ' Some regional data was unavailable.' : ''}</p>}
+    {!boundary && <p className="mt-1 text-xs text-muted-foreground">Draw a boundary to count its addresses.</p>}
+    {current.data?.partial && <p className="mt-1 text-xs text-muted-foreground">Some regional data was unavailable.</p>}
     {current.error && <div className="mt-2 text-xs"><p role="alert">{current.error}</p><button type="button" onClick={current.retry} className="mt-1 underline">Retry count</button></div>}
   </div>;
 }

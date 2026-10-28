@@ -1,6 +1,5 @@
 import { buildFarmDoorPlan } from '@/lib/farms/door-plan';
 import { outreachDate } from '@/lib/farms/outreach-schedule';
-import { forecastOutreach } from '@/lib/farms/outreach-schedule';
 import { NextRequest, NextResponse } from "next/server";
 import { resolveUserFromRequest } from "@/app/api/_utils/request-user";
 import { createAdminClient } from "@/lib/supabase/server";
@@ -81,9 +80,7 @@ export async function PUT(request: NextRequest, context: Context) {
         { error: "Add eligible farm homes before saving an annual plan." },
         { status: 409 },
       );
-    const forecast = settings.outreach ? forecastOutreach(plan.totalHomes, settings.startDate, settings.weeksInPlan, settings.outreach, settings.weeksOff) : null;
-    if (forecast && !forecast.fits) return NextResponse.json({ error: `This plan needs ${forecast.daysNeeded} working days, but only ${forecast.availableDays} are available. Increase your daily pace or adjust your rounds and time off.` }, { status: 422 });
-    if (plan.unassignedAddressIds.length)
+    if (!settings.outreach && plan.unassignedAddressIds.length)
       return NextResponse.json(
         {
           error: `Increase your weekly target to at least ${plan.minimumHomesPerWeek.toLocaleString()} homes to cover the farm in your available weeks.`,
@@ -98,7 +95,7 @@ export async function PUT(request: NextRequest, context: Context) {
     }) : null;
     const { error } = await result.admin
       .from("farms")
-      .update({ annual_coverage_plan: plan, ...(doorPlan ? { door_plan: doorPlan } : {}) })
+      .update({ annual_coverage_plan: plan, ...(settings.outreach ? { door_plan: doorPlan } : {}) })
       .eq("id", result.farm.id);
     if (error) throw error;
     return NextResponse.json({ plan });
