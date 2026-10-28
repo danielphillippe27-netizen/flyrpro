@@ -1,19 +1,25 @@
 {
-  "updated_at": "2026-10-28T01:56:39.300479+00:00",
-  "release": "Daniel private pilot; production domain unchanged",
+  "updated_at": "2026-10-28T06:00:08.658383+00:00",
+  "release": "0.5.1 Contacts and Inbox share WolfGrid light and dark themes",
   "deployment": {
-    "id": "dpl_EhjwPBsSbbqHWLQ8T8BEzRrcXk5B",
-    "url": "https://flyrpro-fdd356nix-danielphillippe27-netizens-projects.vercel.app",
+    "id": "dpl_BbEd7qc5CrFLgt8hizJ9SBz3gNEQ",
+    "url": "https://flyrpro-8u8wsco0b-danielphillippe27-netizens-projects.vercel.app",
     "state": "READY",
     "protection": "Vercel Deployment Protection retained; app uses temporary share entry, then normal WolfGrid sign-in"
   },
   "migrations_applied": [
     "20261028020000_mac_companion.sql",
-    "20261028030000_mac_crm_release.sql"
+    "20261028030000_mac_crm_release.sql",
+    "20261028040000_apple_command_center.sql",
+    "20261028050000_mac_one_button_sync.sql",
+    "20261028070000_coco_crm_pages.sql",
+    "20261028071000_coco_attachment_manifest.sql",
+    "20261028072000_coco_ai_tasks.sql",
+    "20261028080000_apple_review_save_details.sql"
   ],
   "pilot_allowlist": "Daniel existing account only",
   "native": {
-    "installed_path": "/Users/danielphillippe/Applications/WolfGrid Mac Preview.app",
+    "installed_path": "/Applications/WolfGrid Mac Preview.app",
     "macos_minimum": "15.0",
     "architectures": [
       "arm64",
@@ -23,7 +29,13 @@
     "hardened_runtime": true,
     "notarized": false,
     "zip": "/Volumes/Samsung SSD/WolfGrid/Wolfgrid-WEB/apps/mac/build/WolfGrid-Mac-Preview.zip",
-    "sha256": "4af7f826684436d11e98fc02b94d9c4ca4f02e0a10abc7c488c078da4e35e01d"
+    "sha256": "6d2a133e51100cf74d03ee00929267e844aa3c20ba6f5ab6c258a65593183a66",
+    "version": "0.5.1",
+    "build": "20",
+    "entitlements": [
+      "com.apple.security.personal-information.addressbook",
+      "com.apple.security.personal-information.calendars"
+    ]
   },
   "verification": {
     "selected_contact": "Daniel Phillippe in workspace 22; identifiers made unique as authorized",
@@ -31,11 +43,11 @@
     "live_private_import_rows_after_replay": 2,
     "other_workspace_member_visible_rows": 0,
     "authenticated_api_status": 200,
-    "personal_key_connected": false,
+    "personal_key_connected": true,
     "sync_enabled_after_test": false,
-    "ai_message_consent_after_test": false,
-    "installed_fresh_signin": "Verified visible final deployment email/password login; email prefilled, no password entered",
-    "installed_messages_permission": "authorization denied from exact signed app; user grant pending",
+    "ai_message_consent_after_test": true,
+    "installed_fresh_signin": "PASS: Continue with Google returned to existing workspace 22 in installed 0.3.0",
+    "installed_messages_permission": "Needs permission in installed 0.3.0; Full Disk Access user grant pending",
     "tests_passed": [
       "native synthetic Messages reader",
       "release database, private RLS and 1502 contacts",
@@ -46,15 +58,91 @@
       "Mac auth redirect and hidden-window initialization",
       "focused TypeScript",
       "scoped ESLint",
-      "isolated cloud production-mode build"
-    ]
+      "isolated cloud production-mode build",
+      "Mac OAuth URL/PKCE/callback policy",
+      "Mac OAuth helper: reservation, browser routing and cancellation",
+      "Actual Supabase SDK authorization URL compatibility",
+      "Focused login/OAuth TypeScript and ESLint",
+      "Apple command centre database privacy/permissions with 1501 contacts",
+      "Apple command centre responsive light/dark browser fixtures",
+      "Native date-window filtering and metadata scan checkpoints",
+      "Installed 0.3.0 dashboard and Google sign-in",
+      "Live authenticated preview preserves 2 private history rows"
+    ],
+    "google_authentication": "PASS: installed Continue with Google opened the system authentication session; selected the confirmed linked Gmail identity; returned to the Mac app and rendered authenticated Mac setup in existing workspace 22. Evidence: verification/installed-google-signed-in.png",
+    "installed_runtime": "Authenticated native device heartbeat recorded paused status after sign-in; actual Messages polling/import still gated by Full Disk Access and sync opt-in",
+    "installed_dashboard": "PASS: installed 0.3.1 Google sign-in returned to workspace 22; Messages is the default screen; one Enable sync with WolfGrid contacts button; no approval list",
+    "calendar_reminders": "Native review and export implemented; synthetic UI and Swift compilation passed; real OS grant and save not tested",
+    "openai": "User connected key and allowed AI in app; choices preserved; no provider inference performed by this verification",
+    "automatic_apple_contact_permission": "Superseded by one-button sync: current and future owned CRM contacts automatically eligible, all available history, unique phone/email matching",
+    "one_button_sync": "PASS: database fixtures with 1503 contacts, new-contact discovery, stable checkpoints, pause and owner isolation; light/dark/mobile UI uses one button and sends no per-contact approval requests",
+    "live_api": "PASS: latest protected preview returns authenticated status, preserves 2 private messages and saved personal key/AI consent; no paid inference",
+    "live_one_button_rollback": "PASS: transactional real-account test found 8 eligible contacts with available history, preserved AI preference, rolled back consent and audit changes",
+    "contacts_packaging": "PASS: Address Book/Calendar entitlements in signed universal 0.3.3; strict codesign verification passed; app installed in Applications",
+    "contacts_picker": "PASS: actual installed app displays Apple Contacts rows, selection enables Review 1 selected, selected Daniel exact 2896752788 reaches CRM review",
+    "contacts_real_import": "PASS: matched existing Daniel Phillippe 2896752788 / daniel.phillippe27@gmail.com, Fill missing details completed, 1 reviewed CRM imports; no duplicate contact created",
+    "installed_contacts_permission": "Access allowed in installed 0.3.3; no privacy settings bypass or automated OS grant performed",
+    "permission_recovery": "PASS: browser fixture reproduces Calendar denial, removes wrong Messages prefix and clicks Open Calendar Settings; native privacy-settings action uses source calendar. Dedicated Calendar/Reminders settings buttons visible without waiting for an error.",
+    "installed_permission_recovery": "PASS: installed 0.3.4 signed in to existing workspace; Calendar & reminders displays Open Calendar Settings and Open Reminders Settings; clicked Calendar action and System Settings opened the Calendars privacy pane. No OS permission granted or calendar item created.",
+    "coco_parity": {
+      "database": "passed actual migrations and owner isolation, contact/page/task/deal/attachment transaction checks",
+      "browser": "passed actual source components desktop/mobile/Strict Mode and full application shell",
+      "api": "passed actual authenticated Gmail send, private attachments, OAuth claim, CRM assistant and sync route fixtures; no real provider sends",
+      "native": "universal hardened Apple Development signature verified; Contacts review/source reader and OAuth fixture tests passed",
+      "installed": "Verified signed-in workspace 22: 23 contacts, Daniel record, saved private messages, native Apple swipe-card review/search/match, real personal-key AI draft, editable draft use and native exact-recipient send review. Cancelled send; no communication sent. Messages read-only/schema permission check is ready.",
+      "live_data": "23 owned contacts, one private conversation, two messages preserved",
+      "status_fix": "Final preview and build 10 include the native connection badge correction; actual component regression, scoped TypeScript including main shell and ESLint pass. Installed live flows were verified immediately before the status-only patch."
+    },
+    "native_header": "0.4.1 removes the web top header only in the native app, from document start, and expands CRM panes into freed space. Same preview origin/session and native toolbar retained; universal hardened signed build verified.",
+    "composer_templates": "PASS: actual source browser fixture verifies plus Templates/Attachments menu, personalized insertion, append preserves existing draft, attachment picker still works, and no automatic send; scoped ESLint and changed-component TypeScript diagnostics clear; preview build and authenticated API pass. Installed signed 0.4.2 build 12 without interrupting the active Apple Contacts review; new UI takes effect on next launch.",
+    "santana_sync": "Created authorized Santana Phillippe contact; automatic installed runtime imported 606 of 606 locally available one-to-one messages, Sep 27\u2013Oct 27, 333 incoming / 273 outgoing. Sync enabled; account-wide expansion remains disabled.",
+    "apple_review_save": "0.4.3: Done becomes Save N & Done; transactional details import, retry note deduplication, custom labels and notes; pending selections/match choices/details stored per owner and workspace. PGlite database, native durable state, API, browser regressions, Swift typecheck, scoped lint/type diagnostics and universal signed build passed. Migration applied before preview; installed and reopened; Google sign-in requested for live card verification.",
+    "contacts_toolbar": "PASS actual-component browser desktop/mobile: Filter opens stages and labels together; one + Contact menu offers Google (Gmail) and Apple; no separate provider/stage/manual-add or top plus buttons. Signed universal 0.4.4 installed for next launch; running authenticated 0.4.3 kept open.",
+    "installed_apple_review_fields": "PASS actual installed 0.4.3 card: 258 left / 286 total / 0 pending; freeform title, suggested labels and Note present. Opened and closed without changing selections or CRM records.",
+    "apple_contacts_layout": "PASS: actual-source desktop/mobile/light/dark browser checks; compact alphabetic 280px browser, icon-only filter/sidebar and add controls, real label/stage sidebar, circular avatar and message/call/FaceTime/email actions, missing identifiers disable applicable actions. FaceTime handoff limited to user-activated links from the trusted visible app frame; no test call placed. Swift source typecheck and signed universal build passed; installed for next launch preserving current signed-in session.",
+    "native_crm_header": "PASS: native document-start styles hide the duplicate Inbox/Contacts/Mac-connected/actions strip in the Mac app and expand Contacts/Inbox to full web viewport height. Actual-component browser checks confirm hidden header and full-height inbox, with no horizontal overflow. Same installed preview origin retained, no web redeploy. Signed universal 0.4.6 build 16 installed for next launch.",
+    "messages_header": "PASS actual-component desktop/mobile/native viewport fixture: centered avatar/name, name menu opens contact/email actions, exact-recipient FaceTime link, no wide Email/View client controls or status subtitle. ESLint and cloud build passed. Signed universal build 17 installed for next launch, leaving current session open; no calls or communications sent.",
+    "native_window_chrome": "0.4.8 removes the native toolbar, uses the standard hidden-title-bar window style, hides the window title and separator, and keeps normal macOS window controls. Navigation moved to Navigate menu (Cmd+1 Inbox, Cmd+2 Contacts); Mac setup uses Cmd+comma; access check remains in Navigate and menu-bar app. Universal hardened signed build and strict signature verification passed. Same installed web origin/session configuration retained; installed for next launch without interrupting the active campaign screen. Post-relaunch visual verification pending.",
+    "farm_pmtiles": "PASS: current farm creation/planning/calendar/card metrics, WGS84 boundaries, opt-in Durham business review and canonical farm-to-PMTiles integration copied into isolated preview. Unit/browser/API checks and synthetic worker/compiler/publication/retry tests passed. Production farm/map TypeScript diagnostics clear; existing CreateFarmFlow hook warnings remain. Live own-account Farm API 200; compact map schema tiles-v3; authenticated archive redirect followed without forwarding session cookies to storage; 127-byte PMTiles header returned 206. CRM, personal key and consent status checks passed. Fixed legacy phase/status SELECT mismatch and missing map-adjustment source selection. Signed universal 0.5.0 build 19 installed for next launch; current user session not interrupted.",
+    "farm_pmtiles_schema": "Existing canonical geometry/compact-bundle fields, commercial exclusion table and prepare_farm_map_addresses(uuid,uuid) RPC verified; no migrations or bulk tile builds launched by this release.",
+    "shared_crm_theme": {
+      "passed": true,
+      "screens": [
+        "Contacts",
+        "Inbox"
+      ],
+      "checks": [
+        "Shared app background, foreground, card, secondary, border and ring tokens",
+        "Live light \u2192 dark \u2192 light switching",
+        "Conversation name, incoming message, composer and editable contact field colors",
+        "Desktop/mobile layout and existing CRM interaction suite"
+      ],
+      "screenshots": "/var/folders/n4/v135wg4x1z5934csy3hgdp780000gn/T/wolfgrid-coco-browser-nlb0LH",
+      "live_api": {
+        "deployment": "https://flyrpro-8u8wsco0b-danielphillippe27-netizens-projects.vercel.app",
+        "authenticatedStatus": 200,
+        "farmStatus": 200,
+        "pmTiles": {
+          "schema": "tiles-v3",
+          "archiveStatus": 206,
+          "headerBytes": 127
+        },
+        "privateMessages": 0,
+        "contacts": 1,
+        "syncEnabled": true,
+        "aiMessagesEnabled": true,
+        "openAiCanSave": true,
+        "modelConfigured": true,
+        "personalKeyConnected": true
+      },
+      "installation": "Signed universal app installed in Applications; current running session left open; update loads on next launch"
+    }
   },
   "remaining_acceptance": [
-    "User grants Full Disk Access to installed app and signs in",
-    "User connects personal OpenAI API key",
-    "Installed authenticated polling, pause/resume and real summary/draft",
-    "Pilot expansion and monitoring",
-    "Developer ID Application signing, notarization, Intel device installation and update validation before public release"
+    "User-controlled master sync remains paused; enable it in Mac setup to validate ongoing imports and device recovery.",
+    "Real attachment upload/download and concurrent-device acceptance remain unverified.",
+    "Configure Gmail OAuth client/secret/registered callback and encryption settings; none are currently configured on Vercel.",
+    "Developer ID signing, notarization and public installation/update checks."
   ],
   "limitations": [
     "No real OpenAI generation performed",
@@ -62,5 +150,19 @@
     "No public download or production domain promotion",
     "Temporary preview access link expires; not a public distribution package"
   ],
-  "recovery": "Private identifier snapshot and encryption recovery remain outside deployment source with restricted permissions; no secrets stored in this file"
+  "recovery": "Private identifier snapshot and encryption recovery remain outside deployment source with restricted permissions; no secrets stored in this file",
+  "delivered_capabilities": [
+    "Apple integration dashboard",
+    "Private Messages inbox, search, export and explicit deletion",
+    "OpenAI summaries, follow-up suggestions and editable drafts",
+    "Reviewed Calendar and Reminders exports",
+    "System Phone/Messages handoff without sending",
+    "Optional menu-bar background and macOS login item",
+    "Owner-private diagnostics and permission audit",
+    "One-button sync with current and future WolfGrid contacts and available history",
+    "KimiCoco Inbox and Contacts source layouts, filters, bulk actions, contact editor and tasks",
+    "KimiCoco native Apple Contacts swipe-card review",
+    "Reviewed native message/file send and optional private history attachments",
+    "Gmail scoped connection, reviewed all-mail candidate import and idempotent sending implementation; configuration required"
+  ]
 }

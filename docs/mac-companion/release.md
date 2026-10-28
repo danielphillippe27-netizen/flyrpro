@@ -1,3 +1,5 @@
+> Version 0.3.0 supersedes this earlier pilot. See [Apple command centre](command-center.md) for current permissions, automatic Apple-import authorization and native capabilities.
+
 # Mac CRM and OpenAI pilot
 
 Implementation date: October 27, 2026 (Toronto). Extends the local preview documented in `audit.md`.
@@ -73,3 +75,14 @@ Public release still requires installed-app permissions/session testing, real pe
 Monitor `mac_crm_devices` for stale heartbeats and permission/schema/offline states; inspect `crm_ai_usage` for status counts, token usage, and sanitized error codes. A `syncing` device with stale `last_seen_at` is not currently online.
 
 To stop the pilot, deploy with both feature flags false or remove its allowed users. To stop direct authenticated sync RPCs too, set the pilot user's `mac_crm_preferences.sync_enabled=false` (and AI consent false if retiring AI). Do not drop tables or delete imported history during rollback. Keep the encryption key stable for any records retained. A broader pilot requires explicitly adding users to the allowlist and a new deployment.
+
+
+## Mac Google sign-in correction (0.2.1)
+
+The user reproduced Continue with Google in the installed preview reaching an invalid password-reset page in Chrome. The preview landing page treated every authorization code as recovery. It also opened the provider in an ordinary external browser while its PKCE verifier cookie remained in WebKit. The current source landing-route fix is now included in the pilot: only explicit recovery signals go to reset; Google/Apple codes go to the auth callback.
+
+Native Google/Apple sign-in now uses ASWebAuthenticationSession with a dedicated `wolfgrid-mac://auth/callback` return. A native reservation precedes generating the verifier, preventing a second Mac window from overwriting an active flow. Requests require the exact owned Supabase host, supported provider, S256 challenge and attempt-bound callback. Completion accepts a single authorization code for that attempt, routes it to the configured app origin's auth callback, and exchanges it using the existing WebKit cookies. No password, access token or refresh token crosses the native bridge; the native callback code is never returned to JavaScript through the bridge. Cancellation, a changed/closed window, and a five-minute timeout discard pending sign-in. Browser web sign-in retains its existing flow.
+
+Added only `wolfgrid-mac://auth/callback**` to the linked project's redirect allowlist, preserving every existing redirect and the site URL. A restricted recovery snapshot is outside deployment source. Provider configuration, Google client secrets and iPhone redirects were not changed. Automated URL-policy/helper tests and native compile pass; real Google sign-in was completed in the installed update using the Google identity confirmed on the existing pilot account. The authentication tab closed, the app returned to `/settings/mac`, and authenticated setup rendered workspace 22 with both consents off. The native runtime recorded its paused device heartbeat. Screenshot: `verification/installed-google-signed-in.png`. Apple sign-in and actual Messages import after permission remain unverified. Version 0.2.1 is still an Apple Development-signed private pilot, not a notarized public release.
+
+Additional checks: `node scripts/test-mac-oauth.cjs` and OAuth policy cases in `sh apps/mac/tests/run.sh`.

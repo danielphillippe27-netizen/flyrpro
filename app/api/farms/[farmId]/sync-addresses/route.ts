@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import { planFarmCampaignAddressLinks } from '@/lib/farms/campaignAddressLinks';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import {
   formatApiError,
@@ -85,16 +86,36 @@ export async function POST(
     }));
 
     // Keep existing IDs and history, including homes imported outside campaign caps.
-    const existing = await fetchAllInPages<{ campaign_address_id: string | null; gers_id: string | null; formatted: string }>(async (from, to) =>
-      await admin.from('farm_addresses').select('campaign_address_id, gers_id, formatted')
+    const existing = await fetchAllInPages<{ id: string; campaign_address_id: string | null; gers_id: string | null; formatted: string }>(async (from, to) =>
+      await admin.from('farm_addresses').select('id, campaign_address_id, gers_id, formatted')
         .eq('farm_id', farm.id).order('id').range(from, to));
     const campaignIds = new Set(existing.map(row => row.campaign_address_id).filter(Boolean));
     const externalIds = new Set(existing.map(row => row.gers_id).filter(Boolean));
     const formatted = new Set(existing.map(row => row.formatted.trim().toLowerCase()));
+    const exclusions = await fetchAllInPages<{ address_data: { gers_id?: string | null; formatted?: string | null } }>(async (from, to) =>
+      await admin.from('farm_commercial_exclusions').select('address_data').eq('farm_id', farm.id)
+        .is('restored_at', null).order('address_id').range(from, to));
+    const excludedIds = new Set(exclusions.map(row => row.address_data.gers_id).filter(Boolean));
+    const excludedFormatted = new Set(exclusions.map(row => row.address_data.formatted?.trim().toLowerCase()).filter(Boolean));
+    // Existing farm records carry visit history. Match only unambiguous homes,
+    // and attach the campaign identity without replacing the farm record.
+    const eligibleRows = rows.filter(row =>
+      !(row.gers_id && excludedIds.has(row.gers_id)) &&
+      !excludedFormatted.has(row.formatted.trim().toLowerCase()));
+    const links = planFarmCampaignAddressLinks(existing, eligibleRows);
+    for (const link of links) {
+      const { error: linkError } = await admin.from('farm_addresses')
+        .update({ campaign_address_id: link.campaignAddressId })
+        .eq('farm_id', farm.id).eq('id', link.farmId).is('campaign_address_id', null);
+      if (linkError) throw linkError;
+    }
+
     const newRows = rows.filter(row =>
       !campaignIds.has(row.campaign_address_id) &&
       !(row.gers_id && externalIds.has(row.gers_id)) &&
-      !formatted.has(row.formatted.trim().toLowerCase()));
+      !formatted.has(row.formatted.trim().toLowerCase()) &&
+      !(row.gers_id && excludedIds.has(row.gers_id)) &&
+      !excludedFormatted.has(row.formatted.trim().toLowerCase()));
 
     const batchSize = 500;
     for (let index = 0; index < newRows.length; index += batchSize) {
@@ -118,6 +139,7 @@ export async function POST(
       farm_id: farm.id,
       linked_campaign_id: linkedCampaignId,
       inserted_count: newRows.length,
+      linked_count: links.length,
     });
   } catch (error) {
     console.error('[farm sync] Failed to mirror campaign addresses into farm_addresses:', error);

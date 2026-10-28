@@ -23,6 +23,7 @@ export type CanonicalTileManifest = {
   byte_length: number;
   bounds: [number, number, number, number];
   layers: Record<string, CanonicalTileLayer>;
+  geometry_pack?: { url: string; sha256: string; byte_length: number; count: number };
 };
 export type CanonicalTileBundle = {
   schema: typeof CANONICAL_TILE_SCHEMA;
@@ -43,11 +44,20 @@ export type CanonicalTileBundle = {
   counts: Record<string, unknown>;
   display_mode_hint: string;
   links_status: string;
+  built_at?: string | null;
+  expires_at?: string | null;
+  updated_at?: string | null;
+  layer_fetched_at?: Record<string, unknown>;
   reconciliation: unknown;
   reconciliation_report: unknown;
   // Small interactive overlays are deliberately separate from tiled geometry.
   roads: GeoJSON.FeatureCollection;
 };
+export type CanonicalCompactTileBundle = Omit<CanonicalTileBundle, 'schema' | 'roads'> & {
+  schema: 'tiles-v3';
+  road_records: { id: string; source_id: string | number | null; properties: Record<string, unknown> }[];
+};
+export type CanonicalClientTileBundle = CanonicalTileBundle | CanonicalCompactTileBundle;
 
 export function canonicalFeatureId(kind: CanonicalEntityKind, id: string): string {
   const trimmed = id.trim();
@@ -56,16 +66,18 @@ export function canonicalFeatureId(kind: CanonicalEntityKind, id: string): strin
   return `${kind}:${uuid.test(trimmed) ? trimmed.toLowerCase() : trimmed}`;
 }
 
-export function isCanonicalTileBundle(value: unknown): value is CanonicalTileBundle {
-  const bundle = value as Partial<CanonicalTileBundle> | null;
-  return bundle?.schema === CANONICAL_TILE_SCHEMA && Boolean(bundle.tiles?.geometry_revision)
+export function isCanonicalTileBundle(value: unknown): value is CanonicalClientTileBundle {
+  const bundle = value as Partial<CanonicalClientTileBundle> | null;
+  const versionValid = bundle?.schema === CANONICAL_TILE_SCHEMA ||
+    (bundle?.schema === 'tiles-v3' && Boolean(bundle.tiles?.geometry_pack) && Array.isArray(bundle.road_records));
+  return versionValid && Boolean(bundle?.tiles?.geometry_revision)
     && Array.isArray(bundle.records?.addresses) && Array.isArray(bundle.records?.buildings)
     && Array.isArray(bundle.records?.parcels);
 }
 
 /** A tile hit supplies identity only. Tile geometry can be clipped or duplicated. */
 export function canonicalRecordForHit(
-  bundle: CanonicalTileBundle, featureId: string
+  bundle: CanonicalClientTileBundle, featureId: string
 ): { kind: CanonicalEntityKind; record: CanonicalMapRecord } | null {
   for (const [kind, records] of [
     ['building', bundle.records.buildings], ['address', bundle.records.addresses],

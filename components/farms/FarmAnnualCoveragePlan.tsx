@@ -47,12 +47,14 @@ export function FarmAnnualCoveragePlan({
   touches,
   outcomes,
   onAddContact,
+  view = "overview",
 }: {
   farmId: string;
   addresses: FarmAddress[];
   touches: FarmTouch[];
   outcomes: FarmTouchAddress[];
   onAddContact: (home: FarmAddress) => void;
+  view?: "overview" | "settings";
 }) {
   const [settings, setSettings] = useState<AnnualCoverageSettings>(() => ({
     startDate: localPlanDate(),
@@ -264,7 +266,7 @@ export function FarmAnnualCoveragePlan({
   }
   return (
     <div className="space-y-5">
-      <section
+      {view === "settings" && <section
         className={`${panel} p-5 sm:p-6`}
         aria-labelledby="annual-plan-title"
       >
@@ -488,8 +490,10 @@ export function FarmAnnualCoveragePlan({
             </Button>
           </div>
         )}
-      </section>
-      {plan && (
+      </section>}
+      {view === "overview" && !loading && !saved && <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Set up and save your annual plan in Farm settings to see your coverage.</p>}
+      {view === "overview" && loadFailed && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {view === "overview" && saved && plan && (
         <>
           <section
             className={`${panel} p-5 sm:p-6`}
@@ -630,7 +634,7 @@ export function FarmAnnualCoveragePlan({
                     </p>
                     <p className="mt-2 text-xs text-muted-foreground">
                       {week.addressIds.length
-                        ? `${visited} visited so far · View homes`
+                        ? `${visited} visited so far · View week`
                         : week.isOff
                           ? "No visits planned"
                           : "Your farm is allocated in earlier weeks"}
@@ -681,6 +685,7 @@ export function FarmAnnualCoveragePlan({
                     Close home list
                   </Button>
                 </div>
+                <WeeklyCoverageChart week={selected} visits={visits} />
                 <div className="mt-3 max-h-96 overflow-y-auto">
                   {selected.addressIds.slice(0, homeLimit).map((id) => {
                     const home = homes.get(id);
@@ -726,6 +731,50 @@ export function FarmAnnualCoveragePlan({
           </section>
         </>
       )}
+    </div>
+  );
+}
+
+function WeeklyCoverageChart({
+  week,
+  visits,
+}: {
+  week: AnnualCoveragePlan["weeks"][number];
+  visits: Map<string, number>;
+}) {
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = annualPlanDate(week.startDate, index);
+    const start = new Date(`${date}T00:00:00`).getTime();
+    const end = new Date(`${annualPlanDate(date, 1)}T00:00:00`).getTime();
+    return {
+      date,
+      visited: week.addressIds.filter((id) => {
+        const at = visits.get(id);
+        return at !== undefined && at >= start && at < end;
+      }).length,
+    };
+  });
+  const max = Math.max(1, ...days.map((day) => day.visited));
+  const total = days.reduce((sum, day) => sum + day.visited, 0);
+  return (
+    <div className="mt-4 rounded-xl bg-muted/20 p-4" aria-label={`Week ${week.number} daily progress`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-sm font-semibold">Daily progress</h4>
+        <p className="text-xs text-muted-foreground">{count(total)} assigned homes visited this week</p>
+      </div>
+      <div className="mt-4 grid grid-cols-7 gap-2" role="img" aria-label={days.map((day) => `${label(day.date)}: ${day.visited} visited`).join('; ')}>
+        {days.map((day) => (
+          <div key={day.date} className="min-w-0 text-center" aria-hidden="true">
+            <div className="flex h-28 flex-col justify-end">
+              <span className="mb-1 text-xs tabular-nums text-muted-foreground">{day.visited}</span>
+              <div className="mx-auto w-full max-w-10 rounded-t bg-[#E33449]" style={{ height: `${day.visited ? Math.max(4, day.visited / max * 80) : 2}px`, opacity: day.visited ? 1 : 0.25 }} />
+            </div>
+            <p className="mt-2 text-xs font-medium">{new Date(`${day.date}T12:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', timeZone: 'UTC' })}</p>
+            <p className="text-xs text-muted-foreground">{new Date(`${day.date}T12:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">Recorded first visits to homes assigned to this week.</p>
     </div>
   );
 }

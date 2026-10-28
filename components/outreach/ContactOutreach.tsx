@@ -9,7 +9,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { nativeContactUrl, recipientsFor, type OutreachContact, type OutreachMode } from '@/lib/outreach/native';
 import { GmailConnection, outreachRequest } from './GmailConnection';
 
-export function ContactOutreach({ contacts, compact = false }: { contacts: OutreachContact[]; compact?: boolean }) {
+export function ContactOutreach({ contacts, compact = false, iconOnly = false }: { contacts: OutreachContact[]; compact?: boolean; iconOnly?: boolean }) {
   const { currentWorkspaceId } = useWorkspace();
   const [mode, setMode] = useState<OutreachMode | null>(null);
   const [available, setAvailable] = useState<OutreachContact[]>([]);
@@ -52,11 +52,15 @@ export function ContactOutreach({ contacts, compact = false }: { contacts: Outre
   const current = queue?.[index];
   const title = mode === 'call' ? 'Call list' : mode === 'message' ? 'Message list' : 'Email list';
   return <>
-    <div className="flex flex-wrap gap-2">
+    {iconOnly ? <div className="flex items-center gap-2">
+      <Button type="button" size="icon-sm" variant="outline" aria-label="Message list" title="Message list" disabled={!contacts.length} onClick={() => open('message')}><MessageSquare /></Button>
+      <Button type="button" size="icon-sm" variant="outline" aria-label="Call list" title="Call list" disabled={!contacts.length} onClick={() => open('call')}><Phone /></Button>
+      <Button type="button" size="icon-sm" variant="outline" aria-label="Email list" title="Email list" disabled={!contacts.length} onClick={() => open('email')}><Mail /></Button>
+    </div> : <div className="flex flex-wrap gap-2">
       {compact && contacts[0] && nativeContactUrl(contacts[0], 'message') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'message')!}><MessageSquare className="mr-1.5 h-4 w-4" />Messages</a></Button> : <Button type="button" size="sm" variant="outline" disabled={!contacts.length || compact} onClick={() => open('message')}><MessageSquare className="mr-1.5 h-4 w-4" />{compact ? 'Messages' : 'Message list'}</Button>}
       {compact && contacts[0] && nativeContactUrl(contacts[0], 'call') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'call')!}><Phone className="mr-1.5 h-4 w-4" />Call on Mac / iPhone</a></Button> : <Button type="button" size="sm" variant="outline" disabled={!contacts.length || compact} onClick={() => open('call')}><Phone className="mr-1.5 h-4 w-4" />{compact ? 'Call on Mac / iPhone' : 'Call list'}</Button>}
       <Button type="button" size="sm" variant="outline" disabled={!contacts.length} onClick={() => open('email')}><Mail className="mr-1.5 h-4 w-4" />{compact ? 'Gmail' : 'Email list'}</Button>
-    </div>
+    </div>}
     <Dialog open={mode !== null} onOpenChange={open => { if (!open && !sendingRef.current) setMode(null); }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" showCloseButton={!busy}>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{mode === 'email' ? 'Send a separate email to each selected contact from your connected Gmail.' : mode === 'message' ? 'Open each contact in Messages. Copy your message, paste it into Messages, then press Send.' : 'Open each number in your calling app, then return here for the next contact.'}</DialogDescription></DialogHeader>

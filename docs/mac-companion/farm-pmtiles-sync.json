@@ -1,0 +1,502 @@
+{
+  "captured_at": "2026-10-28T05:31:57.967308+00:00",
+  "source_head": "5343f2fc868e3a59a91f2fe86ec218c29ddb07a0",
+  "files": [
+    {
+      "path": "app/(main)/campaigns/[campaignId]/page.tsx",
+      "source_sha256": "d1e4b928862711c66b48a5898cf23205d28dd6e33cc7a795a777827a606b7c96",
+      "release_sha256": "d1e4b928862711c66b48a5898cf23205d28dd6e33cc7a795a777827a606b7c96"
+    },
+    {
+      "path": "app/(main)/campaigns/create/page.tsx",
+      "source_sha256": "16eee4f5d0f6bf432611680c40d0f35c79e1300eb32af0436272a8b1a88e139e",
+      "release_sha256": "16eee4f5d0f6bf432611680c40d0f35c79e1300eb32af0436272a8b1a88e139e"
+    },
+    {
+      "path": "app/api/campaigns/[campaignId]/map-bundle/route.ts",
+      "source_sha256": "d42ab1815ba24f2b2f5e1aa4cfac1112024c0c6c1461b232b6a737231bf053c6",
+      "release_sha256": "d42ab1815ba24f2b2f5e1aa4cfac1112024c0c6c1461b232b6a737231bf053c6"
+    },
+    {
+      "path": "app/api/campaigns/[campaignId]/map-tiles/[revision]/[...tile]/route.ts",
+      "source_sha256": "bceed41928b59628fe0f6e66cc003f41a50b418b2a301703db737615af1baae7",
+      "release_sha256": "bceed41928b59628fe0f6e66cc003f41a50b418b2a301703db737615af1baae7"
+    },
+    {
+      "path": "app/api/farms/[farmId]/annual-coverage/route.ts",
+      "source_sha256": "098a02c646b83d770e58738aa1be39babac95bea317175c647b77c96fd0eea85",
+      "release_sha256": "098a02c646b83d770e58738aa1be39babac95bea317175c647b77c96fd0eea85"
+    },
+    {
+      "path": "app/api/farms/[farmId]/card-stats/route.ts",
+      "source_sha256": "bf036fc4c080dae78128dc2bb5ce1abce31bfb73dd916a5d4eb024be1e22c494",
+      "release_sha256": "bf036fc4c080dae78128dc2bb5ce1abce31bfb73dd916a5d4eb024be1e22c494"
+    },
+    {
+      "path": "app/api/farms/[farmId]/commercial-review/restore/route.ts",
+      "source_sha256": "cea5cbfbb911d14d56018791d1e8b9f1f500ca8d4838931a5a512a90886d84ef",
+      "release_sha256": "cea5cbfbb911d14d56018791d1e8b9f1f500ca8d4838931a5a512a90886d84ef"
+    },
+    {
+      "path": "app/api/farms/[farmId]/commercial-review/route.ts",
+      "source_sha256": "a96f804310fa7159afb6dbea71878dfbbf63831c068f0f297ea4866b51934815",
+      "release_sha256": "a96f804310fa7159afb6dbea71878dfbbf63831c068f0f297ea4866b51934815"
+    },
+    {
+      "path": "app/api/farms/[farmId]/door-plan/route.ts",
+      "source_sha256": "c861908dcaf9b9bfa47b15e8685f7030b468e8b411f1a0485e41b0f22a351f23",
+      "release_sha256": "c861908dcaf9b9bfa47b15e8685f7030b468e8b411f1a0485e41b0f22a351f23"
+    },
+    {
+      "path": "app/api/farms/[farmId]/import-homes/route.ts",
+      "source_sha256": "273e86885b8660905857e5d059a83d6da94326fff6ed80e56fd7a995d6a12d68",
+      "release_sha256": "273e86885b8660905857e5d059a83d6da94326fff6ed80e56fd7a995d6a12d68"
+    },
+    {
+      "path": "app/api/farms/[farmId]/sync-addresses/route.ts",
+      "source_sha256": "987275872645c77d4084fec2ccc9d32ee681bc37f220396ebd6d29f8982fb127",
+      "release_sha256": "987275872645c77d4084fec2ccc9d32ee681bc37f220396ebd6d29f8982fb127"
+    },
+    {
+      "path": "app/api/farms/address-count/route.ts",
+      "source_sha256": "aba0219519e0f8496bebdbec392f5c69eb5a1e977dda08a41f4646b756042dfd",
+      "release_sha256": "aba0219519e0f8496bebdbec392f5c69eb5a1e977dda08a41f4646b756042dfd"
+    },
+    {
+      "path": "app/api/farms/public-holidays/route.ts",
+      "source_sha256": "3935a5dd56db738f59feb1fb842499b16ae01da7963fc984ecab184f212d6004",
+      "release_sha256": "3935a5dd56db738f59feb1fb842499b16ae01da7963fc984ecab184f212d6004"
+    },
+    {
+      "path": "app/api/farms/route.ts",
+      "source_sha256": "44485618b9f50aa1303a3b934db06ec643ff75f19c47409bbe2048dbc64dcbc8",
+      "release_sha256": "44485618b9f50aa1303a3b934db06ec643ff75f19c47409bbe2048dbc64dcbc8"
+    },
+    {
+      "path": "app/api/storm-maps/intelligence/address-count/route.ts",
+      "source_sha256": "0c5ec2288c7694e46b5c0c421cf15b3381a7d776b92591fb412102c3b6d09095",
+      "release_sha256": "0c5ec2288c7694e46b5c0c421cf15b3381a7d776b92591fb412102c3b6d09095"
+    },
+    {
+      "path": "app/farms/[id]/page.tsx",
+      "source_sha256": "b36d016b8eaf771539e80a95fcf8c8e70575661359004c08db58ea7833cd8990",
+      "release_sha256": "77beca359cb65dffe58a62ae891860662dac77aec72c1b8854849b5be3e1f40d"
+    },
+    {
+      "path": "components/campaigns/CampaignDetailMapView.tsx",
+      "source_sha256": "e6fccf0542d4ad60fb11fd9c2c999cef0a6760ffc33c42fa62bf4679e363b1f8",
+      "release_sha256": "e6fccf0542d4ad60fb11fd9c2c999cef0a6760ffc33c42fa62bf4679e363b1f8"
+    },
+    {
+      "path": "components/farms/CreateFarmFlow.tsx",
+      "source_sha256": "49f8643d2579ca3cc1fd8f82b084c02d136169a9a29902424a75a0b0b8b87998",
+      "release_sha256": "49f8643d2579ca3cc1fd8f82b084c02d136169a9a29902424a75a0b0b8b87998"
+    },
+    {
+      "path": "components/farms/DurhamCommercialReview.tsx",
+      "source_sha256": "8e313fb572bc01a161f62f545a9cb669002b6b68d7c0340b47cb225d4279a037",
+      "release_sha256": "8e313fb572bc01a161f62f545a9cb669002b6b68d7c0340b47cb225d4279a037"
+    },
+    {
+      "path": "components/farms/FarmActivityCalendar.tsx",
+      "source_sha256": "f0845de78b119a341b0d0f163041844598ab9a7f3aab4f43e4f05031f15f97d1",
+      "release_sha256": "f0845de78b119a341b0d0f163041844598ab9a7f3aab4f43e4f05031f15f97d1"
+    },
+    {
+      "path": "components/farms/FarmAnnualCoveragePlan.tsx",
+      "source_sha256": "d8fe7a30da11b29b322511b0de25f80fa544bfef98eb269d7bfa2c9da6f8ef7a",
+      "release_sha256": "d8fe7a30da11b29b322511b0de25f80fa544bfef98eb269d7bfa2c9da6f8ef7a"
+    },
+    {
+      "path": "components/farms/FarmBoundaryAddressCount.tsx",
+      "source_sha256": "94fd11f6b86590d23f90898df1f4aabca8c3a7f4175bb02d12fde757808d9f06",
+      "release_sha256": "94fd11f6b86590d23f90898df1f4aabca8c3a7f4175bb02d12fde757808d9f06"
+    },
+    {
+      "path": "components/farms/FarmBusinessCardMetrics.tsx",
+      "source_sha256": "d04c9ff9b002a92a50bfa61bab030fcf8b8d4e00d0d8cc1ea3cdd6f91ed95ae2",
+      "release_sha256": "d04c9ff9b002a92a50bfa61bab030fcf8b8d4e00d0d8cc1ea3cdd6f91ed95ae2"
+    },
+    {
+      "path": "components/farms/FarmCreationWorkspace.tsx",
+      "source_sha256": "e088a7c757e9051cd3dbd0402cf803400a0bb15c1f07482d08eb8e3901ec6897",
+      "release_sha256": "e088a7c757e9051cd3dbd0402cf803400a0bb15c1f07482d08eb8e3901ec6897"
+    },
+    {
+      "path": "components/farms/FarmDoorPlanner.tsx",
+      "source_sha256": "bfff404a6e503afcce6f4fa8eac0e325dd16031bf6cd536eec3e7e00ff972667",
+      "release_sha256": "bfff404a6e503afcce6f4fa8eac0e325dd16031bf6cd536eec3e7e00ff972667"
+    },
+    {
+      "path": "components/farms/FarmNavigation.tsx",
+      "source_sha256": "3cc34d104aedb8926c004f0cc24ff0e6dfe6a909af23da54010f09a4772303c5",
+      "release_sha256": "3cc34d104aedb8926c004f0cc24ff0e6dfe6a909af23da54010f09a4772303c5"
+    },
+    {
+      "path": "components/farms/FarmOutreachQuestions.tsx",
+      "source_sha256": "4198b6c49101544e3a7e604e38228c507094294f85c6fd64ddbcccab1413d882",
+      "release_sha256": "4198b6c49101544e3a7e604e38228c507094294f85c6fd64ddbcccab1413d882"
+    },
+    {
+      "path": "components/farms/__tests__/boundary-address-count.test.tsx",
+      "source_sha256": "e8351d4b19082fd632f7867c61c5019a4ba90ccd6342c2a80c9d7ad4ede21aba",
+      "release_sha256": "e8351d4b19082fd632f7867c61c5019a4ba90ccd6342c2a80c9d7ad4ede21aba"
+    },
+    {
+      "path": "components/map/CampaignAddressPmtilesLayer.tsx",
+      "source_sha256": "29de97bd5fe3e46cdd80c18cc2767644f5ae422a172c558fe6ab5c224df68f0f",
+      "release_sha256": "29de97bd5fe3e46cdd80c18cc2767644f5ae422a172c558fe6ab5c224df68f0f"
+    },
+    {
+      "path": "components/map/CampaignParcelPmtilesLayer.tsx",
+      "source_sha256": "4def1c22b9745fc15c5aca312c9858c612035d6c84fbbd14ee566034d685e8a6",
+      "release_sha256": "4def1c22b9745fc15c5aca312c9858c612035d6c84fbbd14ee566034d685e8a6"
+    },
+    {
+      "path": "components/map/CanonicalCampaignTilesLayer.tsx",
+      "source_sha256": "88fbd82874e5c69404e075575a362e4eb34214b0293410afb36372cc2b8114e5",
+      "release_sha256": "88fbd82874e5c69404e075575a362e4eb34214b0293410afb36372cc2b8114e5"
+    },
+    {
+      "path": "components/outreach/ContactOutreach.tsx",
+      "source_sha256": "a3b506316bf8055e5560159f87ac4482625834b94f514d1ff68196787f065a87",
+      "release_sha256": "a3b506316bf8055e5560159f87ac4482625834b94f514d1ff68196787f065a87"
+    },
+    {
+      "path": "components/outreach/GmailConnection.tsx",
+      "source_sha256": "97d5bc301ffbf3414ead29dfb27c735f7bfcde3f68cfd0e7650cb13a7fd76d11",
+      "release_sha256": "97d5bc301ffbf3414ead29dfb27c735f7bfcde3f68cfd0e7650cb13a7fd76d11"
+    },
+    {
+      "path": "components/storm-maps/useStormTerritoryAddressCount.ts",
+      "source_sha256": "b9aa5efdb0feca2b2095b3639934b9dbb40ee7bee2695ba070500c648fe05fb5",
+      "release_sha256": "b9aa5efdb0feca2b2095b3639934b9dbb40ee7bee2695ba070500c648fe05fb5"
+    },
+    {
+      "path": "lib/__tests__/nestedScrollContainer.test.ts",
+      "source_sha256": "aa57c2365b7332ddabd5c12cf9541c24ba1b30c3d4e99651d4d6bd18c933713b",
+      "release_sha256": "aa57c2365b7332ddabd5c12cf9541c24ba1b30c3d4e99651d4d6bd18c933713b"
+    },
+    {
+      "path": "lib/cards/useCardEngagement.ts",
+      "source_sha256": "647188ba42c88b2b1e433ae7b16dc4dae4b88955ed27fabe471ee54d45e1c17a",
+      "release_sha256": "647188ba42c88b2b1e433ae7b16dc4dae4b88955ed27fabe471ee54d45e1c17a"
+    },
+    {
+      "path": "lib/farms/__tests__/campaignAddressLinks.test.ts",
+      "source_sha256": "ab0f4cebeff53a81a33798cd86b4e3c2d633d3f6c9e8e06a6f83aed6a63e1a11",
+      "release_sha256": "ab0f4cebeff53a81a33798cd86b4e3c2d633d3f6c9e8e06a6f83aed6a63e1a11"
+    },
+    {
+      "path": "lib/farms/__tests__/commercialMatches.test.ts",
+      "source_sha256": "d876d388a880ae7bc1977a50d48b1de2610bac83bd2d16b67e539e8c041e1ed6",
+      "release_sha256": "d876d388a880ae7bc1977a50d48b1de2610bac83bd2d16b67e539e8c041e1ed6"
+    },
+    {
+      "path": "lib/farms/__tests__/durhamPlaces.test.ts",
+      "source_sha256": "36ee271e1f12e155569dc5bb6c3aeb84251ad218ca207e9ac28c9fac55ae9c02",
+      "release_sha256": "36ee271e1f12e155569dc5bb6c3aeb84251ad218ca207e9ac28c9fac55ae9c02"
+    },
+    {
+      "path": "lib/farms/__tests__/farm-boundary.test.ts",
+      "source_sha256": "bf35fd2a181c2ad87d11749f501c2acaf4435d2234715d579bd477a681f8e98f",
+      "release_sha256": "bf35fd2a181c2ad87d11749f501c2acaf4435d2234715d579bd477a681f8e98f"
+    },
+    {
+      "path": "lib/farms/__tests__/outreach-schedule.test.ts",
+      "source_sha256": "08d4be08c97ca5edc5112b13048a3dc1bd018e0ef889b30e548acb58f170a242",
+      "release_sha256": "08d4be08c97ca5edc5112b13048a3dc1bd018e0ef889b30e548acb58f170a242"
+    },
+    {
+      "path": "lib/farms/annual-coverage.ts",
+      "source_sha256": "14d649701ba379c481273383257953b129c1b88172367da91bce85e31cc3370a",
+      "release_sha256": "14d649701ba379c481273383257953b129c1b88172367da91bce85e31cc3370a"
+    },
+    {
+      "path": "lib/farms/campaignAddressLinks.ts",
+      "source_sha256": "f6d04f71a8751b50841c11f1097dcf0eba702124f47858ceace005395f3b38a1",
+      "release_sha256": "f6d04f71a8751b50841c11f1097dcf0eba702124f47858ceace005395f3b38a1"
+    },
+    {
+      "path": "lib/farms/commercialMatches.ts",
+      "source_sha256": "9e2f8bc78740a56eb61861e855fc8a1da999990f3221c275d7e2e1cda19da5db",
+      "release_sha256": "9e2f8bc78740a56eb61861e855fc8a1da999990f3221c275d7e2e1cda19da5db"
+    },
+    {
+      "path": "lib/farms/door-plan.ts",
+      "source_sha256": "4fe98f51f04d610a4ad26ad478d920a68d7ed24f8f18bc4dcb75cad1cf9856ba",
+      "release_sha256": "4fe98f51f04d610a4ad26ad478d920a68d7ed24f8f18bc4dcb75cad1cf9856ba"
+    },
+    {
+      "path": "lib/farms/durhamPlaces.ts",
+      "source_sha256": "225da7f551050446ee2e64bd44730a9a0d8fa392a115dc658efb772760a75940",
+      "release_sha256": "225da7f551050446ee2e64bd44730a9a0d8fa392a115dc658efb772760a75940"
+    },
+    {
+      "path": "lib/farms/durhamSnapshot.ts",
+      "source_sha256": "aa1cdfa69ffcd8cc83ea0b92923269212f65850cfa99943cb881a06295629022",
+      "release_sha256": "aa1cdfa69ffcd8cc83ea0b92923269212f65850cfa99943cb881a06295629022"
+    },
+    {
+      "path": "lib/farms/farm-boundary.ts",
+      "source_sha256": "fe588e34af5397287645018c2c5afe1a35ee5a936dc0c80f2e87cf541eab9d81",
+      "release_sha256": "fe588e34af5397287645018c2c5afe1a35ee5a936dc0c80f2e87cf541eab9d81"
+    },
+    {
+      "path": "lib/farms/outreach-schedule.ts",
+      "source_sha256": "da27711d2ab4409b00d49f2bc8552a70bbd51e76e3553204bd9cdec70db77f17",
+      "release_sha256": "da27711d2ab4409b00d49f2bc8552a70bbd51e76e3553204bd9cdec70db77f17"
+    },
+    {
+      "path": "lib/farms/prepareFarmMap.ts",
+      "source_sha256": "66fa3f80887c3c2bf2b0cfb284400c1d90ba104faf1808e97ab30b50c7a75eae",
+      "release_sha256": "66fa3f80887c3c2bf2b0cfb284400c1d90ba104faf1808e97ab30b50c7a75eae"
+    },
+    {
+      "path": "lib/map/__tests__/canonicalTileState.test.ts",
+      "source_sha256": "d6fdded462f7786dc3c124ae9ab841957bc9a00de6ddcf252bd429f4e5b40a4d",
+      "release_sha256": "d6fdded462f7786dc3c124ae9ab841957bc9a00de6ddcf252bd429f4e5b40a4d"
+    },
+    {
+      "path": "lib/map/canonicalTileBundle.ts",
+      "source_sha256": "d9e37eebe5abeb7f018ec04b3c828e01554266146dc5d53d241ed6386a9c7b4f",
+      "release_sha256": "d9e37eebe5abeb7f018ec04b3c828e01554266146dc5d53d241ed6386a9c7b4f"
+    },
+    {
+      "path": "lib/map/canonicalTileState.ts",
+      "source_sha256": "1d56ef0e519bc2cdf30d05ccb22950077cf289e4cb6dcc2f0920dfb062ac2852",
+      "release_sha256": "1d56ef0e519bc2cdf30d05ccb22950077cf289e4cb6dcc2f0920dfb062ac2852"
+    },
+    {
+      "path": "lib/outreach/__tests__/gmail.test.ts",
+      "source_sha256": "d4ce434ba54660920c981a0049d738f217447f26b59ad35adfe12d2a4ad77eb8",
+      "release_sha256": "d4ce434ba54660920c981a0049d738f217447f26b59ad35adfe12d2a4ad77eb8"
+    },
+    {
+      "path": "lib/outreach/__tests__/native.test.ts",
+      "source_sha256": "0067596539b582ec4b510a556c9f679a64fe6b35b02bc359924e1c9cc3caa8cd",
+      "release_sha256": "0067596539b582ec4b510a556c9f679a64fe6b35b02bc359924e1c9cc3caa8cd"
+    },
+    {
+      "path": "lib/outreach/native.ts",
+      "source_sha256": "cd670325acc405ec76339a0b5574336066bd4b40662687088c575be50f71d1fd",
+      "release_sha256": "cd670325acc405ec76339a0b5574336066bd4b40662687088c575be50f71d1fd"
+    },
+    {
+      "path": "lib/services/CampaignMapBundlePrebuilder.ts",
+      "source_sha256": "0198d09eb5ef318fba6e35b1c1a3315c899108b626af8393cf67c0e173a05dec",
+      "release_sha256": "0198d09eb5ef318fba6e35b1c1a3315c899108b626af8393cf67c0e173a05dec"
+    },
+    {
+      "path": "lib/services/CanonicalCompactBundle.ts",
+      "source_sha256": "33aae86739403c237462d6c05651fc3d3b5d296aaf652a6e7f8386744ba53ba7",
+      "release_sha256": "33aae86739403c237462d6c05651fc3d3b5d296aaf652a6e7f8386744ba53ba7"
+    },
+    {
+      "path": "lib/services/CanonicalGeometryPack.ts",
+      "source_sha256": "90cb0f50e8b044f0ea98d3533e796f950a003d7272fbcca9ce30954ae8c960c2",
+      "release_sha256": "90cb0f50e8b044f0ea98d3533e796f950a003d7272fbcca9ce30954ae8c960c2"
+    },
+    {
+      "path": "lib/services/CanonicalTileArtifacts.ts",
+      "source_sha256": "81b314ec93fa9983f1d9dd9a532304b60e5b1cabb1bb129aa50ac409dc9bd087",
+      "release_sha256": "533ec0bcdd645f23717a92cc28c057e586e22ed5fbfb1268caabf843c18f795b"
+    },
+    {
+      "path": "lib/services/CanonicalTilePreparation.ts",
+      "source_sha256": "690cba57a5ed899ba899c8bc5a1a2934b7807a9f8a56b50605ceeb9f7f2ca962",
+      "release_sha256": "690cba57a5ed899ba899c8bc5a1a2934b7807a9f8a56b50605ceeb9f7f2ca962"
+    },
+    {
+      "path": "lib/services/CanonicalTileValidation.ts",
+      "source_sha256": "129063fac6704959a92b4eb6bd19a28341af37c21dea3f9b994fcb0cad49cc08",
+      "release_sha256": "129063fac6704959a92b4eb6bd19a28341af37c21dea3f9b994fcb0cad49cc08"
+    },
+    {
+      "path": "lib/services/ParcelPinPlacement.ts",
+      "source_sha256": "cd185b14b0681e5c94ea8efd698f760fce5e8da67b742c56725d63af0d4b4d86",
+      "release_sha256": "cd185b14b0681e5c94ea8efd698f760fce5e8da67b742c56725d63af0d4b4d86"
+    },
+    {
+      "path": "lib/services/__tests__/CanonicalCompactBundle.test.ts",
+      "source_sha256": "b5d6a51e67000ae2b5411d3d527e71ed378a41ac4522fc90b8c270f5e459426c",
+      "release_sha256": "b5d6a51e67000ae2b5411d3d527e71ed378a41ac4522fc90b8c270f5e459426c"
+    },
+    {
+      "path": "lib/services/__tests__/CanonicalGeometryPack.test.ts",
+      "source_sha256": "bdcf86c62c1a82025cced856f05e0d6f37301ace8946f3da33210da7a672d5a3",
+      "release_sha256": "bdcf86c62c1a82025cced856f05e0d6f37301ace8946f3da33210da7a672d5a3"
+    },
+    {
+      "path": "lib/services/__tests__/CanonicalTileArtifacts.test.ts",
+      "source_sha256": "47c99e480218a2e022eff6480d72247c0dffc6ae641711d3d03460b92793274f",
+      "release_sha256": "75e9b8c01aa47493f5596234b633e52d364165ccf2fa3997fa6151745fbe251c"
+    },
+    {
+      "path": "lib/services/__tests__/CanonicalTilePreparation.test.ts",
+      "source_sha256": "54b6d49cf3125182d5bfd77dc8d98b02f49a650790ecd7eeddfa9d07cbd4e597",
+      "release_sha256": "54b6d49cf3125182d5bfd77dc8d98b02f49a650790ecd7eeddfa9d07cbd4e597"
+    },
+    {
+      "path": "lib/services/__tests__/ParcelPinPlacement.test.ts",
+      "source_sha256": "b56ce53e928b12af8fb771808f4f2b03848c63d010d087a2058ac7abff0f6b61",
+      "release_sha256": "b56ce53e928b12af8fb771808f4f2b03848c63d010d087a2058ac7abff0f6b61"
+    },
+    {
+      "path": "lib/territory/count-boundary-addresses.ts",
+      "source_sha256": "afceacfd30608766cde082a1e6e6a4a324267d835d8f2f4d3d086cce93839cde",
+      "release_sha256": "afceacfd30608766cde082a1e6e6a4a324267d835d8f2f4d3d086cce93839cde"
+    },
+    {
+      "path": "ops/canonical-tiles/Dockerfile",
+      "source_sha256": "773bd04f68d0ba56c31282ca0a783204f431a3a447f1cef2e9417d15d190c967",
+      "release_sha256": "773bd04f68d0ba56c31282ca0a783204f431a3a447f1cef2e9417d15d190c967"
+    },
+    {
+      "path": "ops/canonical-tiles/handler.cjs",
+      "source_sha256": "4e1a39e520cb7679ef5633561a162272949e447e4bdf3967e81da1054183b46d",
+      "release_sha256": "4e1a39e520cb7679ef5633561a162272949e447e4bdf3967e81da1054183b46d"
+    },
+    {
+      "path": "scripts/build-canonical-campaign-tiles.ts",
+      "source_sha256": "1aaaa2efc03d25e042b19156481d2f30a1a0a91cb5ec8e2bf4cde05645f3ae3d",
+      "release_sha256": "e18dd1c2b8c57462f4f0baf8164639f9168e95e015739aec6f746946f8dd795f"
+    },
+    {
+      "path": "scripts/farms/extract-durham-places.cjs",
+      "source_sha256": "854e62a4fa69d14dca0c7a982f475f2ac3c6a77397908681983f5a2ca6798f83",
+      "release_sha256": "854e62a4fa69d14dca0c7a982f475f2ac3c6a77397908681983f5a2ca6798f83"
+    },
+    {
+      "path": "scripts/farms/prepare-farm-map.ts",
+      "source_sha256": "e5e69e1d09fb9b63c00d74d05ea3e810f9a81083dad0a41fa4709c8c7826fb57",
+      "release_sha256": "e5e69e1d09fb9b63c00d74d05ea3e810f9a81083dad0a41fa4709c8c7826fb57"
+    },
+    {
+      "path": "scripts/package-canonical-tile-worker.cjs",
+      "source_sha256": "a3ca5b05bf597f700216e26c582b4f7172edd1e36c7be5740fc667dc80a81355",
+      "release_sha256": "a3ca5b05bf597f700216e26c582b4f7172edd1e36c7be5740fc667dc80a81355"
+    },
+    {
+      "path": "scripts/test-canonical-tile-handler.cjs",
+      "source_sha256": "7fcf6c202ef8a6be7964bec20b4f6a35a101957270ab38960bb09023461b92b0",
+      "release_sha256": "7fcf6c202ef8a6be7964bec20b4f6a35a101957270ab38960bb09023461b92b0"
+    },
+    {
+      "path": "scripts/test-canonical-tile-no-backfill.sh",
+      "source_sha256": "62c808bbb6ca63088c43bb6a6244d1a8615c97b430e3b7ba54215801c85d661d",
+      "release_sha256": "62c808bbb6ca63088c43bb6a6244d1a8615c97b430e3b7ba54215801c85d661d"
+    },
+    {
+      "path": "scripts/test-canonical-tile-publish.cjs",
+      "source_sha256": "9d38229f0403d6e9e6f68f4690d79f8dd9f8b2e308aaf6c01860906e04ae8daf",
+      "release_sha256": "d87babfa4a4f374046512db3e7f22284fb24e346dfa42920355b359a09d073e3"
+    },
+    {
+      "path": "scripts/test-canonical-tile-worker.cjs",
+      "source_sha256": "7e43f133365dac8865490c3132dd86f22b92ff22af07c923d83cb37609d57e84",
+      "release_sha256": "7e43f133365dac8865490c3132dd86f22b92ff22af07c923d83cb37609d57e84"
+    },
+    {
+      "path": "scripts/test-canonical-tiles-browser.cjs",
+      "source_sha256": "f42205d189d7287e75afa65de2630a6f616bdeeba0c636b1cc30b81e025825a3",
+      "release_sha256": "f42205d189d7287e75afa65de2630a6f616bdeeba0c636b1cc30b81e025825a3"
+    },
+    {
+      "path": "scripts/test-farm-activity-calendar-browser.cjs",
+      "source_sha256": "0f3c6adb02a07fbefc941337fbdae2f87d8b09d6530a5df6f06c255d15be87a4",
+      "release_sha256": "0f3c6adb02a07fbefc941337fbdae2f87d8b09d6530a5df6f06c255d15be87a4"
+    },
+    {
+      "path": "scripts/test-farm-annual-coverage-api.cjs",
+      "source_sha256": "da77145ff5220883ec30aa135615a2d58f4453ae67372751868f517568c2bb60",
+      "release_sha256": "da77145ff5220883ec30aa135615a2d58f4453ae67372751868f517568c2bb60"
+    },
+    {
+      "path": "scripts/test-farm-annual-coverage-browser.cjs",
+      "source_sha256": "40255903e9f5ca5b06806be1e151d50483e0b30faf89d21602beb2019a8ba550",
+      "release_sha256": "40255903e9f5ca5b06806be1e151d50483e0b30faf89d21602beb2019a8ba550"
+    },
+    {
+      "path": "scripts/test-farm-card-metrics-browser.cjs",
+      "source_sha256": "e44d18d36b269c8de34a81ea550e9778643cf38467295fb145132583f9e76daf",
+      "release_sha256": "e44d18d36b269c8de34a81ea550e9778643cf38467295fb145132583f9e76daf"
+    },
+    {
+      "path": "scripts/test-farm-card-stats.mjs",
+      "source_sha256": "dee1759d68604eb3772d5f7636d9e9488f42a9088b90715956024ef6eb661231",
+      "release_sha256": "dee1759d68604eb3772d5f7636d9e9488f42a9088b90715956024ef6eb661231"
+    },
+    {
+      "path": "scripts/test-farm-create-outreach-browser.cjs",
+      "source_sha256": "f84267707ba9f0b241d561f16fd758bd867571a7e6409ce401dd0381ff9cdd7f",
+      "release_sha256": "f84267707ba9f0b241d561f16fd758bd867571a7e6409ce401dd0381ff9cdd7f"
+    },
+    {
+      "path": "scripts/test-farm-list-schema.cjs",
+      "source_sha256": "8bca68ce394b7385a4a626f263c9e4d7ac45223ed88a6bf0ad8e74bad169cc70",
+      "release_sha256": "8bca68ce394b7385a4a626f263c9e4d7ac45223ed88a6bf0ad8e74bad169cc70"
+    },
+    {
+      "path": "scripts/work-canonical-campaign-tiles.ts",
+      "source_sha256": "6d4f2d4c2f9b795eb73f4433579c1133ad318367cd1fa9d8512e1b429a771110",
+      "release_sha256": "6d4f2d4c2f9b795eb73f4433579c1133ad318367cd1fa9d8512e1b429a771110"
+    },
+    {
+      "path": "supabase/migrations/20261027190000_canonical_campaign_tiles.sql",
+      "source_sha256": "48df514096bc443b279d6e9c6d6cd67b4b54e612be1451f5a4ee1b383ef7728b",
+      "release_sha256": "48df514096bc443b279d6e9c6d6cd67b4b54e612be1451f5a4ee1b383ef7728b"
+    },
+    {
+      "path": "supabase/migrations/20261027210000_canonical_geometry_pack.sql",
+      "source_sha256": "19a167664c028bc2dfd95f4459bbedef53014a28fbc6493b40c4d951b5ef142e",
+      "release_sha256": "19a167664c028bc2dfd95f4459bbedef53014a28fbc6493b40c4d951b5ef142e"
+    },
+    {
+      "path": "supabase/migrations/20261028060000_farm_commercial_exclusions.sql",
+      "source_sha256": "41d0be8337ba169351682d615db1cb1b9ac772a35f5cf7943a71ede19d1509f5",
+      "release_sha256": "41d0be8337ba169351682d615db1cb1b9ac772a35f5cf7943a71ede19d1509f5"
+    },
+    {
+      "path": "supabase/migrations/20261028090000_prepare_farm_map_addresses.sql",
+      "source_sha256": "2c32191c4441584298a71977bcc7a43c75befe20aa133774558ced4436ac317a",
+      "release_sha256": "2c32191c4441584298a71977bcc7a43c75befe20aa133774558ced4436ac317a"
+    },
+    {
+      "path": "types/farms.ts",
+      "source_sha256": "c8949ecc0b32f24aa12e3212b0f9a4ca5f3a7d7767e1ec86e007ce93ba973e1e",
+      "release_sha256": "c8949ecc0b32f24aa12e3212b0f9a4ca5f3a7d7767e1ec86e007ce93ba973e1e"
+    }
+  ],
+  "release_snapshot_at": "2026-10-28T05:40:25.432437+00:00",
+  "checks": [
+    "current farm creation component",
+    "weekly and daily farm planner desktop/mobile",
+    "annual plan API access and allocation",
+    "farm card metrics and totals",
+    "canonical pin, exact geometry and compact metadata unit tests",
+    "worker build/publish with synthetic data",
+    "tile worker retries and stale revisions",
+    "native outreach URLs",
+    "production farm/map TypeScript: zero diagnostics; existing CreateFarmFlow hook warnings retained"
+  ],
+  "schema_ready": [
+    "canonical tile geometry and compact bundle fields",
+    "farm commercial exclusions",
+    "prepare_farm_map_addresses(uuid,uuid)"
+  ],
+  "live_checks": {
+    "farm_api": 200,
+    "map_schema": "tiles-v3",
+    "pmtiles_range": 206,
+    "valid_header_bytes": 127,
+    "crm_status": 200
+  },
+  "release": "0.5.0 build 19",
+  "deployment": {
+    "id": "dpl_FSepV9AofphmEN1VKZQUAWqkSYL2",
+    "url": "https://flyrpro-fidyaxijs-danielphillippe27-netizens-projects.vercel.app",
+    "state": "READY",
+    "protection": "Vercel Deployment Protection retained; app uses temporary share entry, then normal WolfGrid sign-in"
+  }
+}

@@ -12,9 +12,9 @@ function dayKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-type Props = { campaignId?: string | null; createdAt: string };
+type Props = { farmId: string; campaignId?: string | null; createdAt: string };
 
-export function FarmActivityCalendar({ campaignId, createdAt }: Props) {
+export function FarmActivityCalendar({ farmId, campaignId, createdAt }: Props) {
   const { currentWorkspaceId } = useWorkspace();
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [days, setDays] = useState<Set<string>>(new Set());
@@ -23,6 +23,20 @@ export function FarmActivityCalendar({ campaignId, createdAt }: Props) {
   const [retry, setRetry] = useState(0);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [today, setToday] = useState(() => dayKey(new Date()));
+  const [sundayOff, setSundayOff] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setSundayOff(false);
+    fetch(`/api/farms/${farmId}/annual-coverage`, { signal: controller.signal })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        const workingDays = data?.plan?.outreach?.workingDays;
+        if (Array.isArray(workingDays)) setSundayOff(!workingDays.includes(0));
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [farmId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setToday(dayKey(new Date())), 60_000);
@@ -91,29 +105,33 @@ export function FarmActivityCalendar({ campaignId, createdAt }: Props) {
         </div>
       </div>
       {error ? <div role="alert" className="rounded-lg border border-border p-6 text-center text-sm">Couldn’t load your activity. <Button variant="outline" size="sm" onClick={() => setRetry(value => value + 1)}>Try again</Button></div> : <>
-        <div className="grid grid-cols-7 gap-1.5 sm:gap-3">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <div key={day} className="pb-2 text-center text-xs font-medium text-muted-foreground">{day}</div>)}
-          {Array.from({ length: month.getDay() }, (_, index) => <div key={`blank-${index}`} />)}
+        <div className="grid grid-cols-7 overflow-hidden rounded-lg border-l border-t border-border">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <div key={day} className="border-b border-r border-border py-2 text-center text-xs font-medium text-muted-foreground">{day}</div>)}
+          {Array.from({ length: month.getDay() }, (_, index) => <div key={`blank-${index}`} className="min-h-14 border-b border-r border-border bg-muted/20 sm:min-h-24" />)}
           {Array.from({ length: count }, (_, index) => {
             const date = new Date(month.getFullYear(), month.getMonth(), index + 1);
             const key = dayKey(date);
             const active = days.has(key);
-            const missed = !loading && !active && key < today && key >= firstDay;
-            const label = loading ? 'Loading' : active ? 'Went out' : missed ? 'Did not go out' : key === today ? 'Still time to go out' : key > today ? 'Upcoming' : 'Before this farm';
+            const notApplicable = sundayOff && date.getDay() === 0 && !active && key >= firstDay;
+            const missed = !loading && !active && !notApplicable && key < today && key >= firstDay;
+            const label = loading ? 'Loading' : active ? 'Went out' : notApplicable ? 'Not applicable' : missed ? 'Did not go out' : key === today ? 'Still time to go out' : key > today ? 'Upcoming' : 'Before this farm';
             return <div key={key} aria-label={`${date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}: ${label}`} title={label}
-              className={cn('relative flex aspect-square flex-col items-center justify-center rounded-md border sm:rounded-xl',
-                loading ? 'animate-pulse border-border bg-muted' : active ? 'border-green-600 bg-green-600 text-white' : missed ? 'border-red-600 bg-red-600 text-white' : 'border-border bg-muted/30 text-muted-foreground',
-                key === today && 'ring-2 ring-foreground ring-offset-2 ring-offset-card')}>
-              <span className="absolute left-1.5 top-1 text-xs font-semibold sm:left-3 sm:top-2 sm:text-base">{index + 1}</span>
-              {!loading && active && <Check aria-hidden="true" className="mt-3 h-5 w-5 sm:h-10 sm:w-10" strokeWidth={3} />}
-              {missed && <X aria-hidden="true" className="mt-3 h-5 w-5 sm:h-10 sm:w-10" strokeWidth={3} />}
-              {key === today && !active && !loading && <span className="mt-3 text-[9px] font-medium sm:text-sm">Today</span>}
+              className={cn('relative flex min-h-14 flex-col items-center justify-center border-b border-r border-border sm:min-h-24',
+                loading ? 'animate-pulse bg-muted' : active ? 'bg-green-600 text-white' : missed ? 'bg-red-600 text-white' : notApplicable ? 'bg-muted text-muted-foreground' : 'bg-card text-muted-foreground',
+                key === today && 'ring-2 ring-inset ring-foreground')}>
+              <span className="absolute right-1.5 top-1 text-xs font-semibold sm:right-2 sm:top-1.5 sm:text-sm">{index + 1}</span>
+              {!loading && active && <Check aria-hidden="true" className="mt-3 h-5 w-5 sm:h-7 sm:w-7" strokeWidth={3} />}
+              {missed && <X aria-hidden="true" className="mt-3 h-5 w-5 sm:h-7 sm:w-7" strokeWidth={3} />}
+              {!loading && notApplicable && <span className="mt-3 text-center text-[9px] sm:text-xs">Not applicable</span>}
+              {key === today && !active && !loading && !notApplicable && <span className="mt-3 text-[9px] font-medium sm:text-xs">Today</span>}
             </div>;
           })}
+          {Array.from({ length: (7 - (month.getDay() + count) % 7) % 7 }, (_, index) => <div key={`end-blank-${index}`} className="min-h-14 border-b border-r border-border bg-muted/20 sm:min-h-24" />)}
         </div>
         <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-green-600" />Went out</span>
           <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-red-600" />Didn’t go out</span>
+          {sundayOff && <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm border border-border bg-muted" />Not applicable</span>}
           <span>Your completed sessions in this farm · {loading ? 'Loading…' : `${days.size} active days this month`}</span>
         </div>
       </>}

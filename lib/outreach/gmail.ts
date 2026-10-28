@@ -24,7 +24,7 @@ export function unseal<T>(value: string): T {
   decipher.setAuthTag(buffer.subarray(12, 28));
   return JSON.parse(Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()]).toString());
 }
-export type GmailTokens = { accessToken: string; refreshToken: string; expiresAt: number };
+export type GmailTokens = { accessToken: string; refreshToken: string; expiresAt: number; scopes?: string[] };
 export async function googleToken(params: Record<string, string>) {
   const config = gmailConfig();
   const response = await fetch('https://oauth2.googleapis.com/token', {
@@ -43,7 +43,7 @@ export async function gmailAccess(userId: string) {
   let tokens = unseal<GmailTokens>(data.tokens_encrypted);
   if (tokens.expiresAt < Date.now() + 60_000) {
     const refreshed = await googleToken({ grant_type: 'refresh_token', refresh_token: tokens.refreshToken });
-    tokens = { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token || tokens.refreshToken, expiresAt: Date.now() + refreshed.expires_in * 1000 };
+    tokens = { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token || tokens.refreshToken, expiresAt: Date.now() + refreshed.expires_in * 1000, scopes: refreshed.scope?.split(' ') ?? tokens.scopes };
     const { error: saveError } = await admin.from('personal_gmail_connections').update({ tokens_encrypted: seal(tokens), updated_at: new Date().toISOString() }).eq('user_id', userId);
     if (saveError) throw new Error('Unable to refresh Gmail connection.');
   }

@@ -1,7 +1,7 @@
 import { areaCampaignMapBundle } from '@/lib/storm-maps/intelligence/area-campaign';
 import { NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { readCanonicalTileBundle } from '@/lib/services/CanonicalTileArtifacts';
+import { canonicalTileAvailability, readCanonicalCompactBundle, readCanonicalTileBundle } from '@/lib/services/CanonicalTileArtifacts';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { ensureCampaignAccess } from '@/app/api/campaigns/_utils/access';
 import {
@@ -171,20 +171,25 @@ export async function GET(
     }
 
     const signature = clientSignature(request);
-    if (request.nextUrl.searchParams.get('format') === 'tiles-v2') {
-      const tiled = await measured('bundle', spans, () => readCanonicalTileBundle(
-        supabase, campaignId, request.nextUrl.searchParams.get('platform') ?? 'web', request.nextUrl.origin
-      ));
+    const tileFormat = request.nextUrl.searchParams.get('format');
+    if (tileFormat === 'tiles-v2' || tileFormat === 'tiles-v3') {
+      const platform = request.nextUrl.searchParams.get('platform') ?? 'web';
+      const tiled = tileFormat === 'tiles-v3'
+        ? await measured('bundle', spans, () => readCanonicalCompactBundle(supabase, campaignId, platform, request.nextUrl.origin))
+        : await measured('bundle', spans, () => readCanonicalTileBundle(supabase, campaignId, platform, request.nextUrl.origin));
       if (!tiled) {
-        return jsonResponse({ schema: 'tiles-v2', status: 'unavailable' }, {
+        const status = tileFormat === 'tiles-v3'
+          ? await canonicalTileAvailability(supabase, campaignId, platform)
+          : 'unavailable';
+        return jsonResponse({ schema: tileFormat, status }, {
           status: 409, spans, startedAt,
         });
       }
-      const extraHeaders = { ETag: etagForSignature(tiled.asset_signature), 'X-WolfGrid-Map-Bundle-Cache': 'tiles-v2' };
+      const extraHeaders = { ETag: etagForSignature(tiled.asset_signature), 'X-WolfGrid-Map-Bundle-Cache': tileFormat };
       // Mobile field tools still use exact canonical geometry for edits, routes and
       // offline work. Keep that contract during the renderer migration; the map
       // reads PMTiles instead of uploading these polygons to a GeoJSON source.
-      if (signature !== tiled.asset_signature && request.nextUrl.searchParams.get('include') === 'canonical') {
+      if (tileFormat === 'tiles-v2' && signature !== tiled.asset_signature && request.nextUrl.searchParams.get('include') === 'canonical') {
         const canonical = await readCurrentCampaignMapBundle(supabase, campaignId);
         if (!canonical || canonical.asset_signature !== tiled.canonical_signature) {
           return jsonResponse({ schema: 'tiles-v2', status: 'unavailable' }, { status: 409, spans, startedAt });

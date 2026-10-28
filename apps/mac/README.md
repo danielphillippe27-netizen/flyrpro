@@ -1,6 +1,6 @@
 # WolfGrid Mac Preview
 
-Mac wrapper for WolfGrid with reviewed Apple Contacts import, ongoing private one-to-one Messages sync, contact history, and the web CRM assistant. This is a development/pilot package until Developer ID signing and notarization are complete.
+Mac wrapper for WolfGrid with reviewed Apple Contacts import, ongoing private one-to-one Messages sync, contact history, and the web CRM assistant. Version 0.3.0 adds the Apple command centre, a private communications inbox, contact-level history permissions, reviewed EventKit exports and opt-in menu-bar/login behaviour. This remains a pilot until Developer ID signing and notarization are complete.
 
 ## Build
 
@@ -24,10 +24,16 @@ Public release builds require `WOLFGRID_PUBLIC_RELEASE=true`, `WOLFGRID_SIGNING_
 
 ## Behaviour
 
-Sign in, choose the workspace, review Apple Contacts if desired, and enable message sync in Mac settings. The app prompts for native approval and requires Full Disk Access for this exact signed app. Rebuilding can affect macOS permissions. Check Messages access in the toolbar performs a schema/permission check without reading content.
+Continue with Google/Apple uses the macOS authentication session and returns to the app with its original WebKit verifier cookie. Password login remains available. The native bridge never receives passwords, API keys or session tokens.
 
-Sync runs while at least one WolfGrid window stays open, including minimization and ordinary web navigation. It pauses on last-window close, quit, logout, or consent withdrawal. New contacts and alternate identifiers become eligible automatically only when unique. Recheck history replays available local rows without duplicating saved messages. Nothing reads an iCloud archive directly.
+Apple Integrations lives at `/settings/integrations/apple`; the old `/settings/mac` entry still works. Saving a reviewed Apple contact automatically authorizes its uniquely matched future messages. Other CRM contacts require a permission choice. Older history always requires choosing a time range. The master sync switch and AI-message permission remain separate.
 
-Connect a personal OpenAI API key in Mac setup or Integrations for the assistant. Permission to use synced messages is separate from message-sync permission. Imported messages and keys are private to their owner. Only text is imported; attachment files, sending, EventKit exports and a standalone daemon are excluded.
+Native Messages access requires Full Disk Access for this exact signed app. Check Messages access in the toolbar performs a content-free permission/schema check. Polling defaults to five seconds, with selectable slower intervals, metadata change detection, transactional deduplication and acknowledged scan progress.
 
-See `docs/mac-companion/release.md` for configuration, tests, live-check limits and release requirements. Reader tests use synthetic SQLite files and never read the real Messages database.
+Closing the last window pauses by default. The user can explicitly keep the signed-in runtime running in the visible menu-bar app and optionally register normal macOS launch at login. Quit/logout/workspace changes stop work; sleep may pause synchronization. No hidden helper is installed.
+
+Calendar and Reminders use EventKit with separate permissions and native review before each CRM export. They do not import unrelated personal data or silently synchronize edits back. System phone/Messages handoffs require review and never invent delivery or call results. Existing business dialer/Gmail integrations stay separate.
+
+Connect a personal OpenAI API key in Permissions & devices for summaries and editable drafts. API usage belongs to that OpenAI account. The assistant has no tools to send communications or change records.
+
+See `docs/mac-companion/command-center.md` and `pilot-status.json` for configuration, verification, live-check limits and public-release requirements. Reader fixtures never access the real Messages database.

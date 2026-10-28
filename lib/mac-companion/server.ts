@@ -15,6 +15,8 @@ export async function crmRequest(request: NextRequest, feature: 'mac' | 'ai', mu
   if (flag === 'false' || (flag !== 'true' && process.env.NODE_ENV === 'production')) throw new CrmRequestError('This feature is not enabled for the pilot yet.', 503);
   const pilot = process.env.CRM_PILOT_USER_IDS?.split(',').map(value => value.trim()).filter(Boolean);
   if (pilot?.length && !pilot.includes(user.id)) throw new CrmRequestError('This feature is currently available to pilot members.', 403);
+  const expectedUser = request.headers.get('x-wolfgrid-user-id');
+  if (expectedUser && expectedUser !== user.id) throw new CrmRequestError('Your account changed. Reload this page.', 403);
   if (mutation) {
     if (request.headers.get('x-wolfgrid-user-id') !== user.id) throw new CrmRequestError('Your account changed. Reload this page.', 403);
     const origin = request.headers.get('origin');

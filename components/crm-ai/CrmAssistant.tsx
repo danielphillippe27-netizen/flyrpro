@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 type Mode = 'question' | 'summarize' | 'follow-up' | 'draft';
 type OpenDetail = { contactId?: string; mode?: Mode };
-type Answer = { answer: string; draft: string | null; sources: { id: string; label: string; href: string; excerpt: string }[]; coverage: string; messagesIncluded: boolean };
+type Answer = { answer: string; draft: string | null; sources: { id: string; label: string; href: string; excerpt: string }[]; coverage: string; messagesIncluded: boolean; consentRevision?: number };
 const prompts: Record<Mode,string> = { question: '', summarize: 'Summarize my relationship and recent conversations with this contact.', 'follow-up': 'What should I follow up on with this contact, and why?', draft: 'Draft a concise, natural reply based on our most recent conversation. Do not invent facts or commitments.' };
 export function openCrmAssistant(detail: OpenDetail = {}) { window.dispatchEvent(new CustomEvent('wolfgrid-crm-ai-open', { detail })); }
 export function CrmAssistant() {
@@ -21,6 +21,7 @@ function CrmAssistantContent({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false), [question, setQuestion] = useState(''), [mode, setMode] = useState<Mode>('question');
   const [contactId, setContactId] = useState<string>(), [result, setResult] = useState<Answer>(), [draft, setDraft] = useState('');
   const [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [after, setAfter] = useState(''), [before, setBefore] = useState('');
+  const [historyScope, setHistoryScope] = useState(''); const [historyRevision, setHistoryRevision] = useState<number>();
   const [history, setHistory] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const controller = useRef<AbortController | null>(null);
   const epoch = useRef(0);
@@ -47,18 +48,16 @@ function CrmAssistantContent({ userId }: { userId: string }) {
     controller.current?.abort(); const request = new AbortController(); controller.current = request;
     const started = ++epoch.current; setBusy(true); setNotice(''); setResult(undefined);
     try {
-      const response = await fetch('/api/crm-ai', { method: 'POST', signal: request.signal, headers: { 'Content-Type': 'application/json', 'x-wolfgrid-user-id': userId }, body: JSON.stringify({ workspaceId: currentWorkspaceId, contactId, mode, question, history, ...(after ? { after: new Date(`${after}T00:00:00`).toISOString() } : {}), ...(before ? { before: new Date(`${before}T23:59:59.999`).toISOString() } : {}) }) });
+      const response = await fetch('/api/crm-ai', { method: 'POST', signal: request.signal, headers: { 'Content-Type': 'application/json', 'x-wolfgrid-user-id': userId }, body: JSON.stringify({ workspaceId: currentWorkspaceId, contactId, mode, question, history: historyScope === (contactId ?? 'workspace') ? history : [], ...(historyRevision === undefined ? {} : { historyRevision }), ...(after ? { after: new Date(`${after}T00:00:00`).toISOString() } : {}), ...(before ? { before: new Date(`${before}T23:59:59.999`).toISOString() } : {}) }) });
       const answer = await response.json(); if (!response.ok) throw new Error(answer.error || 'The assistant is unavailable.');
       if (epoch.current !== started) return;
-      setResult(answer); setDraft(answer.draft ?? '');
-      setHistory(previous => [...previous, { role: 'user' as const, content: question.slice(0,2000) }, { role: 'assistant' as const, content: answer.answer.slice(0,2000) }].slice(-6));
+      setResult(answer); setDraft(answer.draft ?? ''); setHistoryScope(contactId ?? 'workspace'); setHistoryRevision(answer.consentRevision);
+      setHistory(previous => [...(historyScope === (contactId ?? 'workspace') ? previous : []), { role: 'user' as const, content: question.slice(0,2000) }, { role: 'assistant' as const, content: answer.answer.slice(0,2000) }].slice(-6));
     } catch (error) { if (epoch.current === started && !request.signal.aborted) setNotice((error as Error).message); }
     finally { if (epoch.current === started) setBusy(false); }
   }
   function close(value: boolean) { setOpen(value); if (!value) { epoch.current++; controller.current?.abort(); setBusy(false); } }
-  const visible = /^\/(leads|contacts|inbox|sales-pipeline)(\/|$)/.test(pathname);
   return <>
-    {visible && <button className="fixed bottom-6 right-6 z-40 rounded-full bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-lg" onClick={() => openCrmAssistant()}>Ask WolfGrid</button>}
     <Dialog open={open} onOpenChange={close}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>WolfGrid CRM assistant</DialogTitle><DialogDescription>Answers and editable drafts from your records. API usage is billed to your OpenAI account.</DialogDescription></DialogHeader>
       <p className="text-sm text-muted-foreground">{contactId ? 'Working with this contact.' : 'Working with your contacts in the current workspace.'} Message access follows your <Link href="/settings/mac" className="underline" onClick={() => close(false)}>Mac privacy settings</Link>.</p>
       <form className="space-y-3" onSubmit={event => { event.preventDefault(); void ask(); }}>
@@ -69,7 +68,7 @@ function CrmAssistantContent({ userId }: { userId: string }) {
       </form>
       {notice && <p role="status" className="text-sm">{notice}</p>}
       {result && <div className="space-y-4"><p className="whitespace-pre-wrap break-words text-sm">{result.answer}</p><p className="text-xs text-muted-foreground">{result.coverage} {result.messagesIncluded ? 'Synced message context was allowed.' : 'Synced messages were excluded.'}</p>
-        {result.draft !== null && <div className="space-y-2"><label className="block text-sm">Editable reply draft<textarea className="mt-1 min-h-28 w-full rounded-lg border bg-background p-3" value={draft} onChange={event => setDraft(event.target.value)} /></label><button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void navigator.clipboard.writeText(draft).then(() => setNotice('Draft copied. Review it before sending.')).catch(() => setNotice('Select the draft text to copy it.'))}>Copy draft</button></div>}
+        {result.draft !== null && <div className="space-y-2"><label className="block text-sm">Editable reply draft<textarea className="mt-1 min-h-28 w-full rounded-lg border bg-background p-3" value={draft} onChange={event => setDraft(event.target.value)} /></label><button className="rounded-lg border px-3 py-2 text-sm" onClick={() => void navigator.clipboard.writeText(draft).then(() => setNotice('Draft copied. Review it before sending.')).catch(() => setNotice('Select the draft text to copy it.'))}>Copy draft</button>{pathname === '/messages' && contactId && <button className="ml-2 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground" onClick={() => { window.dispatchEvent(new CustomEvent('wolfgrid-crm-draft', { detail: { contactId, draft } })); close(false); }}>Use in conversation</button>}</div>}
         {result.sources.length > 0 && <div className="space-y-2"><h3 className="text-sm font-semibold">Sources</h3>{result.sources.map(source => <div key={source.id} className="rounded-lg border p-3"><Link className="text-sm underline" href={source.href} onClick={() => close(false)}>{source.label}</Link><p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-xs text-muted-foreground">{source.excerpt}</p></div>)}</div>}
       </div>}
     </DialogContent></Dialog>

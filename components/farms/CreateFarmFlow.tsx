@@ -45,6 +45,7 @@ import * as turf from '@turf/turf';
 import Lottie from 'lottie-react';
 import { FarmTouchService } from '@/lib/services/FarmService';
 import { useStormTerritoryAddressCount } from '@/components/storm-maps/useStormTerritoryAddressCount';
+import { handleWheelScrollContainer } from '@/lib/scrollContainer';
 
 const DEFAULT_HOME_LIMIT = 5000;
 const DEFAULT_FARM_DURATION_DAYS = 365;
@@ -93,6 +94,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
     [mapPreset, theme],
   );
   const [farmName, setFarmName] = useState(initialName);
+  const [excludeCommercial, setExcludeCommercial] = useState(false);
   const [nameValidationAttempted, setNameValidationAttempted] = useState(false);
   const farmNameInput = useRef<HTMLInputElement>(null);
   const [outreach, setOutreach] = useState(defaultOutreachSettings);
@@ -131,6 +133,16 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
   );
   const { phase, setPhase, startCreating } = useTerritoryCreatePhase({ map, mapLoaded });
   const isBusy = loading || syncingFarm;
+  const panelScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const panel = panelScrollRef.current;
+    if (!panel) return;
+    // Handle native wheel events before the surrounding page's scroll lock.
+    const wheel = (event: WheelEvent) => handleWheelScrollContainer(event, panel);
+    panel.addEventListener('wheel', wheel, { passive: false });
+    return () => panel.removeEventListener('wheel', wheel);
+  }, [mapLoaded]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -636,7 +648,7 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
       }
 
       setSyncingFarm(true);
-      const importResponse = await fetch(`/api/farms/${farm.id}/import-homes`, { method: 'POST' });
+      const importResponse = await fetch(`/api/farms/${farm.id}/import-homes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ excludeCommercial }) });
       const imported = await importResponse.json();
       if (!importResponse.ok) {
         await showFeedbackDialog({ title: 'Farm saved — homes need importing', description: imported.error || 'Retry importing homes from the Dashboard.', tone: 'warning' });
@@ -652,6 +664,9 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
         if (homeCount.data && imported.totalCount !== homeCount.data.count) {
           await showFeedbackDialog({ title: 'Farm plan updated', description: `The map estimated ${homeCount.data.count.toLocaleString()} addresses; ${imported.totalCount.toLocaleString()} were imported. Your saved plan uses the imported homes.`, tone: 'warning' });
         }
+      }
+      if (importResponse.ok && excludeCommercial) {
+        await showFeedbackDialog({ title: 'Business filter applied', description: `${imported.excludedCount ?? 0} matched addresses were excluded. You can review and restore them from the farm dashboard.`, tone: 'default' });
       }
       if (importResponse.ok && imported.totalCount > 0) {
         const schedule = forecastOutreach(imported.totalCount, startDate, planWeeks, outreach);
@@ -727,8 +742,8 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
         ) : null}
 
         {mapLoaded ? (
-          <div className="absolute right-5 top-5 z-20 max-h-[calc(100%-2.5rem)] w-[min(22rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-white/10 bg-background/92 shadow-2xl backdrop-blur-md">
-            <div className="space-y-4 p-4">
+          <div className={`absolute right-5 top-5 z-20 flex w-[min(22rem,calc(100%-2.5rem))] flex-col overflow-hidden rounded-2xl border border-white/10 bg-background/92 shadow-2xl backdrop-blur-md ${phase === 'naming' ? 'bottom-5' : 'max-h-[calc(100%-2.5rem)]'}`}>
+            <div ref={panelScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 [touch-action:pan-y]">
               {phase !== 'naming' && <button
                 type="button"
                 disabled={isBusy}
@@ -763,16 +778,11 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
                       <Input id="farm-weeks" type="number" min={1} max={52} value={planWeeks || ''} onChange={e => setPlanWeeks(Number(e.target.value))} /></div>
                   </div></details>
                   <FarmOutreachQuestions value={outreach} onChange={setOutreach} totalHomes={homeCount.data?.count ?? null} startDate={startDate} weeks={planWeeks} estimated location={farmLocation} onHolidayLoadingChange={setHolidayLoading} />
+                  <label className="flex items-start gap-3 rounded-xl border border-border p-3 text-sm">
+                    <input type="checkbox" checked={excludeCommercial} onChange={e => setExcludeCommercial(e.target.checked)} className="mt-1" />
+                    <span><span className="font-medium">Remove matching businesses</span><span className="mt-1 block text-muted-foreground">Durham only. Review and restore matches after creation.</span></span>
+                  </label>
                   {homeCount.error && <div className="text-sm text-amber-500" role="alert">Address count unavailable. <button type="button" onClick={homeCount.retry} className="underline">Retry</button></div>}
-                  <button type="button" disabled={isBusy || holidayLoading || !homeCount.data} onClick={() => void handlePrimaryCreateAction()} className="flex h-12 w-full items-center justify-center rounded-xl bg-[#FA263C] px-5 font-semibold text-white hover:bg-red-600 disabled:opacity-50">{isBusy ? 'Creating…' : 'Create farm'}</button>
-                  <button
-                    type="button"
-                    onClick={handleNamingBack}
-                    disabled={isBusy}
-                    className="text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-60"
-                  >
-                    Back to drawing
-                  </button>
                 </div>
               ) : null}
 
@@ -822,6 +832,10 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
 
               <FarmBoundaryAddressCount map={map} draw={drawRef} mapLoaded={mapLoaded} workspaceId={currentWorkspaceId} /></>}
             </div>
+            {phase === 'naming' && <div className="shrink-0 space-y-2 border-t border-border bg-background p-4">
+              <button type="button" disabled={isBusy || holidayLoading || !homeCount.data} onClick={() => void handlePrimaryCreateAction()} className="flex h-12 w-full items-center justify-center rounded-xl bg-[#FA263C] px-5 font-semibold text-white hover:bg-red-600 disabled:opacity-50">{isBusy ? 'Creating…' : 'Create farm'}</button>
+              <button type="button" onClick={handleNamingBack} disabled={isBusy} className="text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-60">Back to drawing</button>
+            </div>}
           </div>
         ) : null}
 

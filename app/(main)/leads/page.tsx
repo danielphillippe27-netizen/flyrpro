@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveDashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { resolveSalespersonForUser } from '@/lib/dialer/salesperson-settings';
 import { ContactsHubView } from '@/components/crm/ContactsHubView';
-import { CrmContactsHub } from '@/components/crm/CrmContactsHub';
+import CocoCrm from '@/components/coco/CocoCrm';
 
 /**
  * /leads — routes to one of two completely separate views:
@@ -43,7 +43,7 @@ export default async function LeadsPage() {
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-background">
       <main className="flex min-h-0 flex-1 overflow-hidden">
-        {isSalesperson ? <ContactsHubView /> : <CrmContactsHub />}
+        {isSalesperson ? <ContactsHubView /> : <CocoCrm initialArea="Clients" />}
       </main>
     </div>
   );

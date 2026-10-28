@@ -92,6 +92,7 @@ export function FinancePanel({
   addresses,
 }: FinancePanelProps) {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
+  const [entryMode, setEntryMode] = useState<'postal' | 'social' | 'expense'>('postal');
   const [metaAdSpendCents, setMetaAdSpendCents] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profileNames, setProfileNames] = useState<Record<string, string>>({});
@@ -497,7 +498,7 @@ export function FinancePanel({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className={`grid gap-4 md:grid-cols-2 ${totalSocialAdSpendCents > 0 ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -512,7 +513,7 @@ export function FinancePanel({
             </p>
           </CardContent>
         </Card>
-        <Card>
+        {totalSocialAdSpendCents > 0 && (<Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Megaphone className="w-4 h-4" />
@@ -527,7 +528,7 @@ export function FinancePanel({
                 : 'Meta, Facebook, Instagram, and social ads'}
             </p>
           </CardContent>
-        </Card>
+        </Card>)}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -574,12 +575,17 @@ export function FinancePanel({
         </div>
       ) : null}
 
-      <div className="grid items-stretch gap-4 xl:grid-cols-3">
-        <Card className="flex h-full flex-col">
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-1 rounded-lg border border-border bg-muted/30 p-1 w-fit" aria-label="Expense type">
+          {([{ id: 'postal', label: 'Postal drop' }, { id: 'social', label: 'Social ad' }, { id: 'expense', label: 'Other expense' }] as const).map(mode => (
+            <Button key={mode.id} type="button" size="sm" variant={entryMode === mode.id ? 'secondary' : 'ghost'} aria-pressed={entryMode === mode.id} onClick={() => setEntryMode(mode.id)}>{mode.label}</Button>
+          ))}
+        </div>
+        <Card className={entryMode === 'postal' ? 'flex flex-col' : 'hidden'}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <Calculator className="w-4 h-4" />
-              Postal Drop Estimator
+              Postal drop
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col space-y-3">
@@ -645,7 +651,7 @@ export function FinancePanel({
                   readOnly
                   className="bg-muted/40"
                 />
-                <p className="text-xs text-muted-foreground">Auto-balanced from the total cost.</p>
+                <p className="text-xs text-muted-foreground">Calculated from total.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="bundling-cost">Bundling cost</Label>
@@ -695,8 +701,8 @@ export function FinancePanel({
               </div>
               <div className="rounded-lg border border-border bg-background p-3">
                 <div>
-                  <p className="text-sm font-medium">Calculated cost per home</p>
-                  <p className="text-xs text-muted-foreground">Based on total cost and homes count.</p>
+                  <p className="text-sm font-medium">Cost per home</p>
+                  <p className="text-xs text-muted-foreground">Total cost ÷ homes.</p>
                 </div>
                 <div className="mt-2 text-2xl font-semibold">{formatCurrencyFromCents(postalCostPerHomeCents)}</div>
               </div>
@@ -710,11 +716,11 @@ export function FinancePanel({
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col">
+        <Card className={entryMode === 'social' ? 'flex flex-col' : 'hidden'}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
-              Meta / Social Ads
+              Social ad
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col space-y-3">
@@ -813,7 +819,7 @@ export function FinancePanel({
               </div>
               <div className="rounded-lg border border-border bg-background p-3 sm:col-span-2">
                 <p className="text-sm font-medium">Cost per lead</p>
-                <p className="text-xs text-muted-foreground">Based on spend and leads entered here.</p>
+                <p className="text-xs text-muted-foreground">Ad spend ÷ leads.</p>
                 <div className="mt-2 text-2xl font-semibold">{formatCurrencyFromCents(socialAdCostPerLeadCents)}</div>
               </div>
             </div>
@@ -838,11 +844,11 @@ export function FinancePanel({
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col">
+        <Card className={entryMode === 'expense' ? 'flex flex-col' : 'hidden'}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <ReceiptText className="w-4 h-4" />
-              Manual Expense
+              Other expense
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col space-y-3">
@@ -983,7 +989,7 @@ export function FinancePanel({
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading finance entries...</p>
           ) : entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No finance entries yet. Save a postal drop or add a manual expense to start tracking spend.</p>
+            <p className="text-sm text-muted-foreground">No expenses yet. Add one above.</p>
           ) : (
             <Table>
               <TableHeader>

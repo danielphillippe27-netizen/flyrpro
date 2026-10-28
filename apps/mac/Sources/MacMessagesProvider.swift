@@ -125,7 +125,11 @@ enum MacMessageBodyDecoder {
 }
 
 extension MacMessagesProvider {
-    func historyBatch(after cursor: Int64, databasePath: String? = nil, allowedIdentifiers: Set<String>, indexedChats: [String: [Int64]]? = nil) throws -> [MacHistoryMessage] {
+    func historyBatch(after cursor: Int64, databasePath: String? = nil, allowedIdentifiers: Set<String>, indexedChats: [String: [Int64]]? = nil, notBefore: Date? = nil) throws -> [MacHistoryMessage] {
+        try historyPage(after: cursor, databasePath: databasePath, allowedIdentifiers: allowedIdentifiers, indexedChats: indexedChats, notBefore: notBefore).messages
+    }
+
+    func historyPage(after cursor: Int64, databasePath: String? = nil, allowedIdentifiers: Set<String>, indexedChats: [String: [Int64]]? = nil, notBefore: Date? = nil) throws -> MacHistoryPage {
         guard cursor >= 0 else { throw MacMessageError.unsupported("Invalid history cursor") }
         if databasePath == nil && indexedChats == nil { try checkReadAccess() }
         var database: OpaquePointer?
@@ -145,14 +149,14 @@ extension MacMessagesProvider {
             let members = try historyParticipants(database, chatID: chat)
             if members.count == 1, let raw = members.first, let normalized = Self.normalizedIdentifier(raw), allowedIdentifiers.contains(normalized) { ids.insert(chat) }
         }
-        guard !ids.isEmpty else { return [] }
+        guard !ids.isEmpty else { return MacHistoryPage(messages: [], scannedThrough: cursor) }
         let chatFilter = " AND c.ROWID IN (" + ids.map(String.init).joined(separator: ",") + ")"
         // One row per message. Shared chat joins must not truncate a page halfway through a ROWID.
         let sql = """
         SELECT m.ROWID,m.guid,c.guid,c.display_name,m.text,m.attributedBody,m.is_from_me,m.service,m.date,h.id,c.ROWID
         FROM message m JOIN chat_message_join cmj ON cmj.message_id=m.ROWID
         JOIN chat c ON c.ROWID=cmj.chat_id LEFT JOIN handle h ON h.ROWID=m.handle_id
-        WHERE m.ROWID > ?\(chatFilter) AND cmj.chat_id=(SELECT min(chat_id) FROM chat_message_join WHERE message_id=m.ROWID)
+        WHERE m.ROWID > ? AND (? IS NULL OR m.date >= ?)\(chatFilter) AND cmj.chat_id=(SELECT min(chat_id) FROM chat_message_join WHERE message_id=m.ROWID)
         ORDER BY m.ROWID LIMIT 100
         """
         var statement: OpaquePointer?
@@ -161,6 +165,10 @@ extension MacMessagesProvider {
         }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_int64(statement, 1, cursor)
+        if let notBefore {
+            let cutoff = Int64((notBefore.timeIntervalSince1970 - 978307200) * 1_000_000_000)
+            sqlite3_bind_int64(statement, 2, cutoff); sqlite3_bind_int64(statement, 3, cutoff)
+        } else { sqlite3_bind_null(statement, 2); sqlite3_bind_null(statement, 3) }
         var result: [MacHistoryMessage] = []
         while true {
             let code = sqlite3_step(statement)
@@ -180,9 +188,37 @@ extension MacMessagesProvider {
                 bodyStatus: body != nil ? "decoded" : blobSize > 0 ? "unsupported" : "empty",
                 direction: sqlite3_column_int(statement, 6) == 1 ? "outgoing" : "incoming", service: text(7),
                 sentAt: date > 0 ? ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: Double(date) / 1_000_000_000 + 978307200)) : nil,
-                attachments: try hasAttachments(database, rowID: row) ? [MacHistoryAttachment(guid: "present", fileName: "Attachment", mimeType: nil, byteCount: 0, status: "excluded", storagePath: nil)] : []))
+                attachments: try historyAttachments(database, rowID: row)))
         }
-        return result
+        var through = result.last?.rowID ?? cursor
+        if result.count < 100 {
+            var maximum: OpaquePointer?
+            defer { sqlite3_finalize(maximum) }
+            let maximumSQL = "SELECT max(message_id) FROM chat_message_join WHERE chat_id IN (" + ids.map(String.init).joined(separator: ",") + ")"
+            guard sqlite3_prepare_v2(database, maximumSQL, -1, &maximum, nil) == SQLITE_OK, sqlite3_step(maximum) == SQLITE_ROW else { throw MacMessageError.unavailable("Could not acknowledge scanned history") }
+            through = max(through, sqlite3_column_int64(maximum, 0))
+        }
+        return MacHistoryPage(messages: result, scannedThrough: through)
+    }
+
+    private func historyAttachments(_ database: OpaquePointer?, rowID: Int64) throws -> [MacHistoryAttachment] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "SELECT a.guid,a.filename,a.transfer_name,a.mime_type,a.total_bytes FROM attachment a JOIN message_attachment_join j ON j.attachment_id=a.ROWID WHERE j.message_id=? ORDER BY a.ROWID", -1, &statement, nil) == SQLITE_OK else { throw MacMessageError.unsupported("Attachment schema changed") }
+        defer { sqlite3_finalize(statement) }; sqlite3_bind_int64(statement, 1, rowID)
+        var values: [MacHistoryAttachment] = []
+        while true {
+            let code = sqlite3_step(statement); if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw MacMessageError.unavailable("Attachment read failed") }
+            func text(_ i: Int32) -> String? { sqlite3_column_text(statement, i).map { String(cString: $0) } }
+            let local = text(1).map { ($0 as NSString).expandingTildeInPath }
+            let root = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Messages/Attachments").resolvingSymlinksInPath().path + "/"
+            let resolved = local.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+            let available = resolved.map { $0.hasPrefix(root) && FileManager.default.isReadableFile(atPath: $0) } ?? false
+            values.append(MacHistoryAttachment(guid: text(0) ?? "", fileName: text(2) ?? local.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Attachment",
+                mimeType: text(3), byteCount: sqlite3_column_int64(statement, 4), status: available ? "pending" : "unavailable",
+                storagePath: nil, localPath: available ? resolved : nil))
+        }
+        return values
     }
 
     static func normalizedIdentifier(_ raw: String) -> String? {
@@ -240,5 +276,50 @@ extension MacMessagesProvider {
             result[handle, default: []].append(chat)
         }
         return result
+    }
+}
+
+extension MacMessagesProvider {
+    /// Metadata only. Unknown participants and message bodies never leave the Mac.
+    func conversationPreview(allowedIdentifiers: Set<String>, databasePath: String? = nil) throws -> [String: Any] {
+        if databasePath == nil { try checkReadAccess() }
+        let index = try participantIndex(databasePath: databasePath)
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databasePath ?? NSHomeDirectory() + "/Library/Messages/chat.db", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { sqlite3_close(database); throw MacMessageError.unavailable("Messages metadata unavailable") }
+        defer { sqlite3_close(database) }
+        var ids = Set<Int64>()
+        for id in Set(allowedIdentifiers.flatMap { index[$0] ?? [] }) {
+            let members = try historyParticipants(database, chatID: id)
+            if members.count == 1, let raw = members.first, let normalized = Self.normalizedIdentifier(raw), allowedIdentifiers.contains(normalized) { ids.insert(id) }
+        }
+        guard !ids.isEmpty else { return ["conversationCount": 0, "messageCount": 0, "lastMessageAt": NSNull()] }
+        var statement: OpaquePointer?
+        let sql = "SELECT count(distinct m.ROWID),max(m.date) FROM message m JOIN chat_message_join j ON j.message_id=m.ROWID WHERE j.chat_id IN (" + ids.map(String.init).joined(separator: ",") + ")"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw MacMessageError.unsupported("Messages metadata schema changed") }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw MacMessageError.unavailable("Could not check the conversation") }
+        let date = sqlite3_column_int64(statement, 1)
+        return ["conversationCount": ids.count, "messageCount": Int(sqlite3_column_int64(statement, 0)), "lastMessageAt": date > 0 ? ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: Double(date) / 1_000_000_000 + 978307200)) : NSNull()]
+    }
+}
+
+
+struct MacHistoryPage: Sendable {
+    let messages: [MacHistoryMessage]
+    let scannedThrough: Int64
+}
+extension MacMessagesProvider {
+    func latestRows(index: [String: [Int64]], databasePath: String? = nil) throws -> [String: Int64] {
+        let ids = Set(index.values.flatMap { $0 }); guard !ids.isEmpty else { return [:] }
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(databasePath ?? NSHomeDirectory() + "/Library/Messages/chat.db", &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else { sqlite3_close(database); throw MacMessageError.unavailable("Cannot inspect Messages changes") }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        let sql = "SELECT chat_id,max(message_id) FROM chat_message_join WHERE chat_id IN (" + ids.map(String.init).joined(separator: ",") + ") GROUP BY chat_id"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw MacMessageError.unsupported("Messages change index unavailable") }
+        defer { sqlite3_finalize(statement) }
+        var latest: [Int64: Int64] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW { latest[sqlite3_column_int64(statement, 0)] = sqlite3_column_int64(statement, 1) }
+        return index.mapValues { ($0.compactMap { latest[$0] }).max() ?? 0 }
     }
 }

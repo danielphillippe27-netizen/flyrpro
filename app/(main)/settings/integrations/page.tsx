@@ -1167,7 +1167,7 @@ export default function IntegrationsPage() {
             <Button onClick={() => router.push('/subscribe?reason=integrations')}>
               View Pro workspace plans
             </Button>
-            <a href="/settings/mac" className="mt-4 block text-sm underline">Mac &amp; personal OpenAI settings</a>
+            <a href="/settings/integrations/apple" className="mt-4 block text-sm underline">Apple &amp; personal OpenAI settings</a>
           </CardContent>
         </Card>
       </div>
@@ -1214,8 +1214,8 @@ export default function IntegrationsPage() {
         <div className="space-y-6">
           <GmailConnection />
           <OpenAIConnection />
-          <a href="/settings/mac" className="block rounded-xl border border-border p-5 hover:bg-muted/50">
-            <h3 className="font-semibold">Mac contacts &amp; messages</h3>
+          <a href="/settings/integrations/apple" className="block rounded-xl border border-border p-5 hover:bg-muted/50">
+            <h3 className="font-semibold">Apple Integrations</h3>
             <p className="mt-1 text-sm text-muted-foreground">Choose Apple Contacts and import private message history for selected people with the Mac companion.</p>
             <span className="mt-2 inline-block text-sm">Open Mac setup →</span>
           </a>

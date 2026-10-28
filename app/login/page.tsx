@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import Image from 'next/image';
 import { resolvePublicAppOrigin } from '@/lib/auth/public-origin';
+import { startProviderSignIn } from '@/lib/auth/mac-oauth';
 import { clearBrowserSupabaseAuthCookies } from '@/lib/supabase/shared-cookie';
 
 type InviteValidationResponse = {
@@ -393,12 +394,7 @@ export default function LoginPage() {
     try {
       const redirectTo = buildAuthCallbackURL();
       const supabase = await getClientAsync();
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo, queryParams: { prompt: 'select_account' } },
-      });
-      if (error) throw error;
-      if (data?.url) window.location.href = data.url;
+      await startProviderSignIn(supabase, 'google', redirectTo);
     } catch (err: unknown) {
       const message = formatAuthError(err, 'Failed to start Google sign-in.');
       setMessage({ type: 'error', text: message });
@@ -412,12 +408,7 @@ export default function LoginPage() {
     try {
       const redirectTo = buildAuthCallbackURL();
       const supabase = await getClientAsync();
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'apple',
-        options: { redirectTo },
-      });
-      if (error) throw error;
-      if (data?.url) window.location.href = data.url;
+      await startProviderSignIn(supabase, 'apple', redirectTo);
     } catch (err: unknown) {
       const msg = formatAuthError(err, 'Failed to start Sign in with Apple.');
       setMessage({ type: 'error', text: msg });

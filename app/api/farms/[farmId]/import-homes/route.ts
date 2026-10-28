@@ -1,5 +1,6 @@
+import { prepareFarmMap } from '@/lib/farms/prepareFarmMap';
 import { createHash } from 'node:crypto';
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { bbox } from '@turf/turf';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -8,10 +9,11 @@ import { selectFarmCampaignRow, userCanAccessFarm, formatApiError } from '@/app/
 import { parseFarmBoundary } from '@/lib/farms/farm-boundary';
 import { resolveCampaignRegion, resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 import { BEDROCK_CANADA_CONFIG, BEDROCK_US_CONFIG, BedrockCountryService } from '@/lib/services/BedrockCountryService';
+import { matchDurhamFarmAddresses } from '@/lib/farms/durhamSnapshot';
 import regions from '@/scripts/regions.json';
 
 export const runtime = 'nodejs';
-export const maxDuration = 180;
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest, context: { params: Promise<{ farmId: string }> }) {
@@ -23,6 +25,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ fa
     const { farm } = await selectFarmCampaignRow(admin, farmId);
     if (!farm) return NextResponse.json({ error: 'Farm not found' }, { status: 404 });
     if (!await userCanAccessFarm(admin, user.id, farm)) return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    const body = await request.json().catch(() => ({}));
+    const filterCommercial = body.excludeCommercial === true;
     const boundary = parseFarmBoundary(farm.polygon);
     if (!boundary) return NextResponse.json({ error: 'Choose a closed farm boundary smaller than 5,000 km².' }, { status: 400 });
     const resolution = await resolveCampaignRegion({ polygon: boundary });
@@ -48,15 +52,39 @@ export async function POST(request: NextRequest, context: { params: Promise<{ fa
         locality: row.locality ?? null, region: row.region ?? null, postal_code: row.postal_code ?? null,
         source: row.source, latitude: row.coordinate?.lat ?? row.lat ?? null, longitude: row.coordinate?.lon ?? row.lon ?? null };
     });
+    const exclusions = await fetchAllInPages<{ address_id: string; restored_at: string | null }>(async (from, to) =>
+      await admin.from('farm_commercial_exclusions').select('address_id,restored_at').eq('farm_id', farm.id).order('address_id').range(from, to));
+    const previouslyExcluded = new Set(exclusions.filter(row => !row.restored_at).map(row => row.address_id));
+    const knownExclusions = new Set(exclusions.map(row => row.address_id));
+    let newExclusions = 0;
+    if (filterCommercial) {
+      const existingAddressIds = new Set(existing.map(row => row.id));
+      const eligible = rows.filter(row => !existingAddressIds.has(row.id) && !knownExclusions.has(row.id));
+      const review = await matchDurhamFarmAddresses(eligible);
+      if (review.addressesInDurham === 0) throw new Error('This filter currently covers Durham Region only. No addresses in this farm could be checked.');
+      const byId = new Map(eligible.map(row => [row.id, row]));
+      const excluded = review.matches.map(match => ({ farm_id: farm.id, address_id: match.addressId, address_data: byId.get(match.addressId), places: match.places }));
+      for (let offset = 0; offset < excluded.length; offset += 500) {
+        const { error } = await admin.from('farm_commercial_exclusions').upsert(excluded.slice(offset, offset + 500), { onConflict: 'farm_id,address_id', ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      excluded.forEach(row => previouslyExcluded.add(row.address_id));
+      newExclusions = excluded.length;
+    }
+    const included = rows.filter(row => !previouslyExcluded.has(row.id));
     // Upsert only address fields: retries retain IDs, contacts and all visit history.
-    for (let offset = 0; offset < rows.length; offset += 500) {
-      const { error } = await admin.from('farm_addresses').upsert(rows.slice(offset, offset + 500), { onConflict: 'id' });
+    for (let offset = 0; offset < included.length; offset += 500) {
+      const { error } = await admin.from('farm_addresses').upsert(included.slice(offset, offset + 500), { onConflict: 'id' });
       if (error) throw error;
     }
     const { count, error: countError } = await admin.from('farm_addresses').select('id', { count: 'exact', head: true }).eq('farm_id', farm.id);
     if (countError) throw countError;
     const { error } = await admin.from('farms').update({ address_count: count ?? 0, last_generated_at: new Date().toISOString() }).eq('id', farm.id);
     if (error) throw error;
-    return NextResponse.json({ importedCount: rows.length, totalCount: count ?? 0 });
+    after(async () => {
+      try { await prepareFarmMap(admin, farm.id, country, resolution.regionCode); }
+      catch (error) { console.error('[farm map] Preparation failed:', farm.id, error); }
+    });
+    return NextResponse.json({ importedCount: included.length, totalCount: count ?? 0, excludedCount: newExclusions });
   } catch (error) { return NextResponse.json({ error: formatApiError(error) }, { status: 500 }); }
 }

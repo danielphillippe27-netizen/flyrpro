@@ -455,6 +455,8 @@ function isPreservedLayer(
     preserveLayerPrefixes?: string[];
   },
 ) {
+  // Canonical campaign layers are app data, never base-map decoration.
+  if (layerId.startsWith('canonical-')) return true;
   if (options?.preserveLayerIds?.includes(layerId)) return true;
   return options?.preserveLayerPrefixes?.some((prefix) => layerId.startsWith(prefix)) ?? false;
 }

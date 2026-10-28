@@ -1056,6 +1056,7 @@ async function fetchBundleReconciliation(
 
 type AddressAdjustmentRow = {
   address_id: string;
+  source?: string | null;
   label_anchor_lon: number | null;
   label_anchor_lat: number | null;
   access_lon: number | null;
@@ -1069,7 +1070,7 @@ async function fetchAddressAdjustments(
 ): Promise<AddressAdjustmentRow[]> {
   const { data, error } = await supabase
     .from('campaign_address_adjustments')
-    .select('address_id, label_anchor_lon, label_anchor_lat, access_lon, access_lat, updated_at')
+    .select('address_id, label_anchor_lon, label_anchor_lat, access_lon, access_lat, updated_at, source')
     .eq('campaign_id', campaignId);
   if (error) return [];
   return (data ?? []) as AddressAdjustmentRow[];

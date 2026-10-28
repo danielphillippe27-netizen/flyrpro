@@ -37,11 +37,28 @@ async function main() {
   assert.equal(plan([home], [{ ...address, properties: { ...address.properties, source: 'manual' } }]).length, 0);
   assert.equal(planParcelPinPlacements({ buildings: [home], addresses: [address], parcels: [parcel], protectedAddressIds: new Set(['address']) }).length, 0);
   assert.equal(plan([home], [address, { ...address, properties: { ...address.properties, id: 'second' } }]).length, 0);
+  // Keep a real point anywhere inside its parcel, including outside the roof.
+  const inside = turf.point([-78.9999, 43.0001], { ...address.properties });
+  const preserved = plan([home], [inside]);
+  assert.deepEqual(preserved[0].coordinate, inside.geometry.coordinates);
+  assert.equal(preserved[0].buildingId, 'home', 'preserving the point must retain the building association');
+  assert.equal(preserved[0].preservedSource, true);
+  const preservedFeature = applyParcelPinPlacements(turf.featureCollection([inside]), preserved).features[0];
+  assert.deepEqual(preservedFeature.geometry, inside.geometry);
+  assert.equal(preservedFeature.properties?.pin_coordinate_preserved, true);
+  assert.equal(preservedFeature.properties?.label_anchor_lon, inside.geometry.coordinates[0]);
+  assert.equal(preservedFeature.properties?.label_anchor_lat, inside.geometry.coordinates[1]);
+  assert.equal(plan([home, ambiguous], [inside])[0].buildingId, null, 'ambiguous footprints must not create a link');
+  assert.deepEqual(plan([], [inside])[0].coordinate, inside.geometry.coordinates);
+  const onBoundary = turf.point([-79, 43.0001], { ...address.properties });
+  assert.deepEqual(plan([home], [onBoundary])[0].coordinate, onBoundary.geometry.coordinates,
+    'a point on the linked parcel boundary is retained');
+  assert.equal(plan([home], [inside, { ...inside, properties: { ...inside.properties, id: 'second' } }]).length, 0);
   // Separate townhouse lots share a single footprint, and retain distinct pins.
   const left = box('left', -79,43,.0005,.001,{parcel_id:'left'});
   const right = box('right', -78.9995,43,.0005,.001,{parcel_id:'right'});
   const row = box('row', -78.9998,43.0002,.0006,.0004,{gers_id:'row'});
-  const units = [turf.point([-79.0001,43],{id:'u1',parcel_id:'left'}),turf.point([-78.999,43],{id:'u2',parcel_id:'right'})];
+  const units = [turf.point([-79.0001,43],{id:'u1',parcel_id:'left'}),turf.point([-78.9989,43],{id:'u2',parcel_id:'right'})];
   const town = plan([row], units, [left,right]);
   assert.equal(town.length,2);
   assert(turf.booleanPointInPolygon(town[0].coordinate,left));

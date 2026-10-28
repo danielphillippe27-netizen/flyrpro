@@ -621,7 +621,7 @@ export function CampaignAddressPmtilesLayer({
         maxzoom: ADDRESS_LABEL_MIN_ZOOM,
         filter: getLayerFilter('Point'),
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2.5, 12, 3.5, 16, 4],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 3.5, 12, 4.5, 16, 5],
           'circle-color': addressColorExpression,
           'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0.95, 16, 0],
           'circle-stroke-width': 1,
@@ -774,7 +774,7 @@ export function CampaignAddressPmtilesLayer({
         minzoom: source.minzoom,
         filter: getLayerFilter('Point'),
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 17, 5],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 13, 4.5, 17, 5],
           'circle-color': addressColorExpression,
           'circle-opacity': 0.88,
           'circle-stroke-width': 1,

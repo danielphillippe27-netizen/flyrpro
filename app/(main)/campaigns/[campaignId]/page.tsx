@@ -484,10 +484,13 @@ function CampaignLeadsTab({
             <h2 className="text-sm font-semibold text-foreground">Campaign Leads</h2>
             <Badge variant="secondary" className="text-xs">{contacts.length}</Badge>
           </div>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="w-4 h-4 mr-1" />
-            Add contact
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <ContactOutreach contacts={filtered} iconOnly />
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="w-4 h-4 mr-1" />
+              Add contact
+            </Button>
+          </div>
         </div>
 
         <div className="relative mb-4">
@@ -499,8 +502,6 @@ function CampaignLeadsTab({
             className="w-full pl-3 pr-3 py-2 rounded-lg border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
-
-        <div className="mb-4"><ContactOutreach contacts={filtered} /></div>
 
         {filtered.length === 0 ? (
           <div className="text-center py-8">

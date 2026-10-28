@@ -1,0 +1,7 @@
+# Durham Overture Places farm review
+
+The versioned snapshot is stored under `s3://flyr-pro-addresses-2025/farms/overture-places/durham/2026-10-21.0/`. It contains Overture Places clipped to Durham Region's official boundary, with source metadata preserved. The manifest records the release, source, boundary, and count. Overture Maps Foundation and Region of Durham Open Data are the data providers; consult their current source-specific licensing and attribution requirements before redistribution.
+
+Run `node scripts/farms/extract-durham-places.cjs <output-directory>` to rebuild the pinned release. Upload new snapshots to a new versioned prefix, verify the manifest and data, and update the application only after validation. The snapshot is not automatically refreshed.
+
+When the opt-in filter is enabled during creation, it matches business categories by normalized street address within 50 metres and excludes matches from the farm. Known residential place categories, including retirement homes and apartments, are protected. The farm dashboard shows exclusions and allows restoration; later imports and campaign syncs retain those decisions. Outside Durham, addresses are not checked. Closed place records are ignored. A business match does not establish that a property is non-residential: home-based businesses and mixed-use addresses can still be excluded, so the list needs review. Building-use classification remains future work.

@@ -72,10 +72,10 @@ export async function middleware(req: NextRequest) {
     // Just refresh the session - don't redirect or make DB calls
     const { data: { session } } = await supabase.auth.getSession();
     // Redirect before the main client layout can hide a streamed redirect.
-    if (req.nextUrl.pathname === '/settings/mac' && !session) {
+    if (['/settings/mac', '/settings/integrations/apple', '/messages','/inbox','/contacts'].includes(req.nextUrl.pathname) && !session) {
       const login = req.nextUrl.clone();
       login.pathname = '/login';
-      login.search = '?next=/settings/mac';
+      login.search = `?next=${encodeURIComponent(req.nextUrl.pathname)}`;
       return NextResponse.redirect(login);
     }
   } catch (error) {

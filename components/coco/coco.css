@@ -1,0 +1,5041 @@
+/* Ported from KimiCoco: preserve its layout and interaction class names. Scoped to WolfGrid CRM. */
+.coco-crm {
+  --bg: var(--background);
+  --surface: var(--secondary);
+  --text: var(--foreground);
+  --coco-muted: var(--muted-foreground);
+  --line: var(--border);
+  --rose: var(--primary);
+  --rose-light: var(--secondary);
+  --cocoa: var(--primary);
+  --espresso: var(--primary);
+  --shadow: 0 8px 30px rgba(53, 43, 39, 0.045);
+}
+.coco-crm * {
+  box-sizing: border-box;
+}
+.coco-crm,
+.coco-crm {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+.coco-crm {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+.coco-crm button,
+.coco-crm input,
+.coco-crm textarea,
+.coco-crm select {
+  font: inherit;
+}
+.coco-crm button {
+  cursor: pointer;
+}
+.coco-crm button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.coco-crm a {
+  color: inherit;
+  text-decoration: none;
+}
+.coco-crm h1,
+.coco-crm h2,
+.coco-crm p {
+  margin-top: 0;
+}
+.coco-crm h1 {
+  font-size: 38px;
+  letter-spacing: -1.8px;
+  line-height: 1.17;
+  font-weight: 670;
+}
+.coco-crm h2 {
+  font-size: 19px;
+  letter-spacing: -0.55px;
+  font-weight: 650;
+}
+.coco-crm .eyebrow {
+  color: var(--coco-muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 2px;
+}
+.coco-crm .muted {
+  color: var(--coco-muted);
+  line-height: 1.6;
+}
+.coco-crm .rose-dot {
+  color: var(--coco-muted);
+}
+.coco-crm .app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+.coco-crm .sidebar {
+  width: 252px;
+  flex: 0 0 252px;
+  background: var(--card);
+  border-right: 1px solid var(--line);
+  min-height: 100vh;
+  padding: 29px 15px 17px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.coco-crm .logo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 3px 14px 33px;
+  font-weight: 730;
+  font-size: 21px;
+  letter-spacing: -0.8px;
+}
+.coco-crm .logo-symbol,
+.coco-crm .brand-mark {
+  height: 36px;
+  width: 36px;
+  border-radius: 12px;
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+  display: grid;
+  place-items: center;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 22px;
+  letter-spacing: -4px;
+  padding-right: 3px;
+}
+.coco-crm .logo-symbol span,
+.coco-crm .brand-mark span {
+  font-size: 18px;
+  margin-left: -4px;
+  align-self: center;
+}
+.coco-crm .workspace-switch {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 12px;
+  padding: 9px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  width: 100%;
+  color: var(--text);
+}
+.coco-crm .workspace-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  background: var(--surface);
+  color: var(--coco-muted);
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+.coco-crm .workspace-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.coco-crm .workspace-copy strong,
+.coco-crm .workspace-copy small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coco-crm .workspace-copy strong {
+  font-size: 12px;
+}
+.coco-crm .workspace-copy small {
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .sidebar-label {
+  font-size: 10px;
+  color: var(--coco-muted);
+  letter-spacing: 1.4px;
+  font-weight: 750;
+  margin: 33px 14px 13px;
+}
+.coco-crm .sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.coco-crm .nav-item {
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  color: var(--text);
+  width: 100%;
+  height: 43px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 560;
+}
+.coco-crm .nav-item:hover {
+  background: var(--surface);
+}
+.coco-crm .nav-item.active {
+  background: var(--surface);
+  color: var(--cocoa);
+  font-weight: 700;
+}
+.coco-crm .nav-count {
+  margin-left: auto;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 99px;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+.coco-crm .sidebar-bottom {
+  margin-top: auto;
+}
+.coco-crm .status-box {
+  background: var(--surface);
+  border-radius: 11px;
+  padding: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 1px 15px;
+}
+.coco-crm .status-dot {
+  display: inline-block;
+  background: var(--surface);
+  height: 7px;
+  width: 7px;
+  border-radius: 50%;
+  flex: none;
+  margin-top: 4px;
+}
+.coco-crm .status-dot.online {
+  background: #82a887;
+}
+.coco-crm .status-box strong,
+.coco-crm .status-box small {
+  display: block;
+}
+.coco-crm .status-box strong {
+  font-size: 11px;
+}
+.coco-crm .status-box small {
+  font-size: 10px;
+  color: var(--coco-muted);
+  margin-top: 4px;
+}
+.coco-crm .profile-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 17px 5px 0;
+  text-align: left;
+  margin-top: 13px;
+}
+.coco-crm .profile-row > span:nth-child(2) {
+  flex: 1;
+}
+.coco-crm .profile-row strong,
+.coco-crm .profile-row small {
+  display: block;
+}
+.coco-crm .profile-row strong {
+  font-size: 12px;
+}
+.coco-crm .profile-row small {
+  color: var(--coco-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.coco-crm .profile-row > svg {
+  color: var(--coco-muted);
+}
+.coco-crm .avatar {
+  height: 38px;
+  width: 38px;
+  flex: 0 0 38px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--coco-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.3px;
+}
+.coco-crm .avatar-large {
+  height: 66px;
+  width: 66px;
+  font-size: 19px;
+}
+.coco-crm .main-content {
+  flex: 1;
+  min-width: 0;
+}
+.coco-crm .page-header {
+  min-height: 192px;
+  padding: 45px 54px 29px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+.coco-crm .page-header .eyebrow {
+  display: block;
+  margin-bottom: 13px;
+}
+.coco-crm .page-header h1 {
+  margin-bottom: 8px;
+}
+.coco-crm .page-header p {
+  margin: 0;
+  color: var(--coco-muted);
+  font-size: 13px;
+}
+.coco-crm .header-date {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--coco-muted);
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 10px 14px;
+  background: var(--card);
+  white-space: nowrap;
+}
+.coco-crm .page-body {
+  padding: 36px 54px 60px;
+  max-width: 1500px;
+}
+.coco-crm .section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.coco-crm .section-heading .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+}
+.coco-crm .section-heading h2 {
+  margin: 0;
+  font-size: 23px;
+}
+.coco-crm .metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.coco-crm .metric-card {
+  height: 154px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--card);
+  padding: 17px 19px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  position: relative;
+  box-shadow: var(--shadow);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.coco-crm .metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px rgba(51, 43, 36, 0.08);
+}
+.coco-crm .metric-card strong {
+  font-size: 29px;
+  line-height: 1.2;
+  margin-top: 12px;
+  font-weight: 680;
+  letter-spacing: -1px;
+}
+.coco-crm .metric-card > span:nth-of-type(2) {
+  font-size: 12px;
+  color: var(--coco-muted);
+  margin-top: 1px;
+}
+.coco-crm .metric-card > svg {
+  position: absolute;
+  bottom: 21px;
+  right: 19px;
+  color: var(--coco-muted);
+}
+.coco-crm .metric-icon {
+  height: 34px;
+  width: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+}
+.coco-crm .metric-icon.blush {
+  background: var(--rose-light);
+  color: var(--coco-muted);
+}
+.coco-crm .metric-icon.sand {
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .metric-icon.lavender {
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .metric-icon.sage {
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .home-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 19px;
+}
+.coco-crm .surface {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.coco-crm .followup-surface,
+.coco-crm .activity-surface {
+  min-height: 320px;
+}
+.coco-crm .surface-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 25px 25px 17px;
+}
+.coco-crm .surface-header .eyebrow {
+  display: block;
+  margin-bottom: 8px;
+}
+.coco-crm .surface-header h2 {
+  margin: 0;
+}
+.coco-crm .text-button {
+  border: 0;
+  background: none;
+  color: var(--cocoa);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px;
+}
+.coco-crm .followup-row,
+.coco-crm .activity-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  padding: 14px 24px;
+  text-align: left;
+  gap: 13px;
+}
+.coco-crm .followup-row:hover,
+.coco-crm .activity-row:hover,
+.coco-crm .client-row:hover,
+.coco-crm .conversation-row:hover {
+  background: var(--surface);
+}
+.coco-crm .row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+.coco-crm .row-main strong,
+.coco-crm .client-name strong,
+.coco-crm .conversation-preview strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.coco-crm .row-main small,
+.coco-crm .client-name small {
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .followup-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--coco-muted);
+  background: var(--surface);
+  border-radius: 7px;
+  padding: 7px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.coco-crm .activity-symbol {
+  width: 33px;
+  height: 33px;
+  flex: 0 0 33px;
+  background: var(--surface);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--coco-muted);
+}
+.coco-crm .activity-row > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.coco-crm .activity-row strong,
+.coco-crm .activity-row small {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coco-crm .activity-row strong {
+  font-size: 12px;
+}
+.coco-crm .activity-row small {
+  color: var(--coco-muted);
+  font-size: 11px;
+  margin-top: 5px;
+}
+.coco-crm .activity-row time {
+  color: var(--coco-muted);
+  font-size: 10px;
+}
+.coco-crm .empty-inline {
+  padding: 26px;
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .demo-banner {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 54px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-size: 11px;
+}
+.coco-crm .demo-banner a {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+}
+.coco-crm .primary {
+  border: 0;
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+  border-radius: 9px;
+  padding: 11px 15px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 5px 13px rgba(143, 96, 84, 0.13);
+}
+.coco-crm .primary:hover {
+  background: var(--espresso);
+}
+.coco-crm .wide {
+  width: 100%;
+}
+.coco-crm .toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 19px;
+}
+.coco-crm .search-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--coco-muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 13px;
+  min-width: 0;
+  width: 390px;
+  height: 41px;
+}
+.coco-crm .search-field input {
+  outline: none;
+  border: 0;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+}
+.coco-crm .search-field input::placeholder {
+  color: var(--coco-muted);
+}
+.coco-crm .count-label {
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .list-head,
+.coco-crm .client-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) 1fr 1fr 1fr;
+  align-items: center;
+  gap: 15px;
+}
+.coco-crm .list-head {
+  padding: 15px 24px;
+  color: var(--coco-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+.coco-crm .client-row {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  width: 100%;
+  padding: 15px 24px;
+  text-align: left;
+}
+.coco-crm .client-name {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.coco-crm .client-name > span:nth-child(2) {
+  min-width: 0;
+}
+.coco-crm .client-name strong,
+.coco-crm .client-name small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.coco-crm .client-name small {
+  margin-top: 5px;
+}
+.coco-crm .stage-pill {
+  display: inline-flex;
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--coco-muted);
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.coco-crm .secondary-cell {
+  font-size: 12px;
+  color: var(--coco-muted);
+}
+.coco-crm .detail-header {
+  display: block;
+  padding-top: 27px;
+}
+.coco-crm .back-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+  padding: 0;
+  font-size: 12px;
+  margin-bottom: 22px;
+}
+.coco-crm .detail-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.coco-crm .detail-title h1 {
+  font-size: 29px;
+  margin: 0 0 5px;
+}
+.coco-crm .detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+}
+.coco-crm .detail-actions button,
+.coco-crm .detail-actions a {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-size: 12px;
+}
+.coco-crm .detail-actions .primary {
+  border: 0;
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+}
+.coco-crm .detail-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(340px, 1.2fr);
+  gap: 19px;
+}
+.coco-crm .details-surface {
+  padding: 27px;
+}
+.coco-crm .details-surface h2 {
+  margin: 8px 0 20px;
+}
+.coco-crm .details-surface dl {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 18px 10px;
+  margin: 0;
+}
+.coco-crm .details-surface dt {
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .details-surface dd {
+  margin: 0;
+  font-size: 12px;
+}
+.coco-crm .notes-block {
+  border-top: 1px solid var(--line);
+  margin-top: 28px;
+  padding-top: 22px;
+}
+.coco-crm .notes-block p {
+  color: var(--text);
+  line-height: 1.6;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.coco-crm .detail-right {
+  display: flex;
+  flex-direction: column;
+  gap: 19px;
+}
+.coco-crm .mini-message {
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+}
+.coco-crm .mini-message span {
+  font-size: 11px;
+  font-weight: 700;
+}
+.coco-crm .mini-message p {
+  margin: 4px 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.coco-crm .mini-message small {
+  color: var(--coco-muted);
+  font-size: 10px;
+}
+.coco-crm .task-row {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  text-align: left;
+  color: var(--text);
+}
+.coco-crm .task-row svg {
+  color: var(--coco-muted);
+}
+.coco-crm .task-row span {
+  flex: 1;
+  font-size: 12px;
+}
+.coco-crm .task-row small {
+  color: var(--coco-muted);
+}
+.coco-crm .kanban-wrap {
+  overflow: auto;
+  padding: 31px 43px 35px;
+}
+.coco-crm .kanban {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: max-content;
+}
+.coco-crm .kanban-column {
+  width: 244px;
+  min-height: 500px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 13px;
+}
+.coco-crm .kanban-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 3px 15px;
+}
+.coco-crm .kanban-heading h2 {
+  font-size: 12px;
+  margin: 0;
+  flex: 1;
+  letter-spacing: 0;
+}
+.coco-crm .kanban-heading > span:last-child {
+  font-size: 10px;
+  color: var(--coco-muted);
+  background: var(--card);
+  border-radius: 99px;
+  padding: 3px 6px;
+}
+.coco-crm .column-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.coco-crm .kanban-column:nth-child(2) .column-dot {
+  background: var(--surface);
+}
+.coco-crm .kanban-column:nth-child(3) .column-dot {
+  background: #aeb99c;
+}
+.coco-crm .kanban-column:nth-child(4) .column-dot {
+  background: #ab9abc;
+}
+.coco-crm .kanban-column:nth-child(5) .column-dot {
+  background: #92aeba;
+}
+.coco-crm .kanban-column:nth-child(6) .column-dot {
+  background: var(--surface);
+}
+.coco-crm .kanban-column:nth-child(7) .column-dot {
+  background: #91ad98;
+}
+.coco-crm .kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.coco-crm .kanban-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 13px;
+  box-shadow: 0 3px 12px rgba(47, 40, 34, 0.025);
+}
+.coco-crm .kanban-card > button {
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+.coco-crm .kanban-card .avatar {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  font-size: 9px;
+}
+.coco-crm .kanban-card strong {
+  font-size: 12px;
+}
+.coco-crm .kanban-card p {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--coco-muted);
+  margin: 11px 0 15px;
+  min-height: 29px;
+}
+.coco-crm .kanban-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--coco-muted);
+  font-size: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.coco-crm .kanban-card select {
+  width: 100%;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 6px;
+  padding: 5px;
+  color: var(--coco-muted);
+  font-size: 10px;
+}
+.coco-crm .narrow-body {
+  max-width: 1000px;
+}
+.coco-crm .task-section {
+  margin-bottom: 29px;
+}
+.coco-crm .task-section .section-heading h2 {
+  font-size: 19px;
+}
+.coco-crm .task-section .section-heading span {
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .todo-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 23px;
+  border-top: 1px solid var(--line);
+}
+.coco-crm .todo-row:first-child {
+  border-top: 0;
+}
+.coco-crm .todo-row .check-button {
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+  padding: 0;
+  line-height: 0;
+}
+.coco-crm .todo-row > span {
+  flex: 1;
+}
+.coco-crm .todo-row strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.coco-crm .todo-row span button {
+  display: block;
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+  padding: 4px 0 0;
+  font-size: 11px;
+}
+.coco-crm .todo-row time {
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .todo-row.done strong {
+  text-decoration: line-through;
+  color: var(--coco-muted);
+}
+.coco-crm .inbox-page-header {
+  min-height: 166px;
+}
+.coco-crm .connection-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 99px;
+  padding: 9px 11px;
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .connection-pill .status-dot {
+  margin: 0;
+}
+.coco-crm .connection-pill.connected {
+  color: #6e9273;
+}
+.coco-crm .inbox-shell {
+  height: calc(100vh - 166px);
+  min-height: 550px;
+  display: grid;
+  grid-template-columns: 330px 1fr;
+}
+.coco-crm .conversation-list {
+  background: var(--card);
+  border-right: 1px solid var(--line);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.coco-crm .conversation-list .search-field {
+  width: 100%;
+  height: 37px;
+  background: var(--bg);
+  margin-bottom: 13px;
+}
+.coco-crm .conversation-scroll {
+  overflow: auto;
+}
+.coco-crm .conversation-row {
+  width: 100%;
+  border: 0;
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 9px;
+  padding: 12px 10px;
+  text-align: left;
+  position: relative;
+}
+.coco-crm .conversation-row.selected {
+  background: var(--surface);
+}
+.coco-crm .conversation-preview {
+  min-width: 0;
+  flex: 1;
+}
+.coco-crm .conversation-preview > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+}
+.coco-crm .conversation-preview small {
+  display: block;
+  color: var(--coco-muted);
+  font-size: 11px;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coco-crm .conversation-preview time {
+  font-size: 10px;
+  color: var(--coco-muted);
+  white-space: nowrap;
+}
+.coco-crm .unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--surface);
+  position: absolute;
+  right: 10px;
+  bottom: 15px;
+}
+.coco-crm .thread-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+.coco-crm .thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 26px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .thread-header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.coco-crm .thread-header strong,
+.coco-crm .thread-header small {
+  display: block;
+}
+.coco-crm .thread-header strong {
+  font-size: 12px;
+}
+.coco-crm .thread-header small {
+  color: var(--coco-muted);
+  font-size: 10px;
+  margin-top: 4px;
+}
+.coco-crm .thread-header button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .thread-messages {
+  padding: 27px 34px;
+  overflow: auto;
+  flex: 1;
+}
+.coco-crm .thread-date {
+  text-align: center;
+  color: var(--coco-muted);
+  font-size: 10px;
+  margin: 2px 0 25px;
+}
+.coco-crm .bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+.coco-crm .bubble-wrap.outgoing {
+  align-items: flex-end;
+}
+.coco-crm .bubble {
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  border-radius: 14px 14px 14px 4px;
+  padding: 12px 15px;
+  max-width: min(440px, 78%);
+  line-height: 1.55;
+  font-size: 12px;
+}
+.coco-crm .outgoing .bubble {
+  background: var(--rose-light);
+  border-color: var(--rose-light);
+  border-radius: 14px 14px 4px 14px;
+}
+.coco-crm .bubble-wrap small {
+  color: var(--coco-muted);
+  font-size: 10px;
+  margin-top: 5px;
+}
+.coco-crm .composer-area {
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  padding: 14px 27px;
+}
+.coco-crm .composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 9px;
+  background: var(--card);
+}
+.coco-crm .composer > button {
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+  padding: 8px;
+  line-height: 0;
+}
+.coco-crm .composer textarea {
+  border: 0;
+  outline: 0;
+  resize: none;
+  min-height: 37px;
+  max-height: 120px;
+  flex: 1;
+  padding: 8px 2px;
+  color: var(--text);
+  font-size: 12px;
+}
+.coco-crm .composer textarea::placeholder {
+  color: var(--coco-muted);
+}
+.coco-crm .composer .sparkle-button {
+  color: var(--cocoa);
+}
+.coco-crm .composer .send-button {
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+  border-radius: 8px;
+  padding: 10px;
+}
+.coco-crm .composer-note {
+  text-align: center;
+  font-size: 10px;
+  color: var(--coco-muted);
+  margin: 9px 0 0;
+}
+.coco-crm .draft-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  margin-bottom: 11px;
+}
+.coco-crm .draft-card > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .draft-card > div:first-child button {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+}
+.coco-crm .draft-card textarea {
+  display: block;
+  resize: vertical;
+  width: 100%;
+  min-height: 62px;
+  border: 0;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 7px 0;
+}
+.coco-crm .draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.coco-crm .draft-actions button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--coco-muted);
+  padding: 5px 8px;
+  font-size: 10px;
+}
+.coco-crm .draft-actions .draft-use {
+  background: var(--cocoa);
+  border-color: var(--cocoa);
+  color: var(--primary-foreground);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.coco-crm .empty-thread {
+  margin: auto;
+  text-align: center;
+  color: var(--coco-muted);
+}
+.coco-crm .empty-thread svg {
+  color: var(--coco-muted);
+}
+.coco-crm .empty-thread h2 {
+  color: var(--text);
+  margin: 14px 0 5px;
+}
+.coco-crm .empty-thread p {
+  font-size: 12px;
+}
+.coco-crm .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(33, 27, 24, 0.3);
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.coco-crm .modal {
+  width: min(440px, 100%);
+  background: var(--card);
+  border-radius: 16px;
+  padding: 27px;
+  position: relative;
+  box-shadow: 0 25px 80px rgba(35, 28, 23, 0.2);
+}
+.coco-crm .modal-close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  border: 0;
+  background: none;
+  color: var(--coco-muted);
+}
+.coco-crm .modal h2 {
+  font-size: 25px;
+  margin: 8px 0 21px;
+}
+.coco-crm .modal label,
+.coco-crm .auth-card label {
+  display: block;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  margin-bottom: 13px;
+}
+.coco-crm .modal input,
+.coco-crm .modal select,
+.coco-crm .auth-card input {
+  display: block;
+  width: 100%;
+  height: 41px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 11px;
+  margin-top: 7px;
+  background: var(--card);
+  outline: none;
+  color: var(--text);
+}
+.coco-crm .modal input:focus,
+.coco-crm .modal select:focus,
+.coco-crm .auth-card input:focus {
+  border-color: var(--line);
+}
+.coco-crm .modal .primary {
+  margin-top: 10px;
+}
+.coco-crm .toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 9px;
+  max-width: 370px;
+  padding: 12px 13px;
+  z-index: 30;
+  font-size: 12px;
+  box-shadow: 0 12px 34px #0002;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.coco-crm .toast.error {
+  background: var(--surface);
+}
+.coco-crm .toast button {
+  border: 0;
+  background: none;
+  color: var(--text);
+  line-height: 0;
+}
+.coco-crm .auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background:
+    radial-gradient(circle at 20% 20%, #f7eae4, transparent 30%), var(--bg);
+}
+.coco-crm .auth-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 20px 55px rgba(58, 45, 38, 0.06);
+  width: min(420px, 100%);
+  padding: 38px;
+}
+.coco-crm .brand-mark {
+  margin-bottom: 26px;
+}
+.coco-crm .auth-card .eyebrow {
+  display: block;
+  margin-bottom: 10px;
+}
+.coco-crm .auth-card h1 {
+  font-size: 29px;
+  margin-bottom: 11px;
+}
+.coco-crm .auth-card .muted {
+  margin-bottom: 25px;
+}
+.coco-crm .auth-card .oauth {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 13px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  text-align: left;
+  font-weight: 630;
+}
+.coco-crm .auth-card form > input {
+  margin: 0 0 11px;
+}
+.coco-crm .auth-card form .wide {
+  margin-top: 7px;
+}
+.coco-crm .divider {
+  text-align: center;
+  color: var(--coco-muted);
+  margin: 18px 0;
+  font-size: 11px;
+}
+.coco-crm .success-line {
+  color: #6d9b75;
+  font-size: 12px;
+  margin-top: 14px;
+}
+.coco-crm .loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--coco-muted);
+}
+.coco-crm .mobile-brand,
+.coco-crm .mobile-tabs {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .coco-crm .sidebar {
+    width: 210px;
+    flex-basis: 210px;
+  }
+  .coco-crm .page-header {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+  .coco-crm .page-body {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+  .coco-crm .demo-banner {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+  .coco-crm .metrics {
+    gap: 10px;
+  }
+  .coco-crm .home-grid {
+    grid-template-columns: 1fr;
+  }
+  .coco-crm .inbox-shell {
+    grid-template-columns: 275px 1fr;
+  }
+  .coco-crm .kanban-wrap {
+    padding-left: 24px;
+  }
+}
+.coco-crm .auth-card .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  margin: 17px 0;
+}
+.coco-crm .auth-card .checkbox-label input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--cocoa);
+}
+@media (max-width: 760px) {
+  .coco-crm .sidebar {
+    display: none;
+  }
+  .coco-crm .mobile-brand {
+    display: block;
+    height: 50px;
+    padding: 16px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    font-weight: 740;
+    font-size: 17px;
+    letter-spacing: -0.4px;
+  }
+  .coco-crm .mobile-brand span {
+    color: var(--coco-muted);
+  }
+  .coco-crm .mobile-tabs {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    z-index: 10;
+    justify-content: space-around;
+    padding: 7px 4px max(8px, env(safe-area-inset-bottom));
+  }
+  .coco-crm .mobile-tabs button {
+    border: 0;
+    background: none;
+    color: var(--coco-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    min-width: 56px;
+  }
+  .coco-crm .mobile-tabs button.active {
+    color: var(--cocoa);
+  }
+  .coco-crm .mobile-tabs small {
+    font-size: 9px;
+  }
+  .coco-crm .page-header {
+    min-height: 145px;
+    padding: 24px 20px;
+    align-items: flex-start;
+  }
+  .coco-crm .page-header h1 {
+    font-size: 30px;
+  }
+  .coco-crm .page-header .eyebrow {
+    font-size: 9px;
+    margin-bottom: 9px;
+  }
+  .coco-crm .page-header p {
+    font-size: 11px;
+  }
+  .coco-crm .header-date {
+    display: none;
+  }
+  .coco-crm .page-body {
+    padding: 23px 17px 100px;
+  }
+  .coco-crm .demo-banner {
+    padding: 9px 16px;
+    font-size: 10px;
+  }
+  .coco-crm .demo-banner a {
+    display: none;
+  }
+  .coco-crm .metrics {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 9px;
+    margin-bottom: 20px;
+  }
+  .coco-crm .metric-card {
+    height: 120px;
+    padding: 12px;
+  }
+  .coco-crm .metric-card strong {
+    font-size: 23px;
+    margin-top: 6px;
+  }
+  .coco-crm .metric-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .coco-crm .metric-icon svg {
+    width: 17px;
+  }
+  .coco-crm .metric-card > svg {
+    bottom: 15px;
+    right: 12px;
+  }
+  .coco-crm .home-grid {
+    gap: 13px;
+  }
+  .coco-crm .surface-header {
+    padding: 20px 16px 14px;
+  }
+  .coco-crm .followup-row,
+  .coco-crm .activity-row {
+    padding: 13px 16px;
+  }
+  .coco-crm .followup-action {
+    font-size: 9px;
+  }
+  .coco-crm .toolbar {
+    margin-bottom: 12px;
+  }
+  .coco-crm .search-field {
+    width: 100%;
+  }
+  .coco-crm .count-label,
+  .coco-crm .list-head {
+    display: none;
+  }
+  .coco-crm .client-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 13px;
+  }
+  .coco-crm .client-row .secondary-cell {
+    display: none;
+  }
+  .coco-crm .client-name {
+    flex: 1;
+  }
+  .coco-crm .client-name strong {
+    font-size: 12px;
+  }
+  .coco-crm .detail-header {
+    padding: 16px 20px 20px;
+  }
+  .coco-crm .detail-title h1 {
+    font-size: 24px;
+  }
+  .coco-crm .detail-actions {
+    flex-wrap: wrap;
+  }
+  .coco-crm .detail-grid {
+    display: block;
+  }
+  .coco-crm .detail-right {
+    margin-top: 14px;
+  }
+  .coco-crm .details-surface {
+    padding: 21px;
+  }
+  .coco-crm .kanban-wrap {
+    padding: 17px 16px 100px;
+  }
+  .coco-crm .kanban-column {
+    width: 222px;
+  }
+  .coco-crm .narrow-body {
+    padding-bottom: 120px;
+  }
+  .coco-crm .todo-row {
+    padding: 15px;
+  }
+  .coco-crm .todo-row time {
+    font-size: 10px;
+  }
+  .coco-crm .inbox-page-header {
+    min-height: 112px;
+    padding-bottom: 17px;
+  }
+  .coco-crm .connection-pill {
+    font-size: 0;
+    padding: 8px;
+  }
+  .coco-crm .inbox-shell {
+    height: calc(100dvh - 220px);
+    min-height: 450px;
+    grid-template-columns: 110px 1fr;
+  }
+  .coco-crm .conversation-list {
+    padding: 10px 4px;
+  }
+  .coco-crm .conversation-list .search-field {
+    display: none;
+  }
+  .coco-crm .conversation-row {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 2px;
+    gap: 4px;
+  }
+  .coco-crm .conversation-row .avatar {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+  }
+  .coco-crm .conversation-preview {
+    width: 100%;
+    text-align: center;
+  }
+  .coco-crm .conversation-preview strong {
+    font-size: 9px;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .coco-crm .conversation-preview time,
+  .coco-crm .conversation-preview small,
+  .coco-crm .unread-dot {
+    display: none;
+  }
+  .coco-crm .thread-header {
+    padding: 8px 10px;
+  }
+  .coco-crm .thread-header .avatar {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+  }
+  .coco-crm .thread-header strong {
+    font-size: 10px;
+  }
+  .coco-crm .thread-header small {
+    font-size: 8px;
+  }
+  .coco-crm .thread-header button {
+    font-size: 0;
+    padding: 7px;
+  }
+  .coco-crm .thread-messages {
+    padding: 15px 10px;
+  }
+  .coco-crm .bubble {
+    font-size: 11px;
+    max-width: 93%;
+  }
+  .coco-crm .composer-area {
+    padding: 7px;
+  }
+  .coco-crm .composer {
+    gap: 0;
+    padding: 5px;
+  }
+  .coco-crm .composer > button {
+    padding: 5px;
+  }
+  .coco-crm .composer textarea {
+    font-size: 11px;
+  }
+  .coco-crm .composer-note {
+    font-size: 8px;
+  }
+  .coco-crm .draft-actions {
+    gap: 3px;
+  }
+  .coco-crm .draft-actions button {
+    font-size: 9px;
+    padding: 4px;
+  }
+  .coco-crm .toast {
+    bottom: 78px;
+    left: 15px;
+    right: 15px;
+    max-width: none;
+  }
+}
+.coco-crm .integration-modal {
+  max-width: 540px;
+}
+.coco-crm .integration-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 17px;
+  margin-top: 16px;
+  background: var(--card);
+}
+.coco-crm .integration-card > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cocoa);
+  font-size: 15px;
+}
+.coco-crm .integration-card p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--coco-muted);
+  margin: 12px 0;
+}
+.coco-crm .integration-card small {
+  display: block;
+  color: var(--coco-muted);
+  margin-bottom: 10px;
+}
+.coco-crm .integration-card button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  padding: 9px 14px;
+  font-size: 12px;
+}
+.coco-crm .integration-card button.primary {
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+  border-color: var(--cocoa);
+}
+.coco-crm .gmail-context-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.4;
+  margin: 0 0 9px;
+}
+.coco-crm .gmail-context-toggle input {
+  margin-top: 1px;
+  accent-color: var(--cocoa);
+}
+.coco-crm .client-header-actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.coco-crm .client-header-actions > button:not(.primary) {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--cocoa);
+  padding: 10px 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.coco-crm .client-deal {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.coco-crm .client-deal:first-of-type {
+  margin-top: 12px;
+}
+.coco-crm .client-deal span,
+.coco-crm .client-deal small {
+  color: var(--coco-muted);
+}
+.coco-crm .gmail-import-modal {
+  width: min(840px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+}
+.coco-crm .gmail-import-modal > p {
+  color: var(--coco-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.coco-crm .gmail-import-actions,
+.coco-crm .gmail-import-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 17px 0;
+}
+.coco-crm .gmail-import-actions span,
+.coco-crm .gmail-import-footer span {
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .gmail-import-footer {
+  justify-content: space-between;
+}
+.coco-crm .gmail-import-status {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 10px;
+}
+.coco-crm .gmail-import-list {
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.coco-crm .gmail-import-row {
+  padding: 15px;
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .gmail-import-row:last-child {
+  border: 0;
+}
+.coco-crm .gmail-import-select {
+  display: flex !important;
+  align-items: center;
+  gap: 9px;
+  margin: 0 !important;
+  font-size: 13px !important;
+}
+.coco-crm .gmail-import-select input {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  accent-color: var(--cocoa);
+}
+.coco-crm .gmail-import-row > small {
+  display: block;
+  margin: 5px 0 0 25px;
+  color: var(--coco-muted);
+}
+.coco-crm .gmail-import-row > p {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .gmail-import-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.coco-crm .gmail-import-fields label {
+  margin: 0;
+  font-size: 10px;
+}
+.coco-crm .gmail-import-fields input,
+.coco-crm .gmail-import-fields select {
+  height: 36px;
+  font-size: 12px;
+}
+.coco-crm .gmail-import-actions > button:not(.primary) {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .coco-crm .client-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .coco-crm .gmail-import-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .coco-crm .mobile-brand {
+    display: flex;
+    align-items: center;
+    padding-top: 0;
+    padding-bottom: 0;
+    gap: 4px;
+  }
+  .coco-crm .mobile-brand button {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--cocoa);
+    padding: 8px;
+  }
+}
+
+/* Muse-inspired desktop rail. The workspace remains a data scope, not a switch in the chrome. */
+@media (min-width: 761px) {
+  .coco-crm .sidebar {
+    width: 82px;
+    flex: 0 0 82px;
+    padding: 25px 12px 17px;
+    align-items: center;
+    background: var(--espresso);
+    border-right: 1px solid var(--line);
+    z-index: 11;
+    overflow: visible;
+  }
+  .coco-crm .sidebar nav {
+    width: 100%;
+    align-items: center;
+    gap: 11px;
+    margin-top: clamp(40px, 10vh, 112px);
+  }
+  .coco-crm .sidebar-bottom {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding-top: 15px;
+    border-top: 1px solid var(--line);
+  }
+  .coco-crm .rail-button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    flex: 0 0 56px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 18px;
+    background: transparent;
+    color: var(--coco-muted);
+    isolation: isolate;
+    transition:
+      color 0.22s ease,
+      background 0.22s ease,
+      border-color 0.22s ease,
+      transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 0.28s ease;
+  }
+  .coco-crm .rail-button:hover,
+  .coco-crm .rail-button:focus-visible {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--line);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 22px #0003;
+  }
+  .coco-crm .rail-button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+  }
+  .coco-crm .rail-button.active {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--line);
+  }
+  .coco-crm .rail-button.active::before {
+    content: "";
+    position: absolute;
+    left: -13px;
+    width: 3px;
+    height: 24px;
+    border-radius: 0 3px 3px 0;
+    background: var(--rose);
+    box-shadow: 0 0 12px var(--rose) 70;
+  }
+  .coco-crm .rail-button > svg {
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .coco-crm .rail-button:hover > svg,
+  .coco-crm .rail-button:focus-visible > svg {
+    transform: scale(1.13) rotate(-5deg);
+  }
+  .coco-crm .rail-button:active {
+    transform: scale(0.94);
+  }
+  .coco-crm .rail-brand {
+    margin-bottom: 0;
+  }
+  .coco-crm .rail-brand .logo-symbol {
+    width: 43px;
+    height: 43px;
+    border-radius: 15px;
+    background: linear-gradient(145deg, #b98275, #754c43);
+    box-shadow: 0 5px 14px #0004;
+    transition:
+      transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 0.3s ease;
+  }
+  .coco-crm .rail-brand:hover .logo-symbol,
+  .coco-crm .rail-brand:focus-visible .logo-symbol {
+    transform: rotate(-8deg) scale(1.07);
+    box-shadow: 0 9px 24px #c9958855;
+  }
+  .coco-crm .rail-connection,
+  .coco-crm .rail-notification {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--espresso);
+    border-radius: 50%;
+    background: var(--surface);
+  }
+  .coco-crm .rail-connection.online {
+    background: #87c59a;
+    box-shadow: 0 0 8px #87c59a80;
+  }
+  .coco-crm .rail-notification {
+    background: #4c9fff;
+    box-shadow: 0 0 10px #4c9fff80;
+    animation: rail-pulse 2.8s ease-in-out infinite;
+  }
+  .coco-crm .rail-tooltip {
+    position: absolute;
+    left: calc(100% + 14px);
+    top: 50%;
+    z-index: 15;
+    width: max-content;
+    max-width: 230px;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 10px 25px #0004;
+    font-size: 12px;
+    font-weight: 560;
+    line-height: 1.2;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translate(-6px, -50%) scale(0.96);
+    transition:
+      opacity 0.18s ease,
+      visibility 0.18s ease,
+      transform 0.23s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .coco-crm .rail-button:hover .rail-tooltip,
+  .coco-crm .rail-button:focus-visible .rail-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(0, -50%) scale(1);
+  }
+  .coco-crm .rail-profile .avatar {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+    background: var(--surface);
+    color: var(--text);
+  }
+}
+@keyframes rail-pulse {
+  50% {
+    box-shadow: 0 0 0 5px #4c9fff24;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coco-crm .rail-button,
+  .coco-crm .rail-button > svg,
+  .coco-crm .rail-brand .logo-symbol,
+  .coco-crm .rail-tooltip {
+    transition: none !important;
+  }
+  .coco-crm .rail-notification {
+    animation: none !important;
+  }
+}
+
+/* Warm neutral surfaces with blush reserved for small brand moments. */
+.coco-crm .eyebrow {
+  color: var(--cocoa);
+}
+.coco-crm .rose-dot {
+  color: var(--rose);
+}
+.coco-crm .metric-icon.blush {
+  color: var(--cocoa);
+}
+.coco-crm .metric-icon.sand {
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .metric-icon.lavender {
+  background: var(--surface);
+  color: var(--cocoa);
+}
+.coco-crm .metric-icon.sage {
+  background: var(--surface);
+  color: var(--cocoa);
+}
+.coco-crm .followup-action,
+.coco-crm .activity-symbol,
+.coco-crm .stage-pill {
+  background: var(--surface);
+  color: var(--cocoa);
+}
+.coco-crm .draft-card {
+  background: var(--rose-light);
+  border-color: var(--line);
+}
+.coco-crm .draft-card > div:first-child {
+  color: var(--cocoa);
+}
+.coco-crm .composer .sparkle-button {
+  color: var(--cocoa);
+  background: var(--rose-light);
+  border-radius: 7px;
+}
+.coco-crm .auth-shell {
+  background:
+    radial-gradient(circle at 18% 18%, var(--rose-light), transparent 31%),
+    var(--bg);
+}
+.coco-crm .auth-card .auth-switch,
+.coco-crm .auth-card .auth-link-form button {
+  display: block;
+  margin: 15px auto 0;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--cocoa);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+.coco-crm .auth-card .auth-hint {
+  margin: -6px 0 13px;
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .auth-card .auth-link-form button {
+  margin-top: 8px;
+  font-weight: 500;
+  text-decoration: underline;
+}
+.coco-crm .auth-card .auth-link-form button:disabled {
+  opacity: 0.5;
+}
+.coco-crm .auth-card .checkbox-label input,
+.coco-crm .gmail-context-toggle input {
+  accent-color: var(--cocoa);
+}
+@media (max-width: 760px) {
+  .coco-crm .mobile-brand span,
+  .coco-crm .mobile-tabs button.active {
+    color: var(--cocoa);
+  }
+}
+
+/* Dot lives above the CRM without taking away workspace navigation. */
+.coco-crm .dot-launcher {
+  position: fixed;
+  right: 27px;
+  bottom: 27px;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 58px;
+  padding: 7px 17px 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--espresso);
+  color: var(--primary-foreground);
+  box-shadow: 0 13px 36px #352b2740;
+  font-size: 13px;
+  font-weight: 710;
+  transition:
+    transform 0.24s ease,
+    box-shadow 0.24s ease;
+}
+.coco-crm .dot-launcher:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 42px #352b2755;
+}
+.coco-crm .dot-launcher:focus-visible,
+.coco-crm .dot-panel button:focus-visible,
+.coco-crm .dot-panel input:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 3px;
+}
+.coco-crm .dot-launcher.open {
+  width: 52px;
+  height: 52px;
+  padding: 8px;
+  justify-content: center;
+}
+.coco-crm .dot-mark {
+  display: inline-block;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 210deg,
+    #8c6d62,
+    #d8b5aa,
+    #f3e3de,
+    #b78276,
+    #8c6d62
+  );
+  box-shadow:
+    inset 0 0 0 1px #fff3,
+    0 4px 14px #0003;
+  animation: dot-breathe 3.8s ease-in-out infinite;
+}
+.coco-crm .dot-mark::after {
+  content: "";
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: var(--espresso);
+}
+.coco-crm .dot-mark-small {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+}
+.coco-crm .dot-mark-small::after {
+  background: var(--card);
+}
+.coco-crm .dot-mark-large {
+  width: 82px;
+  height: 82px;
+  flex-basis: 82px;
+  box-shadow: 0 15px 30px #8c6d6230;
+}
+.coco-crm .dot-mark-large::after {
+  background: var(--bg);
+}
+.coco-crm .dot-panel {
+  position: fixed;
+  right: 27px;
+  bottom: 95px;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  width: min(430px, calc(100vw - 35px));
+  height: min(720px, calc(100dvh - 122px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: 0 24px 80px #352b2738;
+  animation: dot-enter 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.coco-crm .dot-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .dot-header strong,
+.coco-crm .dot-header small {
+  display: block;
+}
+.coco-crm .dot-header strong {
+  font-size: 15px;
+  letter-spacing: -0.3px;
+}
+.coco-crm .dot-header small {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--coco-muted);
+}
+.coco-crm .dot-header button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--coco-muted);
+  line-height: 0;
+  padding: 7px;
+}
+.coco-crm .dot-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .dot-tabs button {
+  position: relative;
+  border: 0;
+  background: transparent;
+  color: var(--coco-muted);
+  padding: 13px 4px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.coco-crm .dot-tabs button.active {
+  color: var(--espresso);
+}
+.coco-crm .dot-tabs button.active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 3px;
+  background: var(--rose);
+}
+.coco-crm .dot-messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.coco-crm .dot-welcome {
+  margin: auto 0;
+  text-align: center;
+}
+.coco-crm .dot-welcome .dot-mark-large {
+  margin: 0 auto 18px;
+}
+.coco-crm .dot-welcome h2,
+.coco-crm .dot-connections-intro h2 {
+  margin: 0 0 8px;
+  font-size: 21px;
+  letter-spacing: -0.7px;
+}
+.coco-crm .dot-welcome p,
+.coco-crm .dot-connections-intro p {
+  color: var(--coco-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 295px;
+  margin: 0 auto;
+}
+.coco-crm .dot-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 25px;
+}
+.coco-crm .dot-suggestions button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--espresso);
+  text-align: left;
+  font-size: 12px;
+}
+.coco-crm .dot-suggestions button:hover {
+  border-color: var(--line);
+  background: var(--rose-light);
+}
+.coco-crm .dot-turn {
+  max-width: 91%;
+  padding: 11px 13px;
+  border-radius: 14px;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.coco-crm .dot-turn.user {
+  align-self: flex-end;
+  background: var(--espresso);
+  color: var(--primary-foreground);
+  border-bottom-right-radius: 4px;
+}
+.coco-crm .dot-turn.assistant {
+  align-self: flex-start;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+.coco-crm .dot-thinking {
+  margin: 0;
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .dot-thinking-dots {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--rose);
+  animation: dot-breathe 1.1s ease-in-out infinite;
+}
+.coco-crm .dot-composer {
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.coco-crm .dot-source-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+}
+.coco-crm .dot-source-picker legend {
+  margin-bottom: 6px;
+  color: var(--coco-muted);
+  font-size: 10px;
+}
+.coco-crm .dot-source-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 10px;
+  cursor: pointer;
+}
+.coco-crm .dot-composer .dot-source-picker input {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  accent-color: var(--cocoa);
+}
+.coco-crm .dot-composer > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 5px 5px 5px 13px;
+}
+.coco-crm .dot-composer input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.coco-crm .dot-composer input:focus-visible {
+  outline: 0;
+}
+.coco-crm .dot-composer button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--cocoa);
+  color: var(--primary-foreground);
+}
+.coco-crm .dot-composer small {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  color: var(--coco-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.coco-crm .dot-error {
+  margin: 0 0 9px;
+  color: var(--destructive);
+  font-size: 11px;
+}
+.coco-crm .dot-connections {
+  overflow: auto;
+  padding: 24px 20px 20px;
+}
+.coco-crm .dot-connections-intro {
+  text-align: center;
+}
+.coco-crm .dot-connections-intro .dot-mark-large {
+  margin: 0 auto 19px;
+}
+.coco-crm .dot-connection-list {
+  margin-top: 25px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.coco-crm .dot-connection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 65px;
+  padding: 7px;
+}
+.coco-crm .dot-service-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--cocoa);
+}
+.coco-crm .dot-connection > div {
+  flex: 1;
+  min-width: 0;
+}
+.coco-crm .dot-connection strong,
+.coco-crm .dot-connection small {
+  display: block;
+}
+.coco-crm .dot-connection strong {
+  font-size: 12px;
+}
+.coco-crm .dot-connection small {
+  margin-top: 3px;
+  color: var(--coco-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.coco-crm .dot-connection-state {
+  flex: 0 0 auto;
+  max-width: 91px;
+  color: var(--cocoa);
+  font-size: 10px;
+  text-align: right;
+}
+.coco-crm .dot-connection-note {
+  margin: 16px 2px;
+  color: var(--coco-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.coco-crm .dot-connect-button {
+  width: 100%;
+  min-height: 43px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--espresso);
+  color: var(--primary-foreground);
+  font-size: 12px;
+  font-weight: 680;
+}
+.coco-crm .dot-connect-button.secondary {
+  background: var(--surface);
+  color: var(--espresso);
+}
+.coco-crm .dot-connect-button + .dot-connect-button {
+  margin-top: 8px;
+}
+.coco-crm .dot-connections {
+  display: flex;
+  flex-direction: column;
+}
+.coco-crm .dot-connections-intro .dot-mark-large {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 13px;
+}
+.coco-crm .dot-connections-intro h2 {
+  font-size: 19px;
+}
+.coco-crm .dot-connection-list {
+  margin-top: 18px;
+}
+.coco-crm .dot-connection {
+  min-height: 57px;
+}
+.coco-crm .dot-connection-note {
+  margin: 12px 2px;
+}
+.coco-crm .dot-google-feedback {
+  margin: 8px 0 12px;
+  color: var(--cocoa);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: center;
+}
+.coco-crm .dot-google-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #1a1513aa;
+  backdrop-filter: blur(7px);
+}
+.coco-crm .dot-google-modal {
+  position: relative;
+  width: min(490px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 35px 38px 26px;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background:
+    var(--card);
+  color: var(--text);
+  box-shadow: 0 28px 90px #0008;
+  text-align: center;
+  animation: dot-enter 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.coco-crm .dot-google-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--coco-muted);
+}
+.coco-crm .dot-google-brands {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin: 8px auto 25px;
+}
+.coco-crm .dot-google-brands .dot-mark {
+  width: 57px;
+  height: 57px;
+  flex-basis: 57px;
+}
+.coco-crm .dot-google-brands .dot-mark::after {
+  background: var(--surface);
+}
+.coco-crm .dot-google-dots {
+  color: var(--coco-muted);
+  font-size: 22px;
+  letter-spacing: 4px;
+}
+.coco-crm .dot-google-g {
+  display: grid;
+  place-items: center;
+  width: 57px;
+  height: 57px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  font-family: Arial, sans-serif;
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1;
+  background-image: linear-gradient(
+    100deg,
+    #4285f4 5%,
+    #ea4335 36%,
+    #fbbc05 62%,
+    #34a853 84%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.coco-crm .dot-google-modal h2 {
+  margin: 0 0 7px;
+  font-size: 25px;
+  letter-spacing: -0.9px;
+}
+.coco-crm .dot-google-modal > p {
+  color: var(--coco-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.coco-crm .dot-google-options {
+  margin: 25px 0 20px;
+}
+.coco-crm .dot-google-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 67px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  cursor: pointer;
+}
+.coco-crm .dot-google-option:last-child {
+  border-bottom: 0;
+}
+.coco-crm .dot-google-option .dot-service-icon {
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .dot-google-option > span:nth-child(2) {
+  flex: 1;
+}
+.coco-crm .dot-google-option strong,
+.coco-crm .dot-google-option small {
+  display: block;
+}
+.coco-crm .dot-google-option strong {
+  font-size: 13px;
+}
+.coco-crm .dot-google-option small {
+  margin-top: 4px;
+  color: var(--coco-muted);
+  font-size: 10px;
+}
+.coco-crm .dot-google-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.coco-crm .dot-google-switch {
+  position: relative;
+  width: 39px;
+  height: 23px;
+  flex: 0 0 39px;
+  border-radius: 99px;
+  background: var(--surface);
+  transition: background 0.2s ease;
+}
+.coco-crm .dot-google-switch::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 4px #0003;
+  transition: transform 0.2s ease;
+}
+.coco-crm .dot-google-option input:checked + .dot-google-switch {
+  background: var(--rose);
+}
+.coco-crm .dot-google-option input:checked + .dot-google-switch::after {
+  transform: translateX(16px);
+}
+.coco-crm .dot-google-option input:focus-visible + .dot-google-switch {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.coco-crm .dot-google-continue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--espresso);
+  font-size: 13px;
+  font-weight: 700;
+}
+.coco-crm .dot-google-continue:disabled {
+  opacity: 0.48;
+}
+.coco-crm .dot-google-skip {
+  margin-top: 13px;
+  border: 0;
+  background: transparent;
+  color: var(--coco-muted);
+  font-size: 11px;
+}
+.coco-crm .billing-card .billing-price {
+  margin: 14px 0 4px;
+  color: var(--espresso);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.7px;
+}
+.coco-crm .billing-price span {
+  color: var(--coco-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.coco-crm .billing-card button + button {
+  margin-left: 8px;
+}
+.coco-crm .billing-card .billing-error {
+  color: var(--destructive);
+}
+@keyframes dot-breathe {
+  50% {
+    transform: scale(1.06);
+    filter: saturate(1.12);
+  }
+}
+@keyframes dot-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (max-width: 760px) {
+  .coco-crm .dot-launcher {
+    right: 15px;
+    bottom: 82px;
+    height: 52px;
+    padding-right: 12px;
+  }
+  .coco-crm .dot-launcher.open {
+    bottom: 80px;
+  }
+  .coco-crm .dot-launcher .dot-mark {
+    width: 35px;
+    height: 35px;
+    flex-basis: 35px;
+  }
+  .coco-crm .dot-panel {
+    right: 10px;
+    left: 10px;
+    width: auto;
+    bottom: 144px;
+    height: min(630px, calc(100dvh - 190px));
+  }
+  .coco-crm .dot-google-modal {
+    padding: 27px 20px 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coco-crm .dot-mark,
+  .coco-crm .dot-thinking-dots,
+  .coco-crm .dot-panel {
+    animation: none !important;
+  }
+  .coco-crm .dot-launcher {
+    transition: none !important;
+  }
+}
+
+/* Match the native KimiCoco screens across web sizes. */
+.coco-crm {
+  --rose: var(--primary);
+  --rose-light: var(--secondary);
+  --text: var(--foreground);
+  --coco-muted: var(--muted-foreground);
+  --line: var(--border);
+  --shadow: none;
+}
+.coco-crm {
+  font-size: 14px;
+}
+.coco-crm .app-shell,
+.coco-crm .main-content {
+  background: var(--bg);
+}
+.coco-crm .main-content {
+  max-width: none;
+}
+.coco-crm .page-header {
+  min-height: 0;
+  padding: 39px 34px 21px;
+  background: transparent;
+  border: 0;
+  align-items: flex-start;
+}
+.coco-crm .page-header h1 {
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -0.9px;
+}
+.coco-crm .page-header p {
+  font-size: 14px;
+  color: var(--coco-muted);
+}
+.coco-crm .page-header .eyebrow {
+  margin-bottom: 7px;
+  color: var(--rose);
+}
+.coco-crm .page-body {
+  max-width: 950px;
+  padding: 12px 34px 65px;
+}
+.coco-crm .native-home-body {
+  max-width: 950px;
+}
+.coco-crm .metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 30px;
+}
+.coco-crm .metric-card {
+  height: auto;
+  min-height: 142px;
+  padding: 17px 18px;
+  border: 0;
+  border-radius: 14px;
+  box-shadow: none;
+  gap: 10px;
+}
+.coco-crm .metric-card > svg {
+  position: static;
+  color: var(--rose);
+}
+.coco-crm .metric-card strong {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.1;
+  font-weight: 650;
+}
+.coco-crm .metric-card span {
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .metric-card:hover {
+  box-shadow: none;
+  background: var(--surface);
+}
+.coco-crm .native-followups h2 {
+  margin: 0 0 16px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
+}
+.coco-crm .native-client-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 13px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--card);
+  text-align: left;
+}
+.coco-crm .native-client-row:hover {
+  background: var(--surface);
+}
+.coco-crm .native-client-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.coco-crm .native-client-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+.coco-crm .native-client-copy small,
+.coco-crm .native-client-row time {
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .native-client-row time {
+  white-space: nowrap;
+}
+.coco-crm .native-empty {
+  color: var(--coco-muted);
+}
+.coco-crm .avatar {
+  background: var(--rose-light);
+  color: var(--rose);
+}
+.coco-crm .surface {
+  border: 0;
+  border-radius: 13px;
+  box-shadow: none;
+}
+.coco-crm .toolbar {
+  margin-bottom: 14px;
+}
+.coco-crm .search-field {
+  height: 43px;
+  border-radius: 10px;
+}
+.coco-crm .client-list {
+  background: transparent;
+}
+.coco-crm .list-head {
+  display: none;
+}
+.coco-crm .client-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 9px;
+  padding: 13px;
+  border: 0;
+  border-radius: 12px;
+}
+.coco-crm .client-row > span:nth-child(2) {
+  margin-left: auto;
+}
+.coco-crm .client-row .secondary-cell {
+  display: none;
+}
+.coco-crm .client-name strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.coco-crm .client-name small {
+  color: var(--coco-muted);
+}
+.coco-crm .client-followup-date {
+  margin-left: auto;
+  color: var(--coco-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.coco-crm .stage-pill {
+  background: var(--rose-light);
+  color: var(--rose);
+}
+.coco-crm .detail-grid {
+  gap: 12px;
+}
+.coco-crm .details-surface {
+  padding: 22px;
+}
+.coco-crm .detail-actions button,
+.coco-crm .detail-actions a,
+.coco-crm .client-header-actions > button:not(.primary) {
+  border-radius: 9px;
+}
+.coco-crm .kanban-wrap {
+  padding: 10px 34px 32px;
+}
+.coco-crm .kanban-column {
+  width: 220px;
+  min-height: 420px;
+  background: var(--surface);
+  border: 0;
+  border-radius: 13px;
+}
+.coco-crm .kanban-heading h2 {
+  font-size: 14px;
+}
+.coco-crm .kanban-card {
+  border: 0;
+  box-shadow: none;
+}
+.coco-crm .task-section .section-heading h2 {
+  font-size: 17px;
+}
+.coco-crm .task-section .surface {
+  overflow: visible;
+  background: transparent;
+}
+.coco-crm .todo-row {
+  margin-bottom: 8px;
+  padding: 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+}
+.coco-crm .inbox-shell {
+  height: calc(100dvh - 165px);
+  min-height: 480px;
+  grid-template-columns: 300px 1fr;
+  padding: 0 34px 34px;
+  gap: 10px;
+}
+.coco-crm .conversation-list,
+.coco-crm .thread-panel {
+  border: 0;
+  border-radius: 12px;
+  background: var(--card);
+}
+.coco-crm .conversation-row {
+  border-radius: 10px;
+}
+.coco-crm .thread-messages {
+  background: var(--bg);
+}
+.coco-crm .bubble {
+  border: 0;
+  box-shadow: none;
+}
+.coco-crm .outgoing .bubble {
+  background: var(--surface);
+}
+.coco-crm .thread-back {
+  display: none !important;
+}
+.coco-crm .native-mobile-header {
+  display: none;
+}
+.coco-crm .auth-shell {
+  background: var(--bg);
+}
+.coco-crm .auth-card {
+  width: min(390px, 100%);
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+}
+.coco-crm .auth-card .brand-mark {
+  width: 74px;
+  height: 74px;
+  margin: 0 auto 24px;
+  border-radius: 20px;
+  background: var(--rose);
+  font-size: 34px;
+}
+.coco-crm .auth-card h1 {
+  font-size: 29px;
+  letter-spacing: -0.7px;
+}
+.coco-crm .auth-card form {
+  text-align: left;
+}
+.coco-crm .auth-card form .wide {
+  min-height: 42px;
+  background: var(--rose);
+}
+.coco-crm .auth-card input {
+  min-height: 43px;
+}
+.coco-crm .auth-card .eyebrow {
+  color: var(--rose);
+}
+.coco-crm .auth-card .muted {
+  color: var(--cocoa);
+}
+
+@media (min-width: 761px) {
+  .coco-crm .sidebar {
+    width: 232px;
+    flex: 0 0 232px;
+    padding: 24px 13px;
+    align-items: stretch;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+  }
+  .coco-crm .sidebar nav {
+    width: 100%;
+    align-items: stretch;
+    gap: 3px;
+    margin-top: 35px;
+  }
+  .coco-crm .rail-button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    height: 44px;
+    flex-basis: auto;
+    gap: 13px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 9px;
+    color: var(--text);
+  }
+  .coco-crm .rail-button:hover,
+  .coco-crm .rail-button:focus-visible {
+    background: var(--surface);
+    border-color: transparent;
+    color: var(--text);
+    transform: none;
+    box-shadow: none;
+  }
+  .coco-crm .rail-button.active {
+    background: var(--surface);
+    border: 0;
+    color: var(--coco-muted);
+  }
+  .coco-crm .rail-button.active::before {
+    display: none;
+  }
+  .coco-crm .rail-brand {
+    height: 52px;
+    padding-left: 7px;
+  }
+  .coco-crm .rail-brand .logo-symbol {
+    width: 40px;
+    height: 40px;
+    background: var(--rose);
+    border-radius: 12px;
+    box-shadow: none;
+  }
+  .coco-crm .rail-brand-name {
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .coco-crm .rail-nav-label {
+    font-size: 14px;
+    font-weight: 560;
+  }
+  .coco-crm .rail-connection {
+    display: none;
+  }
+  .coco-crm .sidebar-bottom {
+    align-items: stretch;
+    gap: 4px;
+    border-color: var(--line);
+  }
+  .coco-crm .rail-tooltip {
+    display: none;
+  }
+  .coco-crm .rail-profile .avatar {
+    background: var(--rose-light);
+    color: var(--rose);
+  }
+  .coco-crm .rail-profile::after {
+    content: "Account";
+    color: var(--text);
+    font-size: 14px;
+  }
+  .coco-crm .sidebar-bottom > .rail-button:first-child::after {
+    content: "Settings";
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .coco-crm .app-shell {
+    display: block;
+  }
+  .coco-crm .main-content {
+    width: 100%;
+  }
+  .coco-crm .native-mobile-header {
+    display: block;
+    padding: max(12px, env(safe-area-inset-top)) 20px 0;
+    background: var(--bg);
+  }
+  .coco-crm .native-mobile-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 21px;
+    height: 40px;
+    color: var(--rose);
+  }
+  .coco-crm .native-mobile-toolbar > span {
+    flex: 1;
+  }
+  .coco-crm .native-mobile-toolbar button {
+    display: grid;
+    place-items: center;
+    padding: 4px;
+    border: 0;
+    background: none;
+    color: var(--rose);
+  }
+  .coco-crm .native-mobile-header h1 {
+    margin: 9px 0 0;
+    font-size: 34px;
+    letter-spacing: -0.8px;
+    font-weight: 700;
+  }
+  .coco-crm .mobile-brand {
+    display: none;
+  }
+  .coco-crm .mobile-tabs {
+    min-height: 69px;
+    padding: 8px 3px max(8px, env(safe-area-inset-bottom));
+    border-color: var(--line);
+    background: var(--surface);
+  }
+  .coco-crm .mobile-tabs button {
+    min-width: 55px;
+    gap: 3px;
+    color: var(--coco-muted);
+  }
+  .coco-crm .mobile-tabs button.active {
+    color: var(--rose);
+  }
+  .coco-crm .mobile-tabs small {
+    font-size: 10px;
+  }
+  .coco-crm .page-header {
+    min-height: 0;
+    padding: 25px 24px 15px;
+    border: 0;
+  }
+  .coco-crm .page-header:not(.home-header) {
+    padding-top: 10px;
+  }
+  .coco-crm .page-header:not(.home-header) > div:first-child {
+    display: none;
+  }
+  .coco-crm
+    .page-header:not(.home-header):not(:has(.client-header-actions)):not(
+      .detail-header
+    ) {
+    display: none;
+  }
+  .coco-crm .home-header h1 {
+    font-size: 32px;
+    letter-spacing: -0.7px;
+  }
+  .coco-crm .home-header .eyebrow {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+  .coco-crm .home-header p {
+    font-size: 14px;
+  }
+  .coco-crm .page-body {
+    padding: 9px 24px 102px;
+  }
+  .coco-crm .metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 9px;
+    margin-bottom: 26px;
+  }
+  .coco-crm .metric-card {
+    min-height: 115px;
+    padding: 13px 11px;
+    gap: 8px;
+  }
+  .coco-crm .metric-card strong {
+    font-size: 25px;
+  }
+  .coco-crm .metric-card span {
+    font-size: 11px;
+  }
+  .coco-crm .native-followups h2 {
+    font-size: 20px;
+    margin-bottom: 16px;
+  }
+  .coco-crm .native-client-row {
+    padding: 12px;
+  }
+  .coco-crm .native-client-copy strong {
+    font-size: 13px;
+  }
+  .coco-crm .native-client-copy small,
+  .coco-crm .native-client-row time {
+    font-size: 11px;
+  }
+  .coco-crm .client-header-actions {
+    width: 100%;
+  }
+  .coco-crm .client-header-actions .primary,
+  .coco-crm .page-header:not(.home-header) > .primary {
+    display: none;
+  }
+  .coco-crm .toolbar {
+    margin-bottom: 13px;
+  }
+  .coco-crm .client-row {
+    justify-content: flex-start;
+  }
+  .coco-crm .client-row .stage-pill {
+    display: none;
+  }
+  .coco-crm .client-name small {
+    color: var(--coco-muted);
+  }
+  .coco-crm .detail-header {
+    display: block !important;
+  }
+  .coco-crm .detail-header .detail-title {
+    display: flex !important;
+  }
+  .coco-crm .detail-title h1 {
+    font-size: 25px;
+  }
+  .coco-crm .detail-grid {
+    display: block;
+  }
+  .coco-crm .kanban-wrap {
+    padding: 16px 20px 100px;
+  }
+  .coco-crm .kanban-column {
+    width: 205px;
+  }
+  .coco-crm .inbox-shell {
+    display: block;
+    height: calc(100dvh - 182px);
+    min-height: 420px;
+    padding: 12px 17px 88px;
+  }
+  .coco-crm .conversation-list {
+    height: 100%;
+    background: transparent;
+    padding: 0;
+  }
+  .coco-crm .conversation-list .search-field {
+    display: flex;
+  }
+  .coco-crm .conversation-row {
+    flex-direction: row;
+    gap: 11px;
+    margin-bottom: 8px;
+    padding: 12px 8px;
+    background: var(--card);
+    text-align: left;
+  }
+  .coco-crm .conversation-row .avatar {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+  }
+  .coco-crm .conversation-preview {
+    text-align: left;
+  }
+  .coco-crm .conversation-preview strong {
+    font-size: 13px;
+  }
+  .coco-crm .conversation-preview small,
+  .coco-crm .conversation-preview time {
+    display: block;
+  }
+  .coco-crm .conversation-preview small {
+    font-size: 11px;
+  }
+  .coco-crm .unread-dot {
+    display: block;
+  }
+  .coco-crm .thread-panel {
+    display: none;
+  }
+  .coco-crm .inbox-shell.show-thread .conversation-list {
+    display: none;
+  }
+  .coco-crm .inbox-shell.show-thread .thread-panel {
+    display: flex;
+    height: 100%;
+  }
+  .coco-crm .thread-back {
+    display: grid !important;
+    place-items: center;
+    flex: 0 0 30px;
+    padding: 3px !important;
+  }
+  .coco-crm .thread-header {
+    padding: 11px;
+  }
+  .coco-crm .thread-header strong {
+    font-size: 13px;
+  }
+  .coco-crm .thread-header small {
+    font-size: 10px;
+  }
+  .coco-crm .thread-messages {
+    padding: 15px;
+  }
+  .coco-crm .composer-area {
+    padding: 10px;
+  }
+  .coco-crm .composer textarea {
+    font-size: 13px;
+  }
+  .coco-crm .bubble {
+    font-size: 12px;
+  }
+  .coco-crm .dot-launcher {
+    display: none;
+  }
+  .coco-crm .dot-panel {
+    left: 9px;
+    right: 9px;
+    bottom: calc(75px + env(safe-area-inset-bottom));
+    height: min(680px, calc(100dvh - 155px));
+  }
+  .coco-crm .modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+  .coco-crm .modal {
+    width: 100%;
+    max-height: 90dvh;
+    overflow: auto;
+    padding: 28px 24px calc(30px + env(safe-area-inset-bottom));
+    border-radius: 20px 20px 0 0;
+  }
+}
+
+/* Mac app navigation and account screens. */
+.coco-crm .mac-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 53px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.coco-crm .mac-titlebar strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+.coco-crm .mac-titlebar-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.coco-crm .mac-titlebar button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rose);
+}
+.coco-crm .mac-titlebar button:hover,
+.coco-crm .mac-titlebar button:focus-visible {
+  background: var(--surface);
+}
+.coco-crm .mac-sidebar-toggle,
+.coco-crm .sidebar-scrim {
+  display: none !important;
+}
+.coco-crm .page-header {
+  padding: 24px 24px 12px;
+}
+.coco-crm .page-body {
+  padding: 10px 24px 54px;
+}
+.coco-crm .page-header:not(.home-header):not(.detail-header) {
+  justify-content: flex-end;
+  padding-bottom: 4px;
+}
+.coco-crm .page-header:not(.home-header):not(.detail-header) > div:first-child {
+  display: none;
+}
+.coco-crm
+  .page-header:not(.home-header):not(.detail-header):has(+ .kanban-wrap) {
+  display: none;
+}
+.coco-crm
+  .page-header:not(.home-header):not(.detail-header):has(
+    + .page-body.narrow-body
+  ) {
+  display: none;
+}
+.coco-crm .home-header h1 {
+  margin-bottom: 7px;
+}
+.coco-crm .detail-grid {
+  display: block;
+  max-width: 748px;
+}
+.coco-crm .detail-right {
+  margin-top: 12px;
+  gap: 12px;
+}
+.coco-crm .inbox-shell {
+  display: block;
+  height: calc(100dvh - 94px);
+  min-height: 440px;
+  padding: 10px 24px 28px;
+}
+.coco-crm .inbox-shell .conversation-list {
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+.coco-crm .conversation-list .search-field {
+  max-width: 520px;
+}
+.coco-crm .conversation-scroll {
+  max-width: 900px;
+}
+.coco-crm .conversation-row {
+  margin-bottom: 6px;
+  padding: 13px;
+  background: var(--card);
+}
+.coco-crm .inbox-shell .thread-panel {
+  display: none;
+  height: 100%;
+}
+.coco-crm .inbox-shell.show-thread .conversation-list {
+  display: none;
+}
+.coco-crm .inbox-shell.show-thread .thread-panel {
+  display: flex;
+}
+.coco-crm .thread-back {
+  display: grid !important;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 4px !important;
+}
+.coco-crm .auth-shell {
+  background: var(--surface);
+}
+.coco-crm .mac-auth {
+  width: min(390px, 100%);
+  padding: 32px 24px;
+}
+.coco-crm .mac-auth .brand-mark {
+  margin-bottom: 23px;
+}
+.coco-crm .logo-symbol,
+.coco-crm .brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  letter-spacing: -3px;
+}
+.coco-crm .logo-symbol span,
+.coco-crm .brand-mark span {
+  align-self: auto;
+  margin-left: -2px;
+  font-size: inherit;
+}
+.coco-crm .mac-auth h1 {
+  margin: 0 0 18px;
+  font-size: 29px;
+  font-weight: 650;
+}
+.coco-crm .mac-auth .auth-subtitle {
+  margin: 0 0 14px;
+  color: var(--text);
+  font-size: 15px;
+}
+.coco-crm .mac-auth .auth-description {
+  margin: 0 0 15px;
+  color: var(--cocoa);
+  font-size: 14px;
+}
+.coco-crm .mac-auth .auth-switch {
+  margin: 0 auto 17px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: 0 1px 3px #352b2712;
+}
+.coco-crm .mac-auth form {
+  text-align: center;
+}
+.coco-crm .mac-auth form > input {
+  width: 100%;
+  height: 37px;
+  min-height: 37px;
+  margin: 0 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 14px;
+}
+.coco-crm .mac-auth .mac-auth-submit {
+  display: block;
+  margin: 12px auto 0;
+  padding: 5px 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: 0 1px 3px #352b2712;
+}
+.coco-crm .mac-auth .auth-link-form button {
+  margin: 13px auto 0;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: 0 1px 3px #352b2712;
+}
+.coco-crm .mac-onboarding {
+  width: min(390px, 100%);
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+}
+.coco-crm .mac-onboarding h1 {
+  font-size: 29px;
+  letter-spacing: -0.7px;
+}
+.coco-crm .mac-onboarding > p {
+  color: var(--cocoa);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.coco-crm .mac-onboarding form > input {
+  min-height: 38px;
+  margin: 0 0 11px;
+}
+.coco-crm .mac-onboarding .mac-auth-submit {
+  display: block;
+  margin: 12px auto 0;
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .coco-crm .native-mobile-header,
+  .coco-crm .mobile-tabs {
+    display: none !important;
+  }
+  .coco-crm .sidebar {
+    display: flex;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 31;
+    width: min(275px, 82vw);
+    height: 100dvh;
+    background: var(--surface);
+    visibility: hidden;
+    transform: translateX(-105%);
+    transition:
+      transform 0.2s ease,
+      visibility 0.2s;
+  }
+  .coco-crm .sidebar.sidebar-open {
+    visibility: visible;
+    transform: translateX(0);
+  }
+  .coco-crm .sidebar-scrim {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    width: 100%;
+    border: 0;
+    background: #29252266;
+  }
+  .coco-crm .sidebar nav {
+    width: 100%;
+    align-items: stretch;
+    gap: 3px;
+    margin-top: 24px;
+  }
+  .coco-crm .sidebar .rail-button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 45px;
+    flex-basis: auto;
+    gap: 13px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text);
+  }
+  .coco-crm .sidebar .rail-brand {
+    min-height: 54px;
+  }
+  .coco-crm .sidebar .rail-brand-name {
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .coco-crm .sidebar .rail-nav-label {
+    font-size: 14px;
+  }
+  .coco-crm .sidebar .rail-button.active {
+    background: var(--surface);
+    color: var(--coco-muted);
+  }
+  .coco-crm .sidebar .rail-connection,
+  .coco-crm .sidebar .rail-tooltip {
+    display: none;
+  }
+  .coco-crm .sidebar .sidebar-bottom {
+    width: 100%;
+    align-items: stretch;
+  }
+  .coco-crm .sidebar .sidebar-bottom > .rail-button:first-child::after {
+    content: "Settings";
+    font-size: 14px;
+  }
+  .coco-crm .sidebar .rail-profile::after {
+    content: "Account";
+    font-size: 14px;
+  }
+  .coco-crm .mac-titlebar {
+    min-height: 52px;
+    padding: 0 15px;
+  }
+  .coco-crm .mac-sidebar-toggle {
+    display: grid !important;
+  }
+  .coco-crm .page-header {
+    padding: 22px 20px 11px;
+  }
+  .coco-crm .page-body {
+    padding: 10px 20px 48px;
+  }
+  .coco-crm .page-header:not(.home-header):not(.detail-header) {
+    display: flex;
+  }
+  .coco-crm
+    .page-header:not(.home-header):not(.detail-header):not(
+      :has(.client-header-actions)
+    ) {
+    display: none;
+  }
+  .coco-crm
+    .page-header:not(.home-header):not(.detail-header)
+    > div:first-child {
+    display: none;
+  }
+  .coco-crm .inbox-shell {
+    height: calc(100dvh - 95px);
+    padding: 10px 16px 20px;
+  }
+  .coco-crm .conversation-list {
+    background: transparent;
+  }
+  .coco-crm .conversation-row {
+    background: var(--card);
+  }
+  .coco-crm .detail-header {
+    display: block;
+  }
+  .coco-crm .detail-header .detail-title {
+    display: flex;
+  }
+  .coco-crm .dot-launcher {
+    display: none;
+  }
+  .coco-crm .dot-panel {
+    bottom: 15px;
+    height: min(720px, calc(100dvh - 75px));
+  }
+  .coco-crm .modal-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+  .coco-crm .modal {
+    width: min(440px, 100%);
+    border-radius: 16px;
+    padding: 27px;
+  }
+}
+.coco-crm .dot-mac-connection {
+  margin-top: 14px;
+  border: 1px solid var(--border, var(--line));
+  border-radius: 18px;
+  padding: 12px;
+}
+.coco-crm .dot-mac-setup {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--coco-muted);
+}
+.coco-crm .dot-mac-setup ol {
+  padding-left: 20px;
+}
+.coco-crm .dot-mac-setup li {
+  margin: 9px 0;
+}
+
+.coco-crm .contact-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.coco-crm .contact-filters button {
+  border: 1px solid var(--border, var(--line));
+  border-radius: 20px;
+  padding: 8px 14px;
+  background: var(--card);
+  color: inherit;
+}
+.coco-crm .contact-filters button[aria-pressed="true"] {
+  background: var(--surface);
+  border-color: var(--line);
+}
+.coco-crm .contact-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: 0;
+  padding: 0;
+}
+.coco-crm .contact-labels label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.coco-crm .contact-labels input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.coco-crm .connections-welcome-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(42, 32, 28, 0.28);
+  backdrop-filter: blur(8px);
+  z-index: 35;
+}
+.coco-crm .dot-panel.connections-welcome-panel {
+  animation: none;
+  inset: 5vh auto auto 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100vw - 32px));
+  height: 90vh;
+  max-height: 90vh;
+  z-index: 36;
+}
+.coco-crm .connections-welcome-panel .dot-connections {
+  padding: 24px 32px;
+}
+.coco-crm .connection-walkthrough {
+  padding: 28px;
+  overflow: auto;
+  text-align: center;
+}
+.coco-crm .connection-step-actions {
+  position: sticky;
+  bottom: -28px;
+  background: var(--card);
+  padding: 12px 0 0;
+  box-shadow: 0 -12px 20px var(--card);
+}
+.coco-crm .connection-walkthrough > p,
+.coco-crm .connection-step-card p {
+  color: var(--coco-muted);
+  line-height: 1.6;
+}
+.coco-crm .connection-step-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 24px 0;
+}
+.coco-crm .connection-step-tabs button {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+}
+.coco-crm .connection-step-tabs button.active {
+  background: var(--surface);
+  border-color: var(--rose);
+}
+.coco-crm .connection-step-card {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 28px;
+  margin-bottom: 18px;
+}
+.coco-crm .connection-step-card .dot-service-icon {
+  margin: 0 auto 14px;
+}
+.coco-crm .connection-step-card small {
+  display: block;
+  color: var(--coco-muted);
+  line-height: 1.6;
+}
+.coco-crm .connection-step-card h3 {
+  font-size: 24px;
+  margin: 14px 0;
+  letter-spacing: -0.6px;
+}
+.coco-crm .connection-step-card a {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-height: 800px) {
+  .coco-crm .connection-walkthrough {
+    padding: 16px;
+  }
+  .coco-crm .connection-walkthrough > h2 {
+    font-size: 20px;
+    margin: 4px 0;
+  }
+  .coco-crm .connection-walkthrough > p {
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .coco-crm .connection-step-tabs {
+    margin: 12px 0;
+    gap: 6px;
+  }
+  .coco-crm .connection-step-tabs button {
+    padding: 8px;
+  }
+  .coco-crm .connection-step-card {
+    padding: 16px;
+    margin-bottom: 8px;
+  }
+  .coco-crm .connection-step-card .dot-service-icon {
+    margin-bottom: 6px;
+  }
+  .coco-crm .connection-step-card h3 {
+    font-size: 20px;
+    margin: 8px 0;
+  }
+  .coco-crm .connection-step-card p {
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .coco-crm .connection-step-card small {
+    font-size: 11px;
+  }
+  .coco-crm .connection-step-actions {
+    bottom: -16px;
+    padding-top: 8px;
+  }
+}
+
+.coco-crm .connection-list {
+  text-align: left;
+  padding: 24px;
+}
+.coco-crm .connection-rows {
+  margin: 20px 0;
+}
+.coco-crm .connection-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .connection-row:last-child {
+  border-bottom: 0;
+}
+.coco-crm .connection-row > svg {
+  color: var(--rose);
+  flex-shrink: 0;
+}
+.coco-crm .connection-row-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+.coco-crm .connection-row-label small {
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .connection-switch {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 26px;
+  padding: 3px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.coco-crm .connection-switch span {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: 0 1px 3px #0002;
+  transition: transform 0.15s;
+}
+.coco-crm .connection-switch.on {
+  background: var(--rose);
+}
+.coco-crm .connection-switch.on span {
+  transform: translateX(16px);
+}
+.coco-crm .connection-switch:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.coco-crm .connection-switch:focus-visible {
+  outline: 2px solid var(--rose);
+  outline-offset: 3px;
+}
+.coco-crm .connection-permission-note {
+  font-size: 12px;
+  margin: 16px 0 24px;
+}
+.coco-crm .dot-panel.connections-welcome-panel:has(.connection-list) {
+  width: min(560px, calc(100vw - 32px));
+  height: auto;
+  max-height: 90vh;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.coco-crm .connection-inline-help {
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--coco-muted);
+}
+.coco-crm .connection-inline-help button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--card);
+  color: var(--text);
+  margin: 4px 8px 4px 0;
+  cursor: pointer;
+}
+.coco-crm .modal-backdrop {
+  overflow: hidden;
+}
+.coco-crm .modal {
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+@media (min-width: 761px) {
+  .coco-crm .sidebar {
+    width: 76px;
+    flex: 0 0 76px;
+    padding: 20px 12px;
+    align-items: center;
+    z-index: 15;
+  }
+  .coco-crm .sidebar nav {
+    width: auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 32px;
+  }
+  .coco-crm .sidebar .rail-button {
+    position: relative;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .coco-crm .sidebar .rail-brand {
+    height: 48px;
+  }
+  .coco-crm .sidebar .rail-brand-name,
+  .coco-crm .sidebar .rail-nav-label,
+  .coco-crm .sidebar .rail-tooltip {
+    display: block;
+    position: absolute;
+    left: calc(100% + 12px);
+    top: 50%;
+    transform: translate(-5px, -50%);
+    padding: 8px 11px;
+    border-radius: 9px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    box-shadow: 0 4px 14px #0002;
+    transition:
+      opacity 0.15s,
+      transform 0.15s,
+      visibility 0.15s;
+  }
+  .coco-crm .sidebar .rail-button:hover .rail-brand-name,
+  .coco-crm .sidebar .rail-button:hover .rail-nav-label,
+  .coco-crm .sidebar .rail-button:hover .rail-tooltip,
+  .coco-crm .sidebar .rail-button:focus-visible .rail-brand-name,
+  .coco-crm .sidebar .rail-button:focus-visible .rail-nav-label,
+  .coco-crm .sidebar .rail-button:focus-visible .rail-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(0, -50%);
+  }
+  .coco-crm .sidebar .rail-button > svg {
+    transition: transform 0.2s ease;
+  }
+  .coco-crm .sidebar .rail-button:hover > svg,
+  .coco-crm .sidebar .rail-button:focus-visible > svg {
+    transform: scale(1.1) translateY(-1px);
+  }
+  .coco-crm .sidebar .rail-profile::after,
+  .coco-crm .sidebar .sidebar-bottom > .rail-button:first-child::after {
+    content: none;
+  }
+  .coco-crm .sidebar .sidebar-bottom {
+    width: auto;
+    padding-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .coco-crm .sidebar .rail-notification {
+    right: 4px;
+    top: 4px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coco-crm .sidebar .rail-button > svg,
+  .coco-crm .sidebar .rail-brand-name,
+  .coco-crm .sidebar .rail-nav-label,
+  .coco-crm .sidebar .rail-tooltip {
+    transition: none;
+  }
+}
+
+.coco-crm .gmail-progress-spinner {
+  flex-shrink: 0;
+  animation: gmail-progress-spin 1s linear infinite;
+}
+.coco-crm .gmail-scan-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin-top: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--coco-muted);
+}
+.coco-crm .gmail-scan-progress strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+}
+.coco-crm .gmail-scan-progress small {
+  display: block;
+  margin-top: 5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+@keyframes gmail-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .coco-crm .gmail-progress-spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* Full-width pages and a persistent Contacts-style browser. */
+.coco-crm .page-body,
+.coco-crm .native-home-body,
+.coco-crm .narrow-body,
+.coco-crm .detail-grid {
+  width: 100%;
+  max-width: none;
+}
+.coco-crm .contacts-workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 34%) minmax(0, 1fr);
+  min-height: calc(100dvh - 94px);
+}
+.coco-crm .contacts-browser {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+.coco-crm .contacts-browser .page-header {
+  padding: 20px 18px 10px;
+}
+.coco-crm .contacts-browser .client-header-actions {
+  flex-wrap: wrap;
+}
+.coco-crm .contacts-list-body {
+  padding: 12px 18px 30px;
+}
+.coco-crm .contacts-browser .toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.coco-crm .contacts-browser .search-field {
+  width: 100%;
+}
+.coco-crm .contacts-browser .contact-filters {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.coco-crm .contacts-browser .contact-filters button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.coco-crm .contact-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: 9px;
+  margin-bottom: 3px;
+}
+.coco-crm .contact-list-row.selected {
+  background: var(--rose-light);
+}
+.coco-crm .contact-list-row .client-row {
+  background: transparent;
+  margin: 0;
+  padding: 11px 0;
+  min-width: 0;
+  border-radius: 0;
+}
+.coco-crm .contact-list-row .client-name {
+  min-width: 0;
+}
+.coco-crm .contact-list-row .client-name strong {
+  overflow-wrap: anywhere;
+}
+.coco-crm .contact-list-row input,
+.coco-crm .bulk-contact-actions input {
+  accent-color: var(--cocoa);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.coco-crm .bulk-contact-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+  font-size: 12px;
+}
+.coco-crm .bulk-contact-actions label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coco-crm .bulk-contact-actions span {
+  color: var(--coco-muted);
+}
+.coco-crm .bulk-contact-actions button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  padding: 7px 10px;
+}
+.coco-crm .bulk-contact-actions .delete-contacts {
+  color: var(--destructive);
+  border-color: var(--line);
+}
+.coco-crm .contact-detail-pane {
+  min-width: 0;
+}
+.coco-crm .contact-detail-empty {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--coco-muted);
+}
+.coco-crm .contact-detail-empty h2 {
+  color: var(--text);
+  margin: 16px 0 8px;
+}
+.coco-crm .contact-detail-pane .detail-actions {
+  flex-wrap: wrap;
+}
+.coco-crm .contact-detail-pane .detail-grid {
+  padding-bottom: 80px;
+}
+@media (min-width: 761px) {
+  .coco-crm .contacts-browser,
+  .coco-crm .contact-detail-pane {
+    max-height: calc(100dvh - 94px);
+    overflow-y: auto;
+  }
+}
+@media (max-width: 760px) {
+  .coco-crm .contacts-workspace {
+    grid-template-columns: 1fr;
+  }
+  .coco-crm .contacts-browser {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    max-height: 45dvh;
+    overflow-y: auto;
+  }
+  .coco-crm .contacts-list-body {
+    padding-bottom: 15px;
+  }
+  .coco-crm .contact-detail-empty {
+    min-height: 25vh;
+  }
+}
+.coco-crm .bulk-label-picker select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+
+/* Let the four pipeline stages fill the available desktop width. */
+.coco-crm .kanban-wrap {
+  width: 100%;
+  max-width: none;
+}
+.coco-crm .kanban {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  align-items: start;
+}
+.coco-crm .kanban-column {
+  width: auto;
+  min-width: 0;
+}
+.coco-crm .kanban-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.coco-crm .kanban-card > button {
+  min-width: 0;
+}
+.coco-crm .kanban-card > button strong {
+  overflow-wrap: anywhere;
+}
+.coco-crm .kanban-card .kanban-meta {
+  margin: 0;
+  padding-top: 10px;
+}
+.coco-crm .kanban-card > select {
+  width: 100%;
+  min-width: 0;
+  margin-top: auto;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text);
+}
+@media (max-width: 760px) {
+  .coco-crm .kanban {
+    grid-template-columns: repeat(4, minmax(220px, 1fr));
+  }
+}
+
+.coco-crm .contact-details-editor input,
+.coco-crm .contact-details-editor textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+}
+.coco-crm .contact-details-editor input:focus,
+.coco-crm .contact-details-editor textarea:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.coco-crm .contact-details-editor > label {
+  display: block;
+  margin: 16px 0 8px;
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .contact-details-editor textarea {
+  resize: vertical;
+}
+.coco-crm .contact-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 22px;
+}
+.coco-crm .contact-editor-actions span {
+  font-size: 12px;
+  color: var(--coco-muted);
+}
+.coco-crm .contact-editor-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Desktop Inbox uses the same persistent master/detail layout as Contacts. */
+@media (min-width: 821px) {
+  .coco-crm .inbox-page-header {
+    min-height: 0;
+    padding: 8px 24px;
+  }
+  .coco-crm .inbox-shell,
+  .coco-crm .inbox-shell.show-thread {
+    display: grid;
+    grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
+    height: calc(100dvh - 105px);
+    min-height: 440px;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+  .coco-crm .inbox-shell .conversation-list,
+  .coco-crm .inbox-shell.show-thread .conversation-list {
+    display: flex;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 20px;
+    border-right: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--bg);
+  }
+  .coco-crm .conversation-list .search-field {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    flex-shrink: 0;
+  }
+  .coco-crm .conversation-scroll {
+    max-width: none;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .coco-crm .conversation-row {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    padding: 13px;
+    margin-bottom: 6px;
+    border-radius: 12px;
+  }
+  .coco-crm .conversation-row.selected {
+    background: var(--rose-light);
+  }
+  .coco-crm .conversation-preview {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+  .coco-crm .conversation-preview > span {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .coco-crm .conversation-preview strong {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+  }
+  .coco-crm .conversation-preview time {
+    display: block;
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+  .coco-crm .conversation-preview small {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+    line-height: 1.4;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+  .coco-crm .inbox-shell .thread-panel,
+  .coco-crm .inbox-shell.show-thread .thread-panel {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    border-radius: 0;
+    background: var(--bg);
+  }
+  .coco-crm .thread-header {
+    flex-shrink: 0;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  .coco-crm .thread-back {
+    display: none !important;
+  }
+  .coco-crm .thread-messages {
+    flex: 1;
+    min-height: 0;
+    padding: 24px;
+    overflow-y: auto;
+  }
+  .coco-crm .composer-area {
+    flex-shrink: 0;
+    padding: 14px 24px;
+    border-top: 1px solid var(--line);
+    background: var(--card);
+  }
+  .coco-crm .bubble {
+    max-width: min(75%, 650px);
+  }
+  .coco-crm .unread-dot {
+    display: block;
+  }
+}
+/* Inbox already exposes Ask Dot in its titlebar; keep the composer unobstructed. */
+.coco-crm .app-shell:has(.inbox-shell) .dot-launcher {
+  display: none;
+}
+
+.coco-crm .composer .sparkle-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: auto;
+  white-space: nowrap;
+  padding: 8px;
+}
+.coco-crm .pending-attachments {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: var(--rose-light);
+  overflow-wrap: anywhere;
+}
+.coco-crm .pending-attachments button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.coco-crm .mac-titlebar-actions {
+  align-items: center;
+}
+.coco-crm .mac-titlebar .connection-pill {
+  font-size: 12px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+@media (min-width: 821px) {
+  .coco-crm .inbox-shell,
+  .coco-crm .inbox-shell.show-thread {
+    height: calc(100dvh - 53px);
+  }
+}
+
+.coco-crm .contact-filters[hidden] {
+  display: none;
+}
+.coco-crm .contacts-browser .client-header-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.coco-crm .contacts-browser .client-header-actions button {
+  padding: 9px 11px;
+  white-space: nowrap;
+}
+.coco-crm
+  .contacts-browser
+  .client-header-actions
+  button[aria-expanded="true"] {
+  background: var(--rose-light);
+  border-color: var(--rose);
+}
+
+.coco-crm .mac-titlebar .pipeline-edit-toggle {
+  width: auto;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.coco-crm .mac-titlebar .pipeline-edit-toggle[aria-pressed="true"] {
+  background: var(--rose-light);
+}
+.coco-crm .kanban {
+  grid-template-columns: repeat(4, minmax(350px, 1fr));
+}
+.coco-crm .kanban-wrap {
+  overflow-x: auto;
+}
+.coco-crm .kanban-card {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 95px 88px;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+}
+.coco-crm .kanban-card > button {
+  padding: 0;
+  text-align: left;
+  overflow: hidden;
+}
+.coco-crm .kanban-card > button strong {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coco-crm .kanban-card .kanban-meta {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.coco-crm .kanban-card .kanban-status {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.coco-crm .kanban-card > select {
+  margin: 0;
+  padding: 4px;
+  font-size: 11px;
+}
+
+.coco-crm .todo-row > span > small {
+  display: block;
+  color: var(--coco-muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.coco-crm .calls-modal {
+  max-height: 80dvh;
+  overflow-y: auto;
+}
+.coco-crm .call-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.coco-crm .call-contact-row span {
+  flex: 1;
+}
+.coco-crm .call-contact-row small {
+  display: block;
+  color: var(--coco-muted);
+  margin-top: 4px;
+}
+.coco-crm .call-contact-row a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cocoa);
+  text-decoration: none;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.coco-crm .inbox-email-composer {
+  padding: 32px;
+  overflow-y: auto;
+  height: 100%;
+}
+.coco-crm .email-compose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+.coco-crm .email-compose-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.coco-crm .email-compose-form input,
+.coco-crm .email-compose-form textarea {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--border, var(--line));
+  border-radius: 10px;
+  font: inherit;
+  background: var(--card);
+}
+.coco-crm .email-compose-form textarea {
+  min-height: 240px;
+  resize: vertical;
+}
+
+.coco-crm {
+  font:
+    14px -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  min-width: 0;
+  min-height: calc(100dvh - 65px);
+  --rose: var(--primary);
+  --cocoa: var(--primary);
+  --rose-light: var(--secondary);
+  --coco-height: calc(100dvh - 122px);
+}
+.coco-crm .mac-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.coco-crm .coco-area-tabs {
+  display: flex;
+  gap: 8px;
+}
+.coco-crm .coco-area-tabs button {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.coco-crm .coco-area-tabs button[aria-current="page"] {
+  background: var(--rose-light);
+  color: var(--cocoa);
+}
+@media (min-width: 821px) {
+  .coco-crm .inbox-shell,
+  .coco-crm .inbox-shell.show-thread {
+    height: var(--coco-height);
+    min-height: 420px;
+  }
+  .coco-crm .contacts-workspace {
+    min-height: var(--coco-height);
+  }
+  .coco-crm .contacts-browser,
+  .coco-crm .contact-detail-pane {
+    max-height: var(--coco-height);
+  }
+}
+.coco-crm .toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 80;
+  max-width: min(500px, calc(100vw - 32px));
+}
+.coco-crm .inbox-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  gap: 12px;
+}
+.coco-crm .history-controls {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px;
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .history-controls button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--card);
+}
+.coco-crm .coco-record-link {
+  display: inline-flex;
+  font-size: 12px;
+  color: var(--cocoa);
+  margin-top: 12px;
+}
+.coco-crm .contact-detail-pane .detail-grid {
+  grid-template-columns: minmax(230px, 1fr) minmax(230px, 1fr);
+  padding: 24px;
+}
+.coco-crm .contact-detail-pane .page-header {
+  padding: 24px;
+}
+.coco-crm .details-surface dl {
+  grid-template-columns: 95px minmax(0, 1fr);
+}
+.coco-crm .detail-actions {
+  flex-wrap: wrap;
+}
+.coco-crm [role="dialog"] {
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+}
+.coco-crm .modal-backdrop {
+  z-index: 70;
+}
+@media (max-width: 1000px) {
+  .coco-crm .contact-detail-pane .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .coco-crm .mac-titlebar {
+    display: flex;
+  }
+  .coco-crm .client-header-actions .primary {
+    display: inline-flex;
+  }
+  .coco-crm .client-header-actions {
+    padding-top: 8px;
+  }
+  .coco-crm .contact-detail-pane .detail-header {
+    display: block;
+  }
+  .coco-crm .contact-detail-pane .detail-title {
+    display: flex;
+  }
+  .coco-crm .inbox-shell {
+    height: calc(100dvh - 142px);
+    padding-bottom: 12px;
+  }
+  .coco-crm .contacts-workspace {
+    min-height: 0;
+  }
+  .coco-crm .client-header-actions button {
+    font-size: 11px;
+  }
+  .coco-crm .detail-grid {
+    padding: 16px !important;
+  }
+  .coco-crm .mac-titlebar .connection-pill {
+    font-size: 10px;
+  }
+  .coco-crm .conversation-list {
+    padding: 8px;
+  }
+  .coco-crm .composer {
+    flex-wrap: wrap;
+  }
+  .coco-crm .composer textarea {
+    min-width: 60%;
+    flex: 1;
+  }
+}
+
+/* Compact Apple Contacts-style browser and contact card. */
+.coco-crm .contacts-workspace { position:relative; grid-template-columns:280px minmax(0,1fr); }
+.coco-crm .contacts-workspace.with-contact-lists { grid-template-columns:190px 280px minmax(0,1fr); }
+.coco-crm .contacts-lists[hidden] { display:none; }
+.coco-crm .contacts-lists { padding:14px 10px; background:var(--surface); border-right:1px solid var(--line); min-width:0; }
+.coco-crm .contacts-lists-heading { display:flex; align-items:center; justify-content:space-between; padding:0 8px 16px; }
+.coco-crm .contacts-lists-heading button { border:0; background:transparent; color:var(--coco-muted); padding:6px; }
+.coco-crm .contacts-lists .contact-filters { display:flex; flex-direction:column; gap:2px; margin:16px 0 0; }
+.coco-crm .contacts-lists .contact-filters > span { padding:8px; color:var(--coco-muted); font-size:11px; font-weight:600; }
+.coco-crm .contacts-lists .contact-filters button,.coco-crm .all-contacts-list { text-align:left; border:0; border-radius:7px; background:transparent; padding:8px; color:var(--text); font-size:12px; }
+.coco-crm .all-contacts-list { width:100%; font-weight:600; }
+.coco-crm .contacts-lists .contact-filters button[aria-pressed=true] { background:var(--card); color:var(--text); }
+.coco-crm .contacts-browser .page-header { min-height:0; padding:12px 12px 4px; background:transparent; border:0; }
+.coco-crm .contacts-browser .client-header-actions { width:100%; justify-content:space-between; flex-wrap:nowrap; padding:0; }
+.coco-crm .contacts-browser .client-header-actions button { position:relative; width:34px; height:34px; display:grid; place-items:center; padding:0; border:1px solid var(--line); border-radius:50%; background:var(--card); color:var(--text); box-shadow:0 1px 3px #00000008; }
+.coco-crm .filter-active-dot { position:absolute; width:6px; height:6px; border-radius:50%; background:var(--primary); top:4px; right:3px; }
+.coco-crm .contacts-list-body { padding:8px 10px 20px; }
+.coco-crm .contacts-browser .search-field { height:33px; border-radius:18px; padding:0 10px; background:var(--surface); }
+.coco-crm .contacts-browser .search-field input { font-size:12px; }
+.coco-crm .contacts-browser .count-label { font-size:10px; }
+.coco-crm .bulk-contact-actions { margin:6px 0; gap:6px; }
+.coco-crm .bulk-contact-actions button { padding:4px 7px; font-size:10px; background:var(--card); }
+.coco-crm .contact-letter { font-size:11px; font-weight:600; color:var(--coco-muted); padding:12px 8px 4px; }
+.coco-crm .contact-list-row { padding:0 7px; margin:0; border-radius:7px; }
+.coco-crm .contact-list-row .client-row { display:flex; width:100%; min-height:48px; padding:7px 0; border:0; }
+.coco-crm .contact-list-row .client-name { gap:9px; width:100%; }
+.coco-crm .contact-list-row .avatar { width:30px; height:30px; flex:0 0 30px; background:var(--primary); color:var(--primary-foreground); font-size:11px; }
+.coco-crm .contact-list-row .client-name > span:last-child { min-width:0; flex:1; }
+.coco-crm .contact-list-row .client-name strong { display:block; font-size:12px; line-height:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.coco-crm .contact-list-row .client-name small { display:block; font-size:10px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.coco-crm .contact-list-row.selected { background:var(--primary); }
+.coco-crm .contact-list-row.selected .client-name strong,.coco-crm .contact-list-row.selected .client-name small { color:var(--primary-foreground); }
+.coco-crm .contact-detail-pane .detail-header { display:flex; flex-direction:column; align-items:center; gap:16px; padding:18px 24px 26px; background:var(--bg); }
+.coco-crm .contact-detail-pane .detail-header .back-button { align-self:flex-start; }
+.coco-crm .contact-detail-pane .detail-title { display:flex; flex-direction:column; align-items:center; text-align:center; gap:12px; }
+.coco-crm .contact-detail-pane .detail-title .avatar-large { width:88px; height:88px; font-size:30px; color:var(--primary-foreground); background:var(--primary); box-shadow:inset 0 1px 2px #ffffff88; }
+.coco-crm .contact-detail-pane .detail-title h1 { font-size:24px; letter-spacing:-.6px; }
+.coco-crm .contact-detail-pane .detail-title p { font-size:12px; }
+.coco-crm .contact-detail-pane .contact-quick-actions { display:flex; justify-content:center; gap:12px; margin:0; }
+.coco-crm .contact-detail-pane .contact-quick-actions > button,.coco-crm .contact-detail-pane .contact-quick-actions > a { display:grid; place-items:center; width:42px; height:42px; padding:0; border:1px solid var(--line); border-radius:50%; background:var(--card); color:var(--text); box-shadow:0 2px 5px #00000005; }
+.coco-crm .contact-quick-actions > [aria-disabled=true] { opacity:.35; pointer-events:none; }
+.coco-crm .contact-quick-actions > :hover { filter:brightness(.96); }
+.coco-crm .contacts-workspace button:focus-visible,.coco-crm .contact-quick-actions a:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+@media(max-width:1000px) { .coco-crm .contacts-workspace.with-contact-lists { grid-template-columns:160px 250px minmax(0,1fr); } }
+@media(max-width:760px) {
+ .coco-crm .contacts-workspace,.coco-crm .contacts-workspace.with-contact-lists { grid-template-columns:minmax(0,1fr); }
+ .coco-crm .contacts-lists { position:absolute; z-index:20; width:220px; top:0; bottom:0; box-shadow:12px 0 32px #0002; overflow:auto; }
+ .coco-crm .contact-detail-pane .detail-header { display:flex; }
+ .coco-crm .contact-detail-pane .detail-title { display:flex; }
+}
+.coco-crm .contact-detail-pane .detail-title .avatar-large { flex:0 0 88px; aspect-ratio:1; }
+.coco-crm .contact-list-row .client-name strong { color:var(--text); }
+.coco-crm .contacts-browser .client-header-actions button[aria-expanded=true] { background:var(--surface); color:var(--text); border-color:var(--line); }
+
+/* A quiet, centered conversation header, like Messages on macOS. */
+.coco-crm .thread-header.messages-contact-header { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; min-height:78px; padding:8px 16px; gap:8px; background:var(--bg); border-bottom:1px solid var(--line); }
+.coco-crm .messages-contact-header .thread-back { grid-column:1; grid-row:1; }
+.coco-crm .messages-contact-header .messages-contact-identity { grid-column:2; grid-row:1; justify-self:center; display:flex; flex-direction:column; align-items:center; gap:3px; max-width:100%; padding:0 8px; border:0; background:transparent; color:var(--text); }
+.coco-crm .messages-contact-identity .avatar { width:30px; height:30px; flex:0 0 30px; aspect-ratio:1; font-size:11px; background:var(--primary); color:var(--primary-foreground); }
+.coco-crm .messages-contact-name { display:flex; align-items:center; gap:3px; max-width:100%; padding:3px 8px; border-radius:12px; background:var(--surface); font-size:12px; line-height:16px; font-weight:600; }
+.coco-crm .messages-contact-header .messages-video-call { grid-column:3; grid-row:1; justify-self:end; display:grid; place-items:center; width:32px; height:32px; padding:0; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--text); }
+.coco-crm .messages-video-call[aria-disabled=true] { opacity:.35; pointer-events:none; }
+.coco-crm .messages-contact-identity:focus-visible,.coco-crm .messages-video-call:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
+@media(max-width:760px) { .coco-crm .thread-header.messages-contact-header { min-height:72px; padding:6px 12px; } }
+
+.coco-crm .messages-contact-name { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+/* Shared WolfGrid surfaces stay in sync when the app theme changes in place. */
+.coco-crm input, .coco-crm textarea, .coco-crm select { color:var(--foreground); background-color:var(--card); color-scheme:inherit; }
+.coco-crm input::placeholder, .coco-crm textarea::placeholder { color:var(--muted-foreground); }
+.coco-crm .outgoing .bubble { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+.coco-crm .contact-list-row.selected .client-name strong, .coco-crm .contact-list-row.selected .client-name small { color:var(--primary-foreground); }
+.coco-crm .contact-details-editor input:focus, .coco-crm .contact-details-editor textarea:focus { outline-color:var(--ring); }
+
+.coco-crm .conversation-row { color:var(--foreground); }

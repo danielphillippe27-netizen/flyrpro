@@ -1,5 +1,7 @@
 'use client';
 
+import { buildFarmCampaignDescription, farmNotesForDisplay } from '@/lib/farms/backingCampaign';
+
 import { ContactOutreach } from '@/components/outreach/ContactOutreach';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -72,7 +74,9 @@ import { buildFarmDashboardAnalytics } from '@/lib/farms/analytics';
 import { localPlanDate, saveTouchPlan } from '@/lib/farms/touch-plan';
 import { FarmTouchPlan, type PlannerTouchDraft } from '@/components/farms/FarmTouchPlan';
 import { FarmDoorPlanner } from '@/components/farms/FarmDoorPlanner';
-import { FarmPlanModes } from '@/components/farms/FarmPlanModes';
+import { FarmPlanModes, type FarmPlanMode } from '@/components/farms/FarmPlanModes';
+import { FarmAnnualCoveragePlan } from '@/components/farms/FarmAnnualCoveragePlan';
+import { DurhamCommercialReview } from '@/components/farms/DurhamCommercialReview';
 import settingsStyles from '@/components/farms/FarmSettings.module.css';
 import { formatDateInput } from '@/lib/farms/plan';
 import {
@@ -202,6 +206,12 @@ export default function FarmPage() {
   const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [farmPlanMode, setFarmPlanMode] = useState<FarmPlanMode>('touchpoints');
+  useEffect(() => {
+    if (!farm?.id) return;
+    try { setFarmPlanMode(localStorage.getItem(`wolfgrid:farm-plan-mode:${farm.id}`) === 'annual' ? 'annual' : 'touchpoints'); }
+    catch { setFarmPlanMode('touchpoints'); }
+  }, [farm?.id]);
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('overview');
   }, []);
@@ -300,9 +310,9 @@ export default function FarmPage() {
       if (resolvedLinkedCampaignId) {
         try {
           const supabase = createClient();
-          const [campaignData, campaignAddressData, scanEventsRes] = await Promise.all([
+          const campaignAddressesPromise = CampaignsService.fetchAddresses(resolvedLinkedCampaignId);
+          const [campaignData, scanEventsRes] = await Promise.all([
             CampaignsService.fetchCampaign(resolvedLinkedCampaignId),
-            CampaignsService.fetchAddresses(resolvedLinkedCampaignId),
             supabase
               .from('scan_events')
               .select('id', { count: 'exact', head: true })
@@ -310,8 +320,11 @@ export default function FarmPage() {
           ]);
 
           setLinkedCampaign(campaignData);
-          setLinkedCampaignAddresses(campaignAddressData);
           setQrScanEventsCount(scanEventsRes.error ? null : (scanEventsRes.count ?? 0));
+          // Farm map rendering already has the imported homes. QR scan details
+          // must not hold the whole page behind a second bulk address download.
+          setLoading(false);
+          setLinkedCampaignAddresses(await campaignAddressesPromise);
         } catch (campaignError) {
           console.error('Error loading linked campaign:', campaignError);
           setLinkedCampaign(null);
@@ -421,12 +434,12 @@ export default function FarmPage() {
 
   useEffect(() => {
     if (linkedCampaign?.notes !== undefined) {
-      setFarmCampaignNotes(linkedCampaign.notes ?? '');
+      setFarmCampaignNotes(farmNotesForDisplay(linkedCampaign.notes, farmId));
     } else {
-      setFarmCampaignNotes(legacyCampaignText.notes ?? '');
+      setFarmCampaignNotes(farmNotesForDisplay(legacyCampaignText.notes, farmId));
     }
     setCampaignNotesDirty(false);
-  }, [legacyCampaignText.notes, linkedCampaign?.notes]);
+  }, [farmId, legacyCampaignText.notes, linkedCampaign?.notes]);
 
   useEffect(() => {
     if (linkedCampaign?.scripts !== undefined) {
@@ -444,7 +457,7 @@ export default function FarmPage() {
         .from('campaigns')
         .update({
           description: buildLegacyCampaignText({
-            notes: updates.notes ?? farmCampaignNotes,
+            notes: buildFarmCampaignDescription(farmId, updates.notes ?? farmCampaignNotes),
             scripts: updates.scripts ?? farmScripts,
             flyerUrl: updates.flyerUrl ?? currentFlyerUrl ?? undefined,
           }),
@@ -453,7 +466,7 @@ export default function FarmPage() {
 
       if (error) throw error;
     },
-    [currentFlyerUrl, farmCampaignNotes, farmScripts]
+    [currentFlyerUrl, farmCampaignNotes, farmScripts, farmId]
   );
 
   useEffect(() => {
@@ -1253,7 +1266,8 @@ export default function FarmPage() {
             scope={overviewScope}
             onScopeChange={setOverviewScope}
           />
-          <FarmPlanModes farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
+          <DurhamCommercialReview farmId={farm.id} />
+          <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan
             drafts={planDrafts}
             touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
@@ -1480,7 +1494,7 @@ export default function FarmPage() {
                 View all workspace activity
               </Link>
             </div>
-            <FarmActivityCalendar campaignId={linkedCampaignId} createdAt={farm.created_at} />
+            <FarmActivityCalendar farmId={farm.id} campaignId={linkedCampaignId} createdAt={farm.created_at} />
           </div>
         </TabsContent>
 
@@ -1491,15 +1505,17 @@ export default function FarmPage() {
                 <h2 className="text-sm font-semibold text-foreground">Farm Leads</h2>
                 <Badge variant="secondary" className="text-xs">{leads.length + contacts.length}</Badge>
               </div>
-              <Button size="sm" disabled={!userId} onClick={() => {
-                setSelectedHomeContactAddress(null);
-                setCreateContactOpen(true);
-              }}>
-                <Plus className="w-4 h-4 mr-1" />
-                Add contact
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <ContactOutreach contacts={contacts} iconOnly />
+                <Button size="sm" disabled={!userId} onClick={() => {
+                  setSelectedHomeContactAddress(null);
+                  setCreateContactOpen(true);
+                }}>
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add contact
+                </Button>
+              </div>
             </div>
-            <div className="mb-4"><ContactOutreach contacts={contacts} /></div>
             <div className="relative mb-4">
               <input
                 type="text"
@@ -1741,7 +1757,7 @@ export default function FarmPage() {
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Linked campaign required</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Farm notes, scripts, and flyer assets are saved on the farm&apos;s linked campaign so the print and QR setup stay together.
+                  Create a campaign to save notes, scripts, and flyers.
                 </p>
               </div>
               <Button onClick={() => void handleCreateLinkedCampaign()} disabled={creatingLinkedCampaign}>
@@ -1753,7 +1769,7 @@ export default function FarmPage() {
               <div className="rounded-xl border border-border bg-card p-4">
                 <h2 className="mb-3 text-sm font-semibold text-foreground">Farm notes</h2>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Free-form notes for this farm&apos;s linked campaign (territory, goals, follow-ups, and print context).
+                  Plans, goals, and follow-ups.
                 </p>
                 <Textarea
                   className="min-h-[200px] resize-y font-mono"
@@ -1779,7 +1795,7 @@ export default function FarmPage() {
               <div className="rounded-xl border border-border bg-card p-4">
                 <h2 className="mb-3 text-sm font-semibold text-foreground">Scripts</h2>
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Script or dialogue to use when working this farm or talking to leads.
+                  What to say at the door or on a call.
                 </p>
                 <Textarea
                   className="min-h-[160px] resize-y font-mono"
@@ -1803,9 +1819,9 @@ export default function FarmPage() {
               </div>
 
               <div className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 text-sm font-semibold text-foreground">Flyer used</h2>
+                <h2 className="mb-3 text-sm font-semibold text-foreground">Flyer</h2>
                 <p className="mb-3 text-xs text-muted-foreground">
-                  Upload a photo or PDF of the flyer used for this farm.
+                  Add a photo or PDF.
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
                   <label className="inline-block cursor-pointer">
@@ -1827,7 +1843,7 @@ export default function FarmPage() {
                       rel="noopener noreferrer"
                       className="text-sm text-primary hover:underline"
                     >
-                      View current flyer
+                      View flyer
                     </a>
                   ) : null}
                 </div>
@@ -1846,6 +1862,20 @@ export default function FarmPage() {
               <p className="text-sm text-muted-foreground">Manage your farm details, outreach schedule, and goals.</p>
             </CardHeader>
             <CardContent className="space-y-6">
+              <section className={settingsStyles.section} aria-labelledby="farm-plan-mode-heading">
+                <h3 id="farm-plan-mode-heading">Farm plan</h3>
+                <p className={settingsStyles.description}>Choose how you plan to reach your farm. Your overview shows the selected plan.</p>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Farm planning mode">
+                  {([{ value: 'annual', label: 'One touchpoint' }, { value: 'touchpoints', label: 'Multiple touchpoints' }] as const).map(option => (
+                    <Button key={option.value} type="button" variant={farmPlanMode === option.value ? 'secondary' : 'outline'} aria-pressed={farmPlanMode === option.value} onClick={() => {
+                      setFarmPlanMode(option.value);
+                      try { localStorage.setItem(`wolfgrid:farm-plan-mode:${farm.id}`, option.value); } catch { /* Keep the current selection for this session. */ }
+                    }}>{option.label}</Button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">This choice is saved in this browser.</p>
+              </section>
+              {farmPlanMode === 'annual' && <FarmAnnualCoveragePlan key={farm.id} view="settings" farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact} />}
               <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <div className="min-w-0 space-y-6">
                   <section className={settingsStyles.section} aria-labelledby="farm-details-heading">

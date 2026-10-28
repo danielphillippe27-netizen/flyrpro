@@ -8,15 +8,6 @@ const LIVE_KEYS = new Set(['status', 'address_status', 'visited', 'visit_count',
   'scans', 'scans_total', 'qr_scanned', 'last_scanned_at', 'selected', 'visit_owner',
   'teammate_owned', 'is_teammate_owned', 'card_engaged', 'updated_at']);
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-// Full provenance and provider fields remain in the immutable details artifact.
-// The hot path carries only fields needed for field interactions and display.
-const RECORD_KEYS = new Set(['formatted', 'house_number', 'street_name', 'locality', 'region', 'postal_code',
-  'address_text', 'address_id', 'primary_address_id', 'linked_address_ids', 'address_count', 'units_count',
-  'is_multi_unit', 'is_townhome', 'unit_arrangement', 'height_m', 'min_height', 'area_sqm', 'feature_type',
-  'feature_status', 'is_linked', 'source', 'building_id', 'campaign_parcel_id', 'parcel_id', 'external_id',
-  'label_anchor_lon', 'label_anchor_lat', 'access_lon', 'access_lat', 'label_group_key', 'label_visible',
-  'label_primary', 'pin_kind', 'match_source', 'provisional', 'address_resolution_status', 'geometry_target_kind',
-  'geometry_target_id', 'resolution_status', 'unit_number', 'parent_building_id', 'editable']);
 
 function collection(value: unknown): GeoJSON.FeatureCollection {
   return value && typeof value === 'object' && Array.isArray((value as GeoJSON.FeatureCollection).features)
@@ -71,8 +62,12 @@ export function prepareCanonicalTiles(bundle: Json) {
       const coordinate = (feature.geometry.type === 'Point' ? feature.geometry.coordinates
         : turf.pointOnFeature(feature).geometry.coordinates) as [number, number];
       if (![...coordinate, ...bounds].every(Number.isFinite)) throw new Error(`Invalid coordinates: ${featureId}`);
-      const properties: Json = { ...Object.fromEntries(Object.entries(propertiesWithoutState(feature.properties ?? {}))
-        .filter(([key]) => RECORD_KEYS.has(key))), feature_id: featureId,
+      // Preserve field metadata and provider identifiers, including fields that
+      // future clients may understand. Exact source geometry is stored in WGP1;
+      // the compact bundle validator rejects any other nested GeoJSON geometry.
+      const metadata = propertiesWithoutState(feature.properties ?? {});
+      if (kind === 'address') delete metadata.source_geometry;
+      const properties: Json = { ...metadata, feature_id: featureId,
         canonical_id: id, row_id: feature.properties?.id ?? feature.id ?? id, [`${kind}_id`]: id };
       records[name].push({ id, feature_id: featureId, coordinate, bounds, properties });
       features.push({ type: 'Feature', geometry: feature.geometry, properties: {
@@ -95,9 +90,15 @@ export function prepareCanonicalTiles(bundle: Json) {
   }
   collections.address_circles = { type: 'FeatureCollection', features: collections.addresses.features.map((feature) => {
     const point = feature.geometry as GeoJSON.Point;
-    return { ...turf.circle(point.coordinates, 2.6, { steps: 28, units: 'meters' }), properties: feature.properties };
+    return { ...turf.circle(point.coordinates, 5.2, { steps: 28, units: 'meters' }), properties: feature.properties };
   }) };
   layers.address_circles = { source_layer: 'address_circles', promote_id: 'feature_id', minzoom: 10, maxzoom: 18, count: records.addresses.length };
+  // Android's dense 3D map uses a smaller cylinder while preserving the same address identity.
+  collections.address_circles_compact = { type: 'FeatureCollection', features: collections.addresses.features.map((feature) => {
+    const point = feature.geometry as GeoJSON.Point;
+    return { ...turf.circle(point.coordinates, 2.6, { steps: 28, units: 'meters' }), properties: feature.properties };
+  }) };
+  layers.address_circles_compact = { source_layer: 'address_circles_compact', promote_id: 'feature_id', minzoom: 10, maxzoom: 18, count: records.addresses.length };
   const addresses = new Set(records.addresses.map((record) => record.id));
   const units = (Array.isArray(bundle.building_units) ? bundle.building_units : []) as Json[];
   collections.building_units = { type: 'FeatureCollection', features: units.flatMap((unit) => {

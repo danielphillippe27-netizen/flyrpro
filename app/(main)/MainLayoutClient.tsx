@@ -370,8 +370,12 @@ function MainLayoutContent({
   const isSelfServeCampaignCreate =
     pathname === '/campaigns/create' && isSelfServeDemoFlow;
 
+  const [macCrm,setMacCrm]=useState(false);
+  useEffect(()=>{setMacCrm(Boolean((window as Window & {webkit?:{messageHandlers?:{wolfgridMac?:unknown}}}).webkit?.messageHandlers?.wolfgridMac));},[]);
+
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
+      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,href:'/inbox/business',label:'Business inbox'}:tab);items.splice(1,0,{href:'/inbox',icon:Inbox,label:'Inbox'});}
       if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
         const index = items.findIndex(tab => tab.href === '/settings');
         items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];

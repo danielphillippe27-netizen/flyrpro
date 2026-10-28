@@ -12,9 +12,9 @@ function OpenAIConnectionContent({ userId }: { userId: string }) {
   const [key, setKey] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
   useEffect(() => {
     const controller = new AbortController(); setKey(''); setStatus(undefined); setNotice('');
-    if (currentWorkspaceId) fetch(`/api/crm-ai/connection?workspaceId=${currentWorkspaceId}`, { signal: controller.signal, cache: 'no-store' }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); setStatus(result); }).catch(error => { if (!controller.signal.aborted) setNotice(error.message); });
+    if (currentWorkspaceId) fetch(`/api/crm-ai/connection?workspaceId=${currentWorkspaceId}`, { signal: controller.signal, cache: 'no-store', headers: { 'x-wolfgrid-user-id': userId } }).then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error); setStatus(result); }).catch(error => { if (!controller.signal.aborted) setNotice(error.message); });
     return () => controller.abort();
-  }, [currentWorkspaceId]);
+  }, [currentWorkspaceId, userId]);
   async function change(method: 'POST' | 'DELETE') {
     if (!currentWorkspaceId) return;
     setBusy(true); setNotice('');

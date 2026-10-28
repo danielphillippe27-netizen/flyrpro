@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { gmailConfig, googleToken, seal, unseal } from '@/lib/outreach/gmail';
 export async function GET(request: NextRequest) {
+  if(request.nextUrl.searchParams.get('state')?.startsWith('coco.')) return (await import('@/app/api/coco/gmail/callback/route')).GET(request);
   let result = 'error';
   try {
     const state = unseal<{ userId: string; state: string; verifier: string; expires: number }>(request.cookies.get('wolfgrid-gmail-connect')?.value ?? '');

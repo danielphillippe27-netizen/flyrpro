@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
     goal_type?: string | null;
     goal_target?: number | null;
   }>();
-  const farmSelect = 'id, name, phase, status, is_active, address_count, updated_at, start_date, end_date, touches_per_interval, touches_interval, goal_type, goal_target';
+  const farmSelect = 'id, name, is_active, address_count, updated_at, start_date, end_date, touches_per_interval, touches_interval, goal_type, goal_target';
 
   if (!requestedWorkspaceId) {
     const { data: ownedFarms, error: ownedError } = await admin

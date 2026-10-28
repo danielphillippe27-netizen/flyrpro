@@ -3,6 +3,8 @@ import type mapboxgl from 'mapbox-gl';
 import {
   applyPresetVisualTweaks,
   classifyWhiteOutRoadLayer,
+  hideBaseBuildingLayers,
+  hideBaseAddressNumberLayers,
   type ResolvedMapStyle,
 } from '../map-styles';
 
@@ -67,3 +69,22 @@ assert.equal(paintChanges.has('campaign-road-overlay:line-color'), false);
 assert.equal(layoutChanges.has('road-label-simple:visibility'), false);
 
 console.log('White Out road styling tests passed');
+
+const canonicalLayers = [
+  { id: 'canonical-buildings', type: 'fill-extrusion', 'source-layer': 'buildings' },
+  { id: 'canonical-selection', type: 'line', 'source-layer': 'buildings' },
+  { id: 'canonical-labels', type: 'symbol', 'source-layer': 'addresses', layout: { 'text-field': ['get', 'house_number'] } },
+  { id: 'base-building', type: 'fill-extrusion', 'source-layer': 'building' },
+] as mapboxgl.AnyLayer[];
+const canonicalChanges: string[] = [];
+const canonicalMap = {
+  getStyle: () => ({ layers: canonicalLayers }),
+  setPaintProperty: (id: string) => canonicalChanges.push(id),
+  setLayoutProperty: (id: string) => canonicalChanges.push(id),
+} as unknown as mapboxgl.Map;
+applyPresetVisualTweaks(canonicalMap, whiteOutStyle);
+hideBaseBuildingLayers(canonicalMap);
+hideBaseAddressNumberLayers(canonicalMap);
+assert(canonicalChanges.includes('base-building'), 'Base buildings are still hidden');
+assert(!canonicalChanges.some(id => id.startsWith('canonical-')), 'Style and zoom cleanup must preserve canonical tiles and labels');
+console.log('Canonical tile layers survive base-map cleanup.');

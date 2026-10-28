@@ -3,7 +3,7 @@ const {build}=require('esbuild');
 (async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'wolfgrid-mac-api-'));
  const outfile=path.join(dir,'route.cjs');
- await build({entryPoints:['app/api/mac-companion/route.ts'],outfile,bundle:true,platform:'node',format:'cjs',packages:'external',plugins:[{name:'auth-fixture',setup(b){b.onResolve({filter:/^@\/lib\/supabase\/server$/},()=>({path:'auth',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const getSupabaseServerClient=async()=>globalThis.macTestApi;',loader:'js'}));}}]});
+ await build({entryPoints:['app/api/mac-companion/route.ts'],outfile,bundle:true,platform:'node',format:'cjs',packages:'external',plugins:[{name:'auth-fixture',setup(b){b.onResolve({filter:/^@\/lib\/supabase\/server$/},()=>({path:'auth',namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const getSupabaseServerClient=async()=>globalThis.macTestApi;export const createAdminClient=()=>globalThis.macTestApi;',loader:'js'}));}}]});
  // Resolve external Next/zod from the repository, even though the bundle is temporary.
  const Module=require('node:module'),module=new Module(outfile);module.filename=outfile;module.paths=Module._nodeModulePaths(process.cwd());module._compile(await fs.readFile(outfile,'utf8'),outfile);
  const route=module.exports,{NextRequest}=require('next/server');let signedIn=false,calls=[];
@@ -18,6 +18,14 @@ const {build}=require('esbuild');
  assert.equal((await post({...valid,messages:[{...valid.messages[0],localPath:'/private/file'}]})).status,400);
  assert.equal((await post(' '.repeat(2000001))).status,413);
  assert.equal(calls.length,0);
+ const review={action:'import-contact',workspaceId:valid.workspaceId,deviceId:valid.deviceId,externalId:'fixture',fullName:'Test Person',phones:['9055550101'],emails:[],phone:'9055550101',email:'',targetId:null,title:'Past Client',note:'Fixture note'};
+ assert.equal((await post({...review,title:'X'.repeat(61)})).status,400);
+ assert.equal((await post(review)).status,200);
+ assert.equal(calls.at(-1).name,'import_apple_contact_details');
+ assert.equal(calls.at(-1).params.contact_title,'Past Client');
+ assert.equal(calls.at(-1).params.contact_note,'Fixture note');
+ calls=[];
+
  assert.equal((await post(valid)).status,200);assert.equal(calls.length,1);assert.equal(calls[0].name,'import_mac_contact_messages');
  console.log('PASS: real API handler rejects unauthenticated/cross-origin/malformed/oversized/group/local-path requests before database writes; valid batch invokes transactional RPC.');
 })().catch(e=>{console.error(e);process.exitCode=1});
