@@ -70,6 +70,7 @@ import { buildFarmDashboardAnalytics } from '@/lib/farms/analytics';
 import { localPlanDate, saveTouchPlan } from '@/lib/farms/touch-plan';
 import { FarmTouchPlan, type PlannerTouchDraft } from '@/components/farms/FarmTouchPlan';
 import { FarmDoorPlanner } from '@/components/farms/FarmDoorPlanner';
+import { FarmPlanModes } from '@/components/farms/FarmPlanModes';
 import settingsStyles from '@/components/farms/FarmSettings.module.css';
 import { formatDateInput } from '@/lib/farms/plan';
 import {
@@ -1441,6 +1442,7 @@ export default function FarmPage() {
         </TabsContent>
 
         <TabsContent value="plan" className="mt-4 space-y-4">
+          <FarmPlanModes farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan
             drafts={planDrafts}
             touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
@@ -1466,6 +1468,7 @@ export default function FarmPage() {
             <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
             <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
           </details>
+          </FarmPlanModes>
         </TabsContent>
 
         <TabsContent value="map" className="mt-1 min-h-0 overflow-hidden rounded-xl border border-border bg-card">
