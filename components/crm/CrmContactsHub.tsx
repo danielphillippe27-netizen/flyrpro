@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { ChevronRight, Plus, Search, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ContactsService } from '@/lib/services/ContactsService';
 import { CreateContactDialog } from './CreateContactDialog';
 import { ImportContactsDialog } from './ImportContactsDialog';
@@ -23,6 +24,15 @@ const SORT_OPTIONS = [
   { value: 'oldest', label: 'Oldest' },
 ] as const;
 type LeadSort = (typeof SORT_OPTIONS)[number]['value'];
+type ContactFilter = 'all' | 'hot lead' | 'cold lead' | 'client' | 'past client' | 'tradie';
+
+function matchesContactFilter(contact: Contact, filter: ContactFilter) {
+  if (filter === 'all') return true;
+  const tags = (contact.tags ?? '').split(',').map((tag) => tag.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' '));
+  if (tags.includes(filter)) return true;
+  return (filter === 'hot lead' && contact.status === 'hot') ||
+    (filter === 'cold lead' && contact.status === 'cold');
+}
 
 function createdTime(contact: Contact) {
   return Date.parse(contact.created_at) || 0;
@@ -57,6 +67,7 @@ export function CrmContactsHub() {
   const [userId, setUserId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<LeadSort>('newest');
+  const [contactFilter, setContactFilter] = useState<ContactFilter>('all');
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
@@ -88,7 +99,7 @@ export function CrmContactsHub() {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    const matches = contacts.filter((contact) =>
+    const matches = contacts.filter((contact) => matchesContactFilter(contact, contactFilter) &&
       [contact.full_name, contact.email, contact.phone, contact.address].some((value) =>
         (value ?? '').toLocaleLowerCase().includes(query)
       )
@@ -101,7 +112,7 @@ export function CrmContactsHub() {
       const order = createdTime(a) - createdTime(b);
       return (sort === 'oldest' ? order : -order) || a.id.localeCompare(b.id);
     });
-  }, [contacts, search, sort]);
+  }, [contacts, search, sort, contactFilter]);
 
   const groups = useMemo(() => {
     const result: { label: string; contacts: Contact[] }[] = [];
@@ -177,6 +188,22 @@ export function CrmContactsHub() {
               className="bg-card pl-9"
             />
           </div>
+          <Select value={contactFilter} onValueChange={(value) => {
+            setContactFilter(value as ContactFilter);
+            setSelectedContactIds([]);
+          }}>
+            <SelectTrigger aria-label="Filter contacts" className="w-full bg-card sm:w-44">
+              <SelectValue placeholder="All contacts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All contacts</SelectItem>
+              <SelectItem value="hot lead">Hot Lead</SelectItem>
+              <SelectItem value="cold lead">Cold Lead</SelectItem>
+              <SelectItem value="client">Client</SelectItem>
+              <SelectItem value="past client">Past Client</SelectItem>
+              <SelectItem value="tradie">Tradie</SelectItem>
+            </SelectContent>
+          </Select>
           <div role="group" aria-label="Sort leads" className="flex flex-wrap items-center gap-3">
             <span className="text-sm text-muted-foreground">Sort:</span>
             {SORT_OPTIONS.map((option) => (
@@ -201,7 +228,7 @@ export function CrmContactsHub() {
             <div className="p-8 text-center text-muted-foreground">{copy.leads.loading}</div>
           ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
-              {search.trim() ? 'No matching contacts. Try another name, email, phone, or address.' : 'No leads yet. Add a contact or import a list to get started.'}
+              {search.trim() || contactFilter !== 'all' ? 'No matching contacts. Try another search or filter.' : 'No leads yet. Add a contact or import a list to get started.'}
             </div>
           ) : (
             <>

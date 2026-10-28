@@ -645,10 +645,11 @@ export function ContactDetailSheet({
                           if (nextValue === (contact.tags ?? '')) return;
                           void saveContactPatch({ tags: nextValue || undefined });
                         }}
-                        placeholder="Buyer, Import, Sphere..."
+                        placeholder="Client, Past Client, Tradie..."
                         disabled={saving}
                         className="mt-2"
                       />
+                      <p className="mt-1 text-xs text-muted-foreground">Separate tags with commas. Use Client, Past Client, or Tradie to filter contacts.</p>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {splitTags(tagsValue).map((tag) => (
                           <Badge key={tag} variant="secondary" className="rounded-full">

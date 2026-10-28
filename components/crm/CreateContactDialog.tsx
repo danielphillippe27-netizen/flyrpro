@@ -387,6 +387,7 @@ export function CreateContactDialog({
                 placeholder={copy.contactDialog.tagsPlaceholder}
                 disabled={loading}
               />
+              <p className="mt-1 text-xs text-muted-foreground">Use Client, Past Client, or Tradie to filter contacts. Separate tags with commas.</p>
             </div>
           </div>
 
