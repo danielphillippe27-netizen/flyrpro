@@ -183,7 +183,9 @@ function MessageAttachments({
 export default function CocoCrm({
   initialArea = "Inbox",
   initialContact,
+  canUseInbox = false,
 }: {
+  canUseInbox?: boolean;
   initialArea?: Area;
   initialContact?: string;
 }) {
@@ -194,6 +196,7 @@ export default function CocoCrm({
       userId={scope.userId}
       initialArea={initialArea}
       initialContact={initialContact}
+      canUseInbox={canUseInbox}
     />
   ) : (
     <div className="coco-crm">
@@ -207,7 +210,9 @@ function CocoWorkspace({
   userId,
   initialArea,
   initialContact,
+  canUseInbox,
 }: {
+  canUseInbox: boolean;
   userId: string;
   initialArea: Area;
   initialContact?: string;
@@ -362,6 +367,10 @@ function CocoWorkspace({
     }
     if (channel === "email" && !client.email) {
       setNotice("Add an email address first.");
+      return;
+    }
+    if (!canUseInbox) {
+      window.location.href = channel === "text" ? `sms:${encodeURIComponent(client.phone!)}` : `mailto:${encodeURIComponent(client.email!)}`;
       return;
     }
     setInboxContact(client);
@@ -931,9 +940,9 @@ function CocoWorkspace({
   // The view model below intentionally retains KimiCoco's markup and class names.
   const renderedData = { ...viewData, messages: data.messages };
   return (
-    <div className="coco-crm">
+    <div className={`coco-crm ${canUseInbox ? "" : "contacts-only"}`}>
       <div className="main-content">
-        <div className="mac-titlebar">
+        {canUseInbox && <div className="mac-titlebar">
           <nav className="coco-area-tabs" aria-label="CRM pages">
             <button
               aria-current={area === "Inbox" ? "page" : undefined}
@@ -982,7 +991,7 @@ function CocoWorkspace({
             </Link>
 
           </div>
-        </div>
+        </div>}
         {area === "Clients" && (
           <div className={`contacts-workspace ${contactOptions === "filter" ? "with-contact-lists" : ""}`}>
             <nav className="contacts-lists" aria-label="Contact lists" hidden={contactOptions !== "filter"}>

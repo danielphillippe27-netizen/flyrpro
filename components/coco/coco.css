@@ -5039,3 +5039,5 @@
 .coco-crm .contact-details-editor input:focus, .coco-crm .contact-details-editor textarea:focus { outline-color:var(--ring); }
 
 .coco-crm .conversation-row { color:var(--foreground); }
+
+.coco-crm.contacts-only { --coco-height: calc(100dvh - 65px); }

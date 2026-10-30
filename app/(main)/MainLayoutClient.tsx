@@ -345,13 +345,15 @@ function DemoFlowClickGuard({
 
 export default function MainLayoutClient({
   children,
+  canUseInbox = false,
 }: {
   children: ReactNode;
+  canUseInbox?: boolean;
 }) {
   return (
     <WorkspaceProvider>
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
-        <MainLayoutContent>{children}</MainLayoutContent>
+        <MainLayoutContent canUseInbox={canUseInbox}>{children}</MainLayoutContent>
       </Suspense>
     </WorkspaceProvider>
   );
@@ -359,8 +361,10 @@ export default function MainLayoutClient({
 
 function MainLayoutContent({
   children,
+  canUseInbox,
 }: {
   children: ReactNode;
+  canUseInbox: boolean;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -375,7 +379,8 @@ function MainLayoutContent({
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
-      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,href:'/inbox/business',label:'Business inbox'}:tab);items.splice(1,0,{href:'/inbox',icon:Inbox,label:'Inbox'});}
+      items = items.filter(tab => canUseInbox || tab.href !== '/inbox');
+      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,href:'/inbox/business',label:'Business inbox'}:tab);if (canUseInbox) items.splice(1,0,{href:'/inbox',icon:Inbox,label:'Inbox'});}
       if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
         const index = items.findIndex(tab => tab.href === '/settings');
         items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];
