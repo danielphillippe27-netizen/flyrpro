@@ -84,7 +84,7 @@ async function createContactForScheduledDisposition(params: {
       full_name: name,
       phone: phone || null,
       email,
-      address: '',
+      address: getPayloadText(payload, 'diallerLeadAddress'),
       status: params.status,
       notes: params.note,
       last_contacted: params.now,

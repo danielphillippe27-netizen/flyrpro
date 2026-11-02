@@ -917,6 +917,49 @@ async function run() {
     assertEqual(state.buildingAddressLinks?.[0].match_type, 'manual');
   });
 
+  await testAsync('Farm linking preserves existing manual links and adds missing links', async () => {
+    const first = { ...makeAddress('address-1', -79.1000, 43.1000, 'Maple Road'), campaign_id: 'campaign-1' };
+    const second = { ...makeAddress('address-2', -79.1010, 43.1000, 'Maple Road'), campaign_id: 'campaign-1' };
+    const state: MockState = { campaignAddresses: [first, second], buildingAddressLinks: [{
+      campaign_id: 'campaign-1', address_id: 'address-1', building_id: 'manual-building', match_type: 'manual',
+    }] };
+    const buildings = [
+      makeBuilding('first-building', rectangle(-79.1002, 43.0998, -79.0998, 43.1002), { streetName: 'Maple Road' }),
+      makeBuilding('second-building', rectangle(-79.1012, 43.0998, -79.1008, 43.1002), { streetName: 'Maple Road' }),
+    ];
+    const service = new StableLinkerService(createMockSupabase(state) as unknown as SupabaseLike);
+    await service.runSpatialJoin('campaign-1', { features: buildings }, 'test', { preserveExisting: true });
+    assertEqual(state.buildingAddressLinks?.length, 2);
+    assertEqual(state.buildingAddressLinks?.[0].building_id, 'manual-building');
+    assertEqual(state.buildingAddressLinks?.[0].match_type, 'manual');
+    assertEqual(state.buildingAddressLinks?.[1].address_id, 'address-2');
+  });
+
+  await testAsync('Indexed matching preserves the original building and parcel decisions', async () => {
+    const addresses = [
+      makeAddress('100', -79.10000, 43.10000, 'Maple Road'),
+      makeAddress('102', -79.10100, 43.10000, 'Maple Road'),
+      makeAddress('104', -79.10200, 43.10000, 'Other Road'),
+    ].map(a => ({ ...a, campaign_id: 'campaign-1', locality: 'Town', region: 'ON', postal_code: null }));
+    const buildings = [
+      makeBuilding('a', rectangle(-79.1001, 43.0999, -79.0999, 43.1001), { streetName: 'Maple Road' }),
+      makeBuilding('b', rectangle(-79.1011, 43.0999, -79.1009, 43.1001)),
+      makeBuilding('c', rectangle(-79.1021, 43.0999, -79.1019, 43.1001)),
+    ];
+    const parcels = { features: [makeParcel('p1', rectangle(-79.1012, 43.0998, -79.1008, 43.1002))] };
+    const indexedState: MockState = { campaignAddresses: addresses, buildingAddressLinks: [] };
+    const baselineState: MockState = { campaignAddresses: addresses, buildingAddressLinks: [] };
+    const indexed = new StableLinkerService(createMockSupabase(indexedState) as unknown as SupabaseLike);
+    const baseline = new StableLinkerService(createMockSupabase(baselineState) as unknown as SupabaseLike) as any;
+    const nearest = baseline.findNearestBuildings.bind(baseline);
+    baseline.findNearestBuildings = (...args: unknown[]) => { const old = baseline.buildingSpatialIndex; baseline.buildingSpatialIndex = undefined; try { return nearest(...args); } finally { baseline.buildingSpatialIndex = old; } };
+    const parcel = baseline.parcelBridgeMatch.bind(baseline);
+    baseline.parcelBridgeMatch = (...args: unknown[]) => { const old = baseline.parcelSpatialIndex; baseline.parcelSpatialIndex = undefined; try { return parcel(...args); } finally { baseline.parcelSpatialIndex = old; } };
+    await indexed.runSpatialJoin('campaign-1', { features: buildings }, 'test', { parcelsGeoJSON: parcels });
+    await baseline.runSpatialJoin('campaign-1', { features: buildings }, 'test', { parcelsGeoJSON: parcels });
+    assertEqual(indexedState.buildingAddressLinks, baselineState.buildingAddressLinks);
+  });
+
   console.log(`\n${'='.repeat(50)}`);
   console.log(`Tests passed: ${testsPassed}`);
   console.log(`Tests failed: ${testsFailed}`);

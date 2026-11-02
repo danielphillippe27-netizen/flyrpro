@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-output="$root/build/WolfGrid Mac Preview.app"
+output="$root/build/WolfGrid.app"
 mkdir -p "$output/Contents/MacOS" "$output/Contents/Resources" "$root/build/bin"
 origin=${WOLFGRID_WEB_ORIGIN:-https://wolfgrid.app}
 case "$origin" in
@@ -16,8 +16,8 @@ lipo -create "$root/build/bin/arm64" "$root/build/bin/x86_64" -output "$output/C
 cat > "$output/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>app.wolfgrid.mac.preview</string>
-<key>CFBundleExecutable</key><string>WolfGridMac</string><key>CFBundleName</key><string>WolfGrid Mac Preview</string>
-<key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>0.5.1</string><key>CFBundleVersion</key><string>20</string>
+<key>CFBundleExecutable</key><string>WolfGridMac</string><key>CFBundleName</key><string>WolfGrid</string><key>CFBundleDisplayName</key><string>WolfGrid</string>
+<key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>0.6.1</string><key>CFBundleVersion</key><string>22</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string><key>NSAppleEventsUsageDescription</key><string>Review each CRM recipient, message and attachment before allowing WolfGrid to send through Apple Messages.</string>
 <key>NSContactsUsageDescription</key><string>Choose people to review and add to your WolfGrid CRM.</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>app.wolfgrid.mac.oauth</string><key>CFBundleURLSchemes</key><array><string>wolfgrid-mac</string></array></dict></array>
@@ -55,13 +55,13 @@ if [ "${WOLFGRID_PUBLIC_RELEASE:-false}" = true ]; then
 fi
 if [ "$identity" = - ]; then codesign --force --sign - --options runtime --entitlements "$root/WolfGridMac.entitlements" "$output"; else codesign --force --sign "$identity" --options runtime --entitlements "$root/WolfGridMac.entitlements" --timestamp "$output"; fi
 codesign --verify --deep --strict "$output"
-ditto -c -k --keepParent "$output" "$root/build/WolfGrid-Mac-Preview.zip"
+ditto -c -k --keepParent "$output" "$root/build/WolfGrid-Mac.zip"
 if [ "${WOLFGRID_PUBLIC_RELEASE:-false}" = true ]; then
-  xcrun notarytool submit "$root/build/WolfGrid-Mac-Preview.zip" --keychain-profile "$WOLFGRID_NOTARY_PROFILE" --wait
+  xcrun notarytool submit "$root/build/WolfGrid-Mac.zip" --keychain-profile "$WOLFGRID_NOTARY_PROFILE" --wait
   xcrun stapler staple "$output"
   xcrun stapler validate "$output"
   spctl --assess --type execute "$output"
-  ditto -c -k --keepParent "$output" "$root/build/WolfGrid-Mac-Preview.zip"
+  ditto -c -k --keepParent "$output" "$root/build/WolfGrid-Mac.zip"
 fi
-shasum -a 256 "$root/build/WolfGrid-Mac-Preview.zip" > "$root/build/SHA256SUMS"
+shasum -a 256 "$root/build/WolfGrid-Mac.zip" > "$root/build/SHA256SUMS"
 echo "$output"

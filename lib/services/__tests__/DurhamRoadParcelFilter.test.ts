@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { featureCollection, polygon, lineString } from '@turf/turf';
+import { filterRoadCentrelineParcels } from '../DurhamRoadParcelFilter';
+const rect = (id:string, x:number, properties:Record<string,unknown> = {}) => polygon([[[x,43],[x+0.0004,43],[x+0.0004,43.006],[x,43.006],[x,43]]],{id,...properties});
+const road=rect('road',-79), home=rect('home',-78.9995), residential=rect('residential',-78.999,{parcel_intent:'residential'});
+const lines=featureCollection([lineString([[-78.9998,43.00005],[-78.9998,43.00595]]),lineString([[-78.9988,43.00005],[-78.9988,43.00595]]),lineString([[-78.9995,43.00005],[-78.9995,43.00595]])]);
+const filtered=filterRoadCentrelineParcels(featureCollection([road,home,residential]),lines);
+assert.deepEqual(filtered.features.map(f=>f.properties?.id),['home','residential']);
+assert.equal(filterRoadCentrelineParcels(featureCollection([road]),featureCollection([])).features.length,1);
+console.log('PASS road centrelines remove corridors while preserving residential parcels and boundary crossings');

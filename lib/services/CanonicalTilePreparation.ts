@@ -99,6 +99,12 @@ export function prepareCanonicalTiles(bundle: Json) {
     return { ...turf.circle(point.coordinates, 2.6, { steps: 28, units: 'meters' }), properties: feature.properties };
   }) };
   layers.address_circles_compact = { source_layer: 'address_circles_compact', promote_id: 'feature_id', minzoom: 10, maxzoom: 18, count: records.addresses.length };
+  // Match iOS campaign address markers (2 m radius) without changing Android's compact layer.
+  collections.address_circles_ios = { type: 'FeatureCollection', features: collections.addresses.features.map((feature) => {
+    const point = feature.geometry as GeoJSON.Point;
+    return { ...turf.circle(point.coordinates, 2.0, { steps: 12, units: 'meters' }), properties: feature.properties };
+  }) };
+  layers.address_circles_ios = { source_layer: 'address_circles_ios', promote_id: 'feature_id', minzoom: 10, maxzoom: 18, count: records.addresses.length };
   const addresses = new Set(records.addresses.map((record) => record.id));
   const units = (Array.isArray(bundle.building_units) ? bundle.building_units : []) as Json[];
   collections.building_units = { type: 'FeatureCollection', features: units.flatMap((unit) => {

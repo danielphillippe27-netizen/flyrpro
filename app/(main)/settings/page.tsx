@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useFieldSales } from '@/lib/field-sales/client';
 import { useTheme } from '@/lib/theme-provider';
 import { useWorkspace } from '@/lib/workspace-context';
 import { createClient } from '@/lib/supabase/client';
@@ -17,6 +19,8 @@ import {
   Shield,
   Globe,
   Plug,
+  BriefcaseBusiness,
+  ArrowRight,
   Flag,
   Layers,
   WalletCards,
@@ -98,7 +102,8 @@ const inFlightBillingWorkspaceIds = new Set<string>();
 
 function SettingsPageContent() {
   const { theme, setTheme } = useTheme();
-  const { currentWorkspaceId, membershipsByWorkspaceId } = useWorkspace();
+  const { currentWorkspaceId, membershipsByWorkspaceId, accessLevel } = useWorkspace();
+  const { data: fieldSales } = useFieldSales({}, true);
   const router = useRouter();
   const [user, setUser] = useState<SupabaseUser | null>(null);
   const [entitlement, setEntitlement] = useState<EntitlementSnapshot | null>(null);
@@ -587,6 +592,23 @@ function SettingsPageContent() {
             </div>
           )}
 
+          {!isSalespersonSettings ? (
+            <nav aria-label="Settings tools" className="grid gap-3 sm:grid-cols-2">
+              <Link href="/settings/integrations" className="flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground hover:bg-muted/50">
+                <Plug className="h-5 w-5 shrink-0" />
+                <div className="flex-1"><h2 className="font-semibold">Integrations</h2><p className="mt-1 text-sm text-muted-foreground">Connect Apple, email, AI, and your CRM tools.</p></div>
+                <ArrowRight className="h-4 w-4 shrink-0" />
+              </Link>
+              {fieldSales?.enabled && accessLevel !== 'salesperson' ? (
+                <Link href="/sales" className="flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground hover:bg-muted/50">
+                  <BriefcaseBusiness className="h-5 w-5 shrink-0" />
+                  <div className="flex-1"><h2 className="font-semibold">Sales - Beta</h2><p className="mt-1 text-sm text-muted-foreground">Open your sales workspace.</p></div>
+                  <ArrowRight className="h-4 w-4 shrink-0" />
+                </Link>
+              ) : null}
+            </nav>
+          ) : null}
+
           {/* Account Section */}
           <Card>
             <CardHeader>
@@ -965,35 +987,6 @@ function SettingsPageContent() {
 
           {!isSalespersonSettings ? (
             <>
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Plug className="w-5 h-5" />
-                    <CardTitle>Integrations</CardTitle>
-                  </div>
-                  <CardDescription>
-                    Connect your CRM and other tools
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-base font-medium dark:text-white mb-1">CRM Connections</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Sync leads to Follow Up Boss and other CRMs
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => router.push('/settings/integrations')}
-                    >
-                      <Plug className="w-4 h-4 mr-2" />
-                      Manage
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
 
               <Card>
                 <CardHeader>

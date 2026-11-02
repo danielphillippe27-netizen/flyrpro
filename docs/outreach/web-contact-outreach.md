@@ -12,7 +12,7 @@ The web Contacts screens, lead records, campaign Leads and farm Leads now expose
 
 ## Personal Gmail activation
 
-Code is local; deployment and provider configuration have not been performed.
+Production Gmail configuration is enabled as of October 28, 2026. A dedicated **WolfGrid Gmail** client uses the existing Google project `flyer-ai-469921`; the WolfGrid Google login client is unchanged. The Gmail API is enabled, Daniel’s Gmail account is a test user, and server credentials plus an independent encryption key are configured as sensitive Production variables on Vercel. Live authenticated status and send-only OAuth initiation return 200. Google mailbox consent, callback completion, and a real send still require acceptance testing. The Google app remains in Testing; it is not approved for public Gmail use.
 
 1. Apply `supabase/migrations/20261028010000_personal_gmail_outreach.sql`.
 2. Register/configure a Google Web OAuth client with the Gmail API enabled. Request `openid`, `email`, and `https://www.googleapis.com/auth/gmail.send`. Configure test users while the app is in testing, and complete Google's applicable verification for public use.

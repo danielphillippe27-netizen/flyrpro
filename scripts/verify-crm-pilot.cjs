@@ -3,7 +3,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
 const dotenv=require('dotenv'),{createClient}=require('@supabase/supabase-js'),{createServerClient}=require('@supabase/ssr');
 let verificationStage="setup";
 (async()=>{
- const deployment=process.argv[2];if(!/^https:\/\/flyrpro-[a-z0-9-]+\.vercel\.app$/.test(deployment||''))throw Error('Supply the exact owned pilot deployment URL.');
+ const deployment=process.argv[2];if(deployment!=='https://wolfgrid.app'&&!/^https:\/\/flyrpro-[a-z0-9-]+\.vercel\.app$/.test(deployment||''))throw Error('Supply the exact owned pilot deployment URL.');
  const env=dotenv.parse(await fs.readFile('.env.local'));
  const userId='6d5b64bc-ff8d-4331-a808-86074a7266dc',workspace='8246edea-ffa7-4560-b484-e5493a61a127',contact='f11bbe77-5e20-49d2-87c6-840603d0a1ee';
  const admin=createClient(env.NEXT_PUBLIC_SUPABASE_URL,env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -16,14 +16,18 @@ let verificationStage="setup";
   const client=createServerClient(env.NEXT_PUBLIC_SUPABASE_URL,env.NEXT_PUBLIC_SUPABASE_ANON_KEY,{cookies:{getAll:()=>cookies,setAll:next=>{cookies=next;}}});
   const accepted=await client.auth.setSession({access_token:session.data.session.access_token,refresh_token:session.data.session.refresh_token});if(accepted.error)throw Error('Could not encode acceptance session cookies.');
   const headers=path.join(temporary,'headers');await fs.writeFile(headers,`Cookie: ${cookies.map(c=>`${c.name}=${c.value}`).join('; ')}\nx-wolfgrid-user-id: ${userId}\nContent-Type: application/json\nOrigin: ${deployment}\n`,{mode:0o600});
-  const info=JSON.parse(spawnSync('/usr/bin/plutil',['-convert','json','-o','-','apps/mac/build/WolfGrid Mac Preview.app/Contents/Info.plist'],{encoding:'utf8'}).stdout);
-  if(info.WolfGridWebOrigin!==deployment)throw Error('Preview entry mismatch');
-  const protection=new Map();let entry=info.WolfGridPilotEntryURL;
+  const protection=new Map();
+  if(deployment!=='https://wolfgrid.app'){
+  const info=JSON.parse(spawnSync('/usr/bin/plutil',['-convert','json','-o','-','apps/mac/build/WolfGrid.app/Contents/Info.plist'],{encoding:'utf8'}).stdout);
+  if(!process.env.WOLFGRID_VERIFICATION_ENTRY_URL&&info.WolfGridWebOrigin!==deployment)throw Error('Preview entry mismatch');
+  let entry=process.env.WOLFGRID_VERIFICATION_ENTRY_URL??info.WolfGridPilotEntryURL;
+  if(new URL(entry).origin!==deployment)throw Error('Preview entry mismatch');
   for(let i=0;i<5;i++){
    const response=await fetch(entry,{redirect:'manual',headers:{Cookie:[...protection].map(([k,v])=>`${k}=${v}`).join('; ')},signal:AbortSignal.timeout(20000)});
    for(const value of response.headers.getSetCookie()){const pair=value.split(';',1)[0],split=pair.indexOf('=');protection.set(pair.slice(0,split),pair.slice(split+1));}
    const next=response.headers.get('location');await response.body?.cancel();if(!next)break;
    entry=new URL(next,entry).href;if(new URL(entry).origin!==deployment)throw Error('Preview protection failed');
+  }
   }
   const cookie=[...cookies.map(c=>`${c.name}=${c.value}`),...[...protection].map(([k,v])=>`${k}=${v}`)].join('; ');
   async function request(url,body){
@@ -34,6 +38,7 @@ let verificationStage="setup";
   verificationStage="contacts";const contacts=await request(`/api/crm-workspace?workspaceId=${workspace}`);if(contacts.status!==200||!Array.isArray(contacts.data.clients))throw Error('Authenticated contacts failed.');
   const chosen=contacts.data.clients.find(c=>c.id===contact)??contacts.data.clients[0];
   const history=chosen?await request(`/api/mac-companion?workspaceId=${workspace}&contactId=${chosen.id}`):{status:200,data:{messages:[]}};if(history.status!==200||!Array.isArray(history.data.messages))throw Error('Authenticated private history failed: '+history.status+' '+String(history.data?.error??'').slice(0,180));
+  verificationStage="Gmail configuration";const gmail=await request(`/api/coco/gmail/status?workspaceId=${workspace}`);if(gmail.status!==200)throw Error("Authenticated Gmail status failed.");
   verificationStage="OpenAI configuration";const connection=await request(`/api/crm-ai/connection?workspaceId=${workspace}`);if(connection.status!==200||!connection.data.canSave||!connection.data.configured)throw Error('Pilot OpenAI configuration failed.');
   if(!connection.data.connected){const answer=await request('/api/crm-ai',{workspaceId:workspace,contactId:contact,question:'Summarize this contact'});if(answer.status!==403)throw Error('Missing personal key must fail closed.');}
   let farmStatus,pmTiles;
@@ -54,6 +59,6 @@ let verificationStage="setup";
    if(rangeStatus!==206||bytes.length!==127||bytes.subarray(0,7).toString()!=='PMTiles')throw Error('Invalid PMTiles header');
    pmTiles={schema:pm.data.schema,archiveStatus:206,headerBytes:bytes.length};
   }
-  console.log(JSON.stringify({deployment,authenticatedStatus:state.status,...(pmTiles?{farmStatus,pmTiles}:{}),privateMessages:history.data.messages.length,contacts:contacts.data.clients.length,syncEnabled:state.data.preferences.sync_enabled,aiMessagesEnabled:state.data.preferences.ai_messages_enabled,openAiCanSave:connection.data.canSave,modelConfigured:connection.data.configured,personalKeyConnected:connection.data.connected}));
+  console.log(JSON.stringify({deployment,authenticatedStatus:state.status,...(pmTiles?{farmStatus,pmTiles}:{}),privateMessages:history.data.messages.length,contacts:contacts.data.clients.length,syncEnabled:state.data.preferences.sync_enabled,aiMessagesEnabled:state.data.preferences.ai_messages_enabled,openAiCanSave:connection.data.canSave,modelConfigured:connection.data.configured,personalKeyConnected:connection.data.connected,gmailConfigured:gmail.data.configured,gmailConnected:gmail.data.connected,gmailCanSend:gmail.data.can_send}));
  }finally{await anon.auth.signOut({scope:'local'});await fs.rm(temporary,{recursive:true,force:true});}
 })().catch(error=>{const safe=['Authenticated pilot status failed.','Authenticated contacts failed.','Authenticated private history failed:','Pilot OpenAI configuration failed.','Pilot HTTP request failed.','Pilot response was not application JSON.','Could not create own-account acceptance session.','Could not authenticate own-account acceptance session.','Farm API failed: ','Compact map API failed: ','PMTiles range request failed: ','Archive origin changed','Invalid PMTiles header'];console.error('Pilot verification failed at '+verificationStage+' ('+error.name+'); credentials and message content were withheld.'+(safe.some(prefix=>error.message?.startsWith(prefix))?' '+error.message:''));process.exitCode=1;});

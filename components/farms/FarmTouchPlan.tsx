@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowUpRight, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { FarmSessionMode, FarmTouch } from "@/types/database";
+import type { FarmAddress, FarmTouchAddress, CampaignAddress, FarmSessionMode, FarmTouch } from "@/types/database";
 
 import {
-  buildTouchPlanProgress,
-  planDateTime as dateTime,
   type PlannerTouchDraft,
 } from "@/lib/farms/touch-plan";
 export type { PlannerTouchDraft } from "@/lib/farms/touch-plan";
@@ -22,16 +20,13 @@ const MODES: Record<FarmSessionMode, string> = {
   social_ad: "Social ad",
   event: "Event",
 };
-const dateLabel = (value: string) =>
-  new Date(dateTime(value)).toLocaleDateString("en-CA", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 
 export function FarmTouchPlan({
   drafts,
   touches,
+  addresses,
+  outcomes,
+  campaignAddresses,
   saving,
   message,
   error,
@@ -43,6 +38,9 @@ export function FarmTouchPlan({
 }: {
   drafts: PlannerTouchDraft[];
   touches: FarmTouch[];
+  addresses: FarmAddress[];
+  campaignAddresses: CampaignAddress[];
+  outcomes: FarmTouchAddress[];
   saving: boolean;
   message: string;
   error?: string;
@@ -91,362 +89,47 @@ export function FarmTouchPlan({
     setPlanOpen(true);
     onAdd();
   }
-  const gradientId = useId().replace(/:/g, "");
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [chartWidth, setChartWidth] = useState(1000);
-  useEffect(() => {
-    const element = chartRef.current;
-    if (!element) return;
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width;
-      if (width) setChartWidth(Math.max(280, Math.round(width)));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  const plotEnd = chartWidth - 28;
-  const plotWidth = plotEnd - 52;
   const now = Date.now();
-  const {
-    events: rawEvents,
-    completed: completedEvents,
-    planned,
-    total,
-  } = buildTouchPlanProgress(drafts, touches, now);
-  const events = rawEvents.map((event) => ({
-    ...event,
-    title: event.title || MODES[event.mode],
-  }));
-  const times = [
-    ...events.map((e) => dateTime(e.date)),
-    ...planned.map((e) => dateTime(e.plannedDate)),
-  ];
-  const completedCount = completedEvents.length;
-  const day = 86400000;
-  const min = Math.min(now - day * 7, ...times) - day * 3;
-  const max = Math.max(now + day * 30, ...times) + day * 3;
-  const x = (time: number) => 52 + ((time - min) / (max - min)) * plotWidth;
-  const ceiling = Math.max(4, total);
-  const y = (count: number) => 228 - (count / ceiling) * 180;
-  const planPoints = `52,228 ${planned.map((e, i) => `${x(dateTime(e.plannedDate))},${y(i + 1)}`).join(" ")} ${plotEnd},${y(total)}`;
-  const actualPoints = `52,228 ${completedEvents.map((e, i) => `${x(dateTime(e.date))},${y(i + 1)}`).join(" ")} ${x(now)},${y(completedCount)}`;
-  const next = events.find((e) => e.status !== "Completed");
-  function edit(id: string) {
-    setFocusRequest((request) => request + 1);
-    pendingFocus.current = id;
-    setPlanOpen(true);
-    setSelected(id);
+  const homeIds = new Set(addresses.map((address) => address.id));
+  const sessionIds = new Set(touches.filter((touch) => ["doorknock", "flyer", "pop_by"].includes(touch.mode ?? "doorknock")).map((touch) => touch.id));
+  const firstVisits = new Map<string, number>();
+  const visitKeys = new Set<string>();
+  for (const outcome of outcomes) {
+    const time = Date.parse(outcome.occurred_at);
+    if (!homeIds.has(outcome.farm_address_id) || !sessionIds.has(outcome.farm_touch_id) ||
+        outcome.status === "none" || outcome.status === "do_not_knock" ||
+        !Number.isFinite(time) || time > now) continue;
+    firstVisits.set(outcome.farm_address_id, Math.min(firstVisits.get(outcome.farm_address_id) ?? Infinity, time));
+    visitKeys.add(`${outcome.farm_touch_id}:${outcome.farm_address_id}`);
   }
+  const visitTimes = [...firstVisits.values()].sort((a, b) => a - b);
+  const campaignVisited = new Set(campaignAddresses.filter((address) => address.visited).map((address) => address.id));
+  const historicalHomes = addresses.filter((address) => address.campaign_address_id && campaignVisited.has(address.campaign_address_id) && !firstVisits.has(address.id)).length;
+  const totalHomes = homeIds.size;
+  const visitedHomes = visitTimes.length + historicalHomes;
+  const earliest = visitTimes[0] ?? now;
+  const min = Math.min(earliest, now - 86400000);
+  const x = (time: number) => 40 + ((time - min) / Math.max(now - min, 1)) * 920;
+  const y = (count: number) => 210 - (count / Math.max(totalHomes, 1)) * 180;
+  const points = `40,210 ${visitTimes.map((time, index) => `${x(time)},${y(index + 1)}`).join(" ")} 960,${y(visitTimes.length)}`;
   return (
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="flex flex-wrap items-start justify-between gap-4 p-5">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-              The long game
-            </p>
-            <h2 className="mt-2 text-xl font-semibold">Progress over time</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Every touch builds momentum. See your progress against the plan.
-            </p>
-          </div>
-          <div className="flex gap-5 text-xs text-muted-foreground">
-            <span>
-              <span className="mr-2 inline-block h-2 w-2 rounded-full bg-primary" />
-              Completed
-            </span>
-            <span>
-              <span className="mr-2 inline-block h-2 w-2 rounded-full bg-muted-foreground" />
-              Planned
-            </span>
-          </div>
+      <section className="overflow-hidden rounded-2xl border border-border bg-card p-5">
+        <h2 className="text-xl font-semibold">Homes visited over time</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Each home counts once toward coverage. Repeat visits are included in the total.</p>
+        <div className="mt-4 flex items-baseline gap-2">
+          <span className="text-3xl font-semibold tabular-nums">{visitedHomes.toLocaleString()} / {totalHomes.toLocaleString()}</span>
+          <span className="text-sm text-muted-foreground">homes visited · {totalHomes ? Math.round(visitedHomes / totalHomes * 100) : 0}% · {historicalHomes ? "At least " : ""}{(visitKeys.size + historicalHomes).toLocaleString()} total visits</span>
         </div>
-        <div className="grid grid-cols-2 gap-4 px-5 pb-3 md:grid-cols-4">
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {completedCount}
-              <span className="ml-1 text-sm font-normal text-muted-foreground">
-                / {total}
-              </span>
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Touchpoints completed
-            </p>
-          </div>
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {total ? Math.round((completedCount / total) * 100) : 0}%
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Of all touchpoints
-            </p>
-          </div>
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {events.filter((e) => e.status === "Overdue").length}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Overdue touchpoints
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-semibold">
-              {next ? dateLabel(next.date) : "All caught up"}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {next ? `Next: ${next.title}` : "Add your next touchpoint"}
-            </p>
-          </div>
-        </div>
-        <div className="px-3">
-          <div ref={chartRef}>
-            <svg
-              viewBox={`0 0 ${chartWidth} 280`}
-              className="w-full"
-              role="group"
-              aria-label={`Cumulative touchpoint progress: ${completedCount} completed of ${total} planned. Timeline details below.`}
-            >
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop
-                    offset="0%"
-                    stopColor="var(--primary)"
-                    stopOpacity="0.2"
-                  />
-                  <stop
-                    offset="100%"
-                    stopColor="var(--primary)"
-                    stopOpacity="0"
-                  />
-                </linearGradient>
-              </defs>
-              {[0, 1, 2, 3, 4].map((i) => {
-                const count = Math.round((ceiling * i) / 4);
-                return (
-                  <g key={i}>
-                    <line
-                      x1="52"
-                      x2={plotEnd}
-                      y1={y(count)}
-                      y2={y(count)}
-                      stroke="currentColor"
-                      className="text-border"
-                    />
-                    <text
-                      x="35"
-                      y={y(count) + 4}
-                      textAnchor="end"
-                      fill="currentColor"
-                      className="text-muted-foreground"
-                      fontSize="11"
-                    >
-                      {count}
-                    </text>
-                  </g>
-                );
-              })}
-              <polygon
-                points={`${actualPoints} ${x(now)},228`}
-                fill={`url(#${gradientId})`}
-              />
-              <polyline
-                points={planPoints}
-                fill="none"
-                stroke="currentColor"
-                className="text-muted-foreground"
-                strokeWidth="2"
-                strokeDasharray="5 6"
-              />
-              <polyline
-                points={actualPoints}
-                fill="none"
-                stroke="var(--primary)"
-                strokeWidth="3"
-                vectorEffect="non-scaling-stroke"
-                strokeLinejoin="round"
-              />
-              <line
-                x1={x(now)}
-                x2={x(now)}
-                y1="30"
-                y2="232"
-                stroke="currentColor"
-                className="text-muted-foreground"
-                strokeDasharray="3 5"
-              />
-              <text
-                x={x(now)}
-                y="20"
-                textAnchor="middle"
-                fill="currentColor"
-                className="text-muted-foreground"
-                fontSize="11"
-              >
-                TODAY
-              </text>
-              {planned.map((event, i) => (
-                <g
-                  key={event.id}
-                  role={
-                    drafts.some((d) => d.slotId === event.id)
-                      ? "button"
-                      : undefined
-                  }
-                  tabIndex={
-                    drafts.some((d) => d.slotId === event.id) && !saving
-                      ? 0
-                      : undefined
-                  }
-                  aria-label={
-                    drafts.some((d) => d.slotId === event.id)
-                      ? `Edit ${event.title || MODES[event.mode]}`
-                      : `Planned ${event.title || MODES[event.mode]}`
-                  }
-                  className={
-                    drafts.some((d) => d.slotId === event.id)
-                      ? "cursor-pointer outline-none focus:text-primary"
-                      : ""
-                  }
-                  onClick={() => {
-                    if (!saving && drafts.some((d) => d.slotId === event.id))
-                      edit(event.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (
-                      !saving &&
-                      drafts.some((d) => d.slotId === event.id) &&
-                      (e.key === "Enter" || e.key === " ")
-                    ) {
-                      e.preventDefault();
-                      edit(event.id);
-                    }
-                  }}
-                >
-                  <circle
-                    cx={x(dateTime(event.plannedDate))}
-                    cy={y(i + 1)}
-                    r="14"
-                    fill="transparent"
-                  />
-                  <circle
-                    key={event.id}
-                    cx={x(dateTime(event.plannedDate))}
-                    cy={y(i + 1)}
-                    r="5"
-                    fill="var(--card)"
-                    stroke="currentColor"
-                  >
-                    <title>
-                      {dateLabel(event.plannedDate)} ·{" "}
-                      {event.title || MODES[event.mode]} · {event.status}
-                    </title>
-                  </circle>
-                </g>
-              ))}
-              {completedEvents.map((event, i) => (
-                <circle
-                  key={event.id}
-                  cx={x(dateTime(event.date))}
-                  cy={y(i + 1)}
-                  r="5"
-                  fill="var(--primary)"
-                >
-                  <title>
-                    Completed {dateLabel(event.date)} ·{" "}
-                    {event.title || MODES[event.mode]}
-                  </title>
-                </circle>
-              ))}
-              {(chartWidth < 600 ? [0, 2, 4] : [0, 1, 2, 3, 4]).map((i) => (
-                <text
-                  key={i}
-                  x={52 + (i * plotWidth) / 4}
-                  y="260"
-                  textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"}
-                  fill="currentColor"
-                  className="text-muted-foreground"
-                  fontSize="11"
-                >
-                  {new Date(min + ((max - min) * i) / 4).toLocaleDateString(
-                    "en-CA",
-                    { month: "short", day: "numeric", year: "2-digit" },
-                  )}
-                </text>
-              ))}
-            </svg>
-          </div>
-        </div>
-        <div className="border-t border-border p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">Touchpoint timeline</h3>
-            <span className="text-xs text-muted-foreground">
-              Select an upcoming touchpoint to edit
-            </span>
-          </div>
-          <div className="flex gap-3 overflow-x-auto pb-3">
-            {events.map((event) => (
-              <div
-                key={event.id}
-                className={`w-56 shrink-0 rounded-xl border p-4 ${selected === event.id ? "border-primary bg-primary/5" : "border-border bg-muted/20"}`}
-              >
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span
-                    className={
-                      event.status === "Completed"
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : event.status === "Overdue"
-                          ? "text-amber-600 dark:text-amber-400"
-                          : "text-muted-foreground"
-                    }
-                  >
-                    {event.status === "Completed" ? (
-                      <Check className="mr-1 inline h-3 w-3" />
-                    ) : null}
-                    {event.status}
-                  </span>
-                  <span className="text-muted-foreground">
-                    Cycle {event.cycle ?? "—"}
-                  </span>
-                </div>
-                <p className="mt-3 text-sm font-semibold">{event.title}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {dateLabel(event.date)} · {MODES[event.mode]}
-                </p>
-                {event.target != null || event.reached != null ? (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {event.reached ?? 0} / {event.target ?? "—"} homes reached
-                  </p>
-                ) : null}
-                {drafts.some((d) => d.slotId === event.id) ? (
-                  <div className="mt-3 flex items-center justify-between">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={saving}
-                      onClick={() => edit(event.id)}
-                    >
-                      Edit <ArrowUpRight className="ml-1 h-3 w-3" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      disabled={saving}
-                      aria-label={`Remove ${event.title}`}
-                      onClick={() => onRemove(event.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          {!events.length ? (
-            <p className="text-sm text-muted-foreground">
-              Your timeline will appear when you add a touchpoint.
-            </p>
-          ) : null}
-        </div>
+        {historicalHomes > 0 && <p className="mt-2 text-xs text-muted-foreground">{historicalHomes} linked campaign homes have no dated Farm visit history and are included in the total, but not the timeline.</p>}
+        <svg viewBox="0 0 1000 240" className="mt-4 w-full" role="img" aria-label={`${visitedHomes} of ${totalHomes} homes visited over time`}>
+          {[0, 0.25, 0.5, 0.75, 1].map((fraction) => <g key={fraction}>
+            <line x1="40" x2="960" y1={y(totalHomes * fraction)} y2={y(totalHomes * fraction)} stroke="currentColor" className="text-border" />
+            <text x="32" y={y(totalHomes * fraction) + 4} textAnchor="end" fill="currentColor" className="text-muted-foreground" fontSize="11">{Math.round(totalHomes * fraction)}</text>
+          </g>)}
+          <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+          <text x="960" y="235" textAnchor="end" fill="currentColor" className="text-muted-foreground" fontSize="11">TODAY</text>
+        </svg>
       </section>
       <section className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="flex items-center gap-3 p-5">

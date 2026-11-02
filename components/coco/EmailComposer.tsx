@@ -8,6 +8,7 @@ export function EmailComposer({
   workspaceId,
   from,
   canSend,
+  configured = true,
   onConnect,
   onClose,
   inline = false,
@@ -17,6 +18,7 @@ export function EmailComposer({
   workspaceId: string;
   from: string | null;
   canSend: boolean;
+  configured?: boolean;
   onConnect: () => void;
   onClose: () => void;
 }) {
@@ -82,7 +84,7 @@ export function EmailComposer({
       >
         <h2>{sent ? "Email sent" : "Compose email"}</h2>
         <p>To: {client.email}</p>
-        <p>From: {from ?? "Connect Gmail"}</p>
+        <p>From: {from ?? (configured ? "Connect Gmail" : "Gmail unavailable")}</p>
         {sent ? (
           <p>
             Gmail accepted your email. It appears in Gmail Sent; delivery is not
@@ -92,10 +94,14 @@ export function EmailComposer({
           <>
             {!canSend && (
               <>
-                <p>Allow Gmail sending to send email from WolfGrid.</p>
-                <button type="button" onClick={onConnect}>
-                  Connect Gmail sending
-                </button>
+                {configured ? (
+                  <>
+                    <p>Connect your Gmail account to send email. Google sign-in only signs you into WolfGrid.</p>
+                    <button type="button" onClick={onConnect}>Connect Gmail sending</button>
+                  </>
+                ) : (
+                  <p role="status">Gmail sending is not set up on WolfGrid yet. You can write a draft here, but sending will be available after WolfGrid enables Gmail connections.</p>
+                )}
               </>
             )}
             <label>

@@ -28,10 +28,12 @@ export function ContactDetailsEditor({
   client,
   userId,
   onSaved,
+  onCancel,
 }: {
   client: Client;
   userId: string;
   onSaved: () => Promise<void>;
+  onCancel?: () => void;
 }) {
   const [draft, setDraft] = useState(() => fields(client));
   const [saving, setSaving] = useState(false);
@@ -221,6 +223,7 @@ export function ContactDetailsEditor({
             setVersion(client.updated_at);
             setSource(client);
             setMessage("");
+            onCancel?.();
           }}
         >
           Cancel

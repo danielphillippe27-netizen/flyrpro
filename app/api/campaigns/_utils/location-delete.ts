@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server';
+import { isUuid, isSnapshotBuildingIdentifier } from './resolve-campaign-building';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -248,7 +249,7 @@ export async function deleteBuildingDeep(
   let addressBackedPublicBuildingId: string | null = null;
   let directAddressId: string | null = null;
 
-  if (!row) {
+  if (!row && isUuid(buildingId)) {
     const { data: addressRow, error: addressError } = await admin
       .from('campaign_addresses')
       .select('id, building_id, building_gers_id')
@@ -280,6 +281,7 @@ export async function deleteBuildingDeep(
     linkedAddressIds.push(directAddressId);
   }
 
+  const rowIdentifiers = buildingIdentifiers.filter(isUuid);
   if (buildingIdentifiers.length > 0) {
     const { data: linkRows, error: linkQueryError } = await admin
       .from('building_address_links')
@@ -297,11 +299,14 @@ export async function deleteBuildingDeep(
         .filter((value): value is string => Boolean(value))
     );
 
+  }
+
+  if (rowIdentifiers.length > 0) {
     const { data: directBuildingAddresses, error: directBuildingAddressesError } = await admin
       .from('campaign_addresses')
       .select('id')
       .eq('campaign_id', campaignId)
-      .in('building_id', buildingIdentifiers);
+      .in('building_id', rowIdentifiers);
 
     if (directBuildingAddressesError) {
       throw new Error(directBuildingAddressesError.message);
@@ -336,16 +341,16 @@ export async function deleteBuildingDeep(
       .upsert({
         campaign_id: campaignId,
         public_building_id: publicBuildingId,
-      });
+      }, { onConflict: 'campaign_id,public_building_id' });
 
     if (hiddenBuildingError) {
-      console.warn('[location-delete] Hidden building upsert skipped:', hiddenBuildingError);
+      throw new Error(`Failed to suppress building: ${hiddenBuildingError.message}`);
     }
   }
 
   linkedAddressIds = uniqueNonEmpty(linkedAddressIds);
 
-  if (!row && linkedAddressIds.length === 0) {
+  if (!row && linkedAddressIds.length === 0 && !isSnapshotBuildingIdentifier(buildingId)) {
     return {
       found: false,
       buildingId: publicBuildingId,

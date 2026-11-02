@@ -183,7 +183,9 @@ function MessageAttachments({
 export default function CocoCrm({
   initialArea = "Inbox",
   initialContact,
+  canUseInbox = false,
 }: {
+  canUseInbox?: boolean;
   initialArea?: Area;
   initialContact?: string;
 }) {
@@ -194,6 +196,7 @@ export default function CocoCrm({
       userId={scope.userId}
       initialArea={initialArea}
       initialContact={initialContact}
+      canUseInbox={canUseInbox}
     />
   ) : (
     <div className="coco-crm">
@@ -207,7 +210,9 @@ function CocoWorkspace({
   userId,
   initialArea,
   initialContact,
+  canUseInbox,
 }: {
+  canUseInbox: boolean;
   userId: string;
   initialArea: Area;
   initialContact?: string;
@@ -220,6 +225,15 @@ function CocoWorkspace({
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const availableLabels = useMemo(() => Array.from(new Set<string>([...contactLabels, ...data.clients.flatMap(client => client.contact_labels ?? [])])), [data.clients]);
+  const availableLists = useMemo(() => {
+    const lists = new Map<string, string>();
+    for (const name of [...contactLabels, ...stages, ...data.clients.flatMap(client => [...(client.contact_labels ?? []), client.stage ?? "Lead"])]) {
+      const label = name.trim();
+      const key = label.toLowerCase();
+      if (label && !["all", "unlabeled"].includes(key) && !lists.has(key)) lists.set(key, label);
+    }
+    return [...lists.values()];
+  }, [data.clients]);
   const [search, setSearch] = useState(""),
     [selectedClient, setSelectedClient] = useState<string | null>(
       initialContact ?? null,
@@ -232,12 +246,13 @@ function CocoWorkspace({
   const [contactFilter, setContactFilter] = useState<
       ContactLabel | "All" | "Unlabeled"
     >("All"),
-    [stageFilter, setStageFilter] = useState("All"),
     [contactOptions, setContactOptions] = useState<"filter" | "stage" | null>(
       null,
     ),
     [bulkStage, setBulkStage] = useState("Lead"),
     [bulkLabel, setBulkLabel] = useState<ContactLabel>("Client");
+  const [editingContact, setEditingContact] = useState<string | null>(null);
+  useEffect(() => { setEditingContact(null); }, [selectedClient]);
   const [contactSelectionMode, setContactSelectionMode] = useState(false),
     [selectedContacts, setSelectedContacts] = useState<string[]>([]),
     [savingLabels, setSavingLabels] = useState(false),
@@ -364,6 +379,10 @@ function CocoWorkspace({
       setNotice("Add an email address first.");
       return;
     }
+    if (!canUseInbox) {
+      window.location.href = channel === "text" ? `sms:${encodeURIComponent(client.phone!)}` : `mailto:${encodeURIComponent(client.email!)}`;
+      return;
+    }
     setInboxContact(client);
     setEmailClient(channel === "email" ? client : null);
     setSelectedConversation(client.id);
@@ -436,11 +455,11 @@ function CocoWorkspace({
   const filteredContacts = data.clients
     .filter(
       (c) =>
-        (stageFilter === "All" || clientStage(c.id) === stageFilter) &&
         (contactFilter === "All" ||
           (contactFilter === "Unlabeled"
             ? !c.contact_labels.length
-            : c.contact_labels.includes(contactFilter))) &&
+            : clientStage(c.id).trim().toLowerCase() === contactFilter.toLowerCase() ||
+              c.contact_labels.some(label => label.trim().toLowerCase() === contactFilter.toLowerCase()))) &&
         `${displayName(c)} ${c.phone ?? ""} ${c.email ?? ""}`
           .toLowerCase()
           .includes(search.toLowerCase()),
@@ -717,6 +736,8 @@ function CocoWorkspace({
       })) as { id: string };
       await loadData();
       setSelectedClient(row.id);
+      setContactFilter("All");
+      setSearch("");
       setShowAddClient(false);
       setArea("Clients");
     } catch (e) {
@@ -931,9 +952,9 @@ function CocoWorkspace({
   // The view model below intentionally retains KimiCoco's markup and class names.
   const renderedData = { ...viewData, messages: data.messages };
   return (
-    <div className="coco-crm">
+    <div className={`coco-crm ${canUseInbox ? "" : "contacts-only"}`}>
       <div className="main-content">
-        <div className="mac-titlebar">
+        {canUseInbox && <div className="mac-titlebar">
           <nav className="coco-area-tabs" aria-label="CRM pages">
             <button
               aria-current={area === "Inbox" ? "page" : undefined}
@@ -982,56 +1003,17 @@ function CocoWorkspace({
             </Link>
 
           </div>
-        </div>
+        </div>}
         {area === "Clients" && (
           <div className={`contacts-workspace ${contactOptions === "filter" ? "with-contact-lists" : ""}`}>
             <nav className="contacts-lists" aria-label="Contact lists" hidden={contactOptions !== "filter"}>
               <div className="contacts-lists-heading"><strong>Lists</strong><button aria-label="Hide contact filters" onClick={() => setContactOptions(null)}><PanelLeft size={18} /></button></div>
-              <button className="all-contacts-list" onClick={() => { setContactFilter("All"); setStageFilter("All"); }}>All Contacts</button>
-                  <div
-                    id="contact-label-options"
-                    hidden={contactOptions !== "filter"}
-                    className="contact-filters"
-                    role="group"
-                    aria-label="Filter contacts by label"
-                  >
-                    <span>Labels</span>
-                    {(["All", ...availableLabels, "Unlabeled"] as const).map(
-                      (label) => (
-                        <button
-                          key={label}
-                          aria-pressed={contactFilter === label}
-                          onClick={() => setContactFilter(label)}
-                        >
-                          {label}
-                        </button>
-                      ),
-                    )}
-                  </div>
-                  <div
-                    id="contact-stage-options"
-                    hidden={contactOptions !== "filter"}
-                    className="contact-filters"
-                    role="group"
-                    aria-label="Filter contacts by pipeline stage"
-                  >
-                    <span>Stage</span>
-                    {[
-                      "All",
-                      "Lead",
-                      "Warm",
-                      "Active Client",
-                      "Past Client",
-                    ].map((stage) => (
-                      <button
-                        key={stage}
-                        aria-pressed={stageFilter === stage}
-                        onClick={() => setStageFilter(stage)}
-                      >
-                        {stage}
-                      </button>
-                    ))}
-                  </div>
+              <button className="all-contacts-list" aria-pressed={contactFilter === "All"} onClick={() => setContactFilter("All")}>All Contacts</button>
+              <div id="contact-list-options" className="contact-filters" role="group" aria-label="Filter contacts by list">
+                {[...availableLists, "Unlabeled"].map(list => (
+                  <button key={list} aria-pressed={contactFilter === list} onClick={() => setContactFilter(list)}>{list}</button>
+                ))}
+              </div>
             </nav>
             <aside className="contacts-browser" aria-label="Clients">
               <>
@@ -1048,7 +1030,7 @@ function CocoWorkspace({
                       aria-label="Filter"
                       title="Show contact lists and filters"
                       aria-expanded={contactOptions === "filter"}
-                      aria-controls="contact-label-options contact-stage-options"
+                      aria-controls="contact-list-options"
                       onClick={() =>
                         setContactOptions((value) =>
                           value === "filter" ? null : "filter",
@@ -1056,7 +1038,7 @@ function CocoWorkspace({
                       }
                     >
                       <PanelLeft size={19} />
-                      {(contactFilter !== "All" || stageFilter !== "All") && <span className="filter-active-dot" />}
+                      {contactFilter !== "All" && <span className="filter-active-dot" />}
                     </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1065,6 +1047,7 @@ function CocoWorkspace({
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => setShowAddClient(true)}>Add Contact</DropdownMenuItem>
                         <DropdownMenuItem disabled={integrationBusy} onSelect={() => setShowGmailImport(true)}>Google (Gmail)</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void importAppleContacts()}>Apple</DropdownMenuItem>
                       </DropdownMenuContent>
@@ -1270,12 +1253,10 @@ function CocoWorkspace({
                   return (
                     <>
                       <header className="page-header detail-header">
-                        <button
-                          className="back-button"
-                          onClick={() => setSelectedClient(null)}
-                        >
-                          <ArrowLeft size={17} /> All clients
-                        </button>
+                        <div className="contact-profile-toolbar">
+                          <button className="back-button" onClick={() => { setSelectedClient(null); setEditingContact(null); }}><ArrowLeft size={17} /> All contacts</button>
+                          <button className="contact-edit-button" aria-label="Edit contact" disabled={editingContact === client.id} onClick={() => setEditingContact(client.id)}>{editingContact === client.id ? "Editing" : "Edit"}</button>
+                        </div>
                         <div className="detail-title">
                           <Avatar name={displayName(client)} size="large" />
                           <div>
@@ -1295,13 +1276,15 @@ function CocoWorkspace({
                       </header>
                       <div className="page-body detail-grid">
                         <section className="surface details-surface">
+                          {editingContact === client.id ? <>
                           <span className="eyebrow">THE DETAILS</span>
                           <h2>About {client.first_name}</h2>
                           <ContactDetailsEditor
                             key={client.id}
                             client={client}
                             userId={userId}
-                            onSaved={() => loadData()}
+                            onSaved={async () => { await loadData(); setEditingContact(null); }}
+                            onCancel={() => setEditingContact(null)}
                           />
                           <dl>
                             <dt>Labels</dt>
@@ -1359,7 +1342,17 @@ function CocoWorkspace({
                               </select>
                             </dd>
                           </dl>
-                          <div className="notes-block">
+                          </> : <>
+                          <div className="contact-read-fields">
+                            {client.phone && <a className="contact-info-row" href={`tel:${encodeURIComponent(client.phone)}`}><span><small>mobile</small><strong>{client.phone}</strong></span><Phone size={17} /></a>}
+                            {client.email && <button className="contact-info-row" onClick={() => openContactInbox(client, "email")}><span><small>email</small><strong>{client.email}</strong></span><Mail size={17} /></button>}
+                            {client.address && <div className="contact-info-row"><span><small>address</small><strong>{client.address}</strong></span></div>}
+                            <button className="contact-info-row contact-note-row" onClick={() => setEditingContact(client.id)}><span><small>Notes</small><span className={client.notes ? "contact-note-text" : "contact-note-placeholder"}>{client.notes || "Add a note"}</span></span></button>
+                            <div className="contact-info-row"><span><small>Lists</small><span>{[...new Set([clientStage(client.id), ...client.contact_labels])].join(" · ")}</span></span></div>
+                            {client.next_follow_up_at && <div className="contact-info-row"><span><small>Next follow-up</small><span>{new Date(client.next_follow_up_at).toLocaleString()}</span></span></div>}
+                          </div>
+                          </>}
+                          {clientDeals.some(deal => deal.client_id === client.id) && <div className="notes-block">
                             <span className="eyebrow">PAST DEALS</span>
                             {clientDeals
                               .filter((deal) => deal.client_id === client.id)
@@ -1392,8 +1385,9 @@ function CocoWorkspace({
                             {!clientDeals.some(
                               (deal) => deal.client_id === client.id,
                             ) && <p>No past deals added yet.</p>}
-                          </div>
+                          </div>}
                         </section>
+                        <details className="contact-crm-extras"><summary>Conversations & tasks</summary>
                         <div className="detail-right">
                           <ContactContext client={client} />
                           <section className="surface">
@@ -1451,6 +1445,7 @@ function CocoWorkspace({
                             )}
                           </section>
                         </div>
+                        </details>
                       </div>
                     </>
                   );
@@ -1585,6 +1580,7 @@ function CocoWorkspace({
                     workspaceId={workspaceId}
                     from={gmailStatus?.email ?? null}
                     canSend={Boolean(gmailStatus?.can_send)}
+                    configured={gmailStatus?.configured !== false}
                     onConnect={() => void connectGmail(true)}
                     onClose={() => {
                       setEmailClient(null);
@@ -1618,11 +1614,10 @@ function CocoWorkspace({
                           <div className="px-2 py-1.5 text-xs text-muted-foreground">{activeConversation.channel.toUpperCase()} · {deviceOnline ? "Mac connected" : "Mac offline"}</div>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                      <a className="messages-video-call" aria-label="Video call conversation contact" title="FaceTime" aria-disabled={!clientsById[activeConversation.client_id ?? ""]?.phone && !clientsById[activeConversation.client_id ?? ""]?.email} href={(() => {
-                        const person = clientsById[activeConversation.client_id ?? ""];
-                        const recipient = person?.phone || person?.email;
-                        return recipient ? `facetime:${encodeURIComponent(recipient)}` : undefined;
-                      })()}><Video size={20} /></a>
+                      <a className="messages-phone-call" aria-label="Call conversation contact" title="Call" aria-disabled={!clientsById[activeConversation.client_id ?? ""]?.phone} href={(() => {
+                        const phone = clientsById[activeConversation.client_id ?? ""]?.phone;
+                        return phone ? `tel:${encodeURIComponent(phone)}` : undefined;
+                      })()}><Phone size={19} /></a>
                     </div>
                     <div
                       className="thread-messages"
@@ -1865,7 +1860,7 @@ function CocoWorkspace({
               setShowAddTask(false);
             }}
           >
-            <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="contact-task-title" onClick={(event) => event.stopPropagation()}>
               <button
                 className="modal-close"
                 onClick={() => {
@@ -1878,7 +1873,7 @@ function CocoWorkspace({
               <span className="eyebrow">
                 {showAddClient ? "A NEW CONNECTION" : "ONE THING AT A TIME"}
               </span>
-              <h2>{showAddClient ? "Add a client" : "Add a task"}</h2>
+              <h2 id="contact-task-title">{showAddClient ? "Add Contact" : "Add a task"}</h2>
               <form action={showAddClient ? addClient : addTask}>
                 {showAddClient ? (
                   <>
@@ -1948,7 +1943,7 @@ function CocoWorkspace({
                   type="submit"
                   disabled={savingNew}
                 >
-                  {showAddClient ? "Add client" : "Create task"}{" "}
+                  {showAddClient ? "Add Contact" : "Create task"}{" "}
                   <ArrowRight size={16} />
                 </button>
               </form>

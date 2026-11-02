@@ -168,6 +168,26 @@
   --tabs-active: oklch(0.29 0 0);
 }
 
+/* Give lead-finder fields a visible surface against cards in either theme. */
+.lead-finder-page [data-slot="input"],
+.lead-finder-page [data-slot="select-trigger"] {
+  background-color: var(--background);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.lead-finder-page [data-slot="tabs-list"] {
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  padding: 3px;
+}
+
+.lead-finder-page [data-slot="tabs-trigger"][data-state="active"] {
+  background-color: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

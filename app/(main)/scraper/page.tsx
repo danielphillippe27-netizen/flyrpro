@@ -5,8 +5,8 @@ import { SalespersonPlacesLeadFinder } from '@/components/scraper/SalespersonPla
 export default async function SalespersonScraperPage() {
   await requireSalesperson();
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background">
-      <header className="border-b border-border bg-white dark:bg-card">
+    <div className="lead-finder-page min-h-screen bg-background text-foreground">
+      <header className="border-b border-border bg-card">
         <div className="w-full px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">

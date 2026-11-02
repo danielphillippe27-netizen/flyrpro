@@ -1,3 +1,4 @@
+import { canUseInbox } from "@/lib/coco/inbox-access";
 import { redirect } from 'next/navigation';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -43,7 +44,7 @@ export default async function LeadsPage() {
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-background">
       <main className="flex min-h-0 flex-1 overflow-hidden">
-        {isSalesperson ? <ContactsHubView /> : <CocoCrm initialArea="Clients" />}
+        {isSalesperson ? <ContactsHubView /> : <CocoCrm initialArea="Clients" canUseInbox={canUseInbox(user.email)} />}
       </main>
     </div>
   );

@@ -1,3 +1,4 @@
+import { readCurrentCampaignMapBundle } from '@/lib/services/CampaignMapBundlePrebuilder';
 import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
@@ -285,13 +286,8 @@ async function resolveBuilding(supabase: SupabaseClient, campaignId: string, bui
     }
   }
 
-  const { data: bundle, error: bundleError } = await supabase
-    .from("campaign_map_bundles")
-    .select("buildings_geojson")
-    .eq("campaign_id", campaignId)
-    .eq("is_current", true)
-    .maybeSingle();
-  if (!bundleError && bundle) {
+  const bundle = await readCurrentCampaignMapBundle(supabase, campaignId);
+  if (bundle) {
     const snapshotBuilding = resolveSnapshotBuilding(bundle.buildings_geojson, buildingIdParam);
     if (snapshotBuilding) return snapshotBuilding;
   }

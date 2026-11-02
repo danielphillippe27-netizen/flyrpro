@@ -1,4 +1,10 @@
-# WolfGrid Mac Preview
+# Shared live website · Mac 0.6.1
+
+The installed app loads https://wolfgrid.app/messages and uses the same live deployment as the browser. Web features update with the website. Mac bridge permissions, Apple Contacts review, Messages synchronization and system handoffs remain native app capabilities. The website business inbox remains at /inbox; the private CRM messages inbox is /messages. There is no preview-share cookie or expiring entry link in this build.
+
+Quit and reopen after installing to leave the previous preview origin. Sign in once at the live website origin. Native permissions and server-side personal settings are retained. Native bridge changes still require an app update. This remains a signed private pilot, not a notarized public download.
+
+# WolfGrid
 
 Mac wrapper for WolfGrid with reviewed Apple Contacts import, ongoing private one-to-one Messages sync, contact history, and the web CRM assistant. Version 0.3.0 adds the Apple command centre, a private communications inbox, contact-level history permissions, reviewed EventKit exports and opt-in menu-bar/login behaviour. This remains a pilot until Developer ID signing and notarization are complete.
 

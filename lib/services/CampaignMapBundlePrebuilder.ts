@@ -1,3 +1,5 @@
+import { fetchDurhamRoadCentrelines, filterRoadCentrelineParcels } from './DurhamRoadParcelFilter';
+import { isExternalMapPointer, putExternalMapPayload, readExternalMapPayload } from './ExternalMapPayload';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { fetchGeometryTargetStates, mergeGeometryTargetProgress } from './GeometryTargetProgress';
 import { createHash } from 'node:crypto';
@@ -626,59 +628,15 @@ function representativeCoordinate(feature: GeoJSON.Feature): [number, number] | 
   }
 }
 
-function parcelHasExplicitOccupant(feature: GeoJSON.Feature): boolean {
-  const properties = (feature.properties ?? {}) as JsonRecord;
-  const positiveCounts = [
-    properties.address_count,
-    properties.linked_address_count,
-    properties.building_count,
-    properties.linked_building_count,
-  ].some((value) => (numberValue(value) ?? 0) > 0);
-  if (positiveCounts) return true;
-
-  return uniqueStrings([
-    properties.address_id,
-    properties.campaign_address_id,
-    properties.building_id,
-    properties.linked_building_id,
-    ...stringArrayValue(properties.address_ids),
-    ...stringArrayValue(properties.linked_address_ids),
-    ...stringArrayValue(properties.building_ids),
-    ...stringArrayValue(properties.linked_building_ids),
-  ]).length > 0;
-}
-
-/**
- * Keep only campaign parcels that contain an address or a renderable building.
- * Explicit link metadata is also honored because source coordinates can sit just outside
- * a parcel boundary even when the canonical ownership/link is known.
- */
-export function filterParcelsWithoutBuildingsOrAddresses(params: {
-  parcels: FeatureCollection;
-  addresses: FeatureCollection;
-  buildings: FeatureCollection;
-}): FeatureCollection {
-  if (params.parcels.features.length === 0) return params.parcels;
-
-  const occupantCoordinates = [...params.addresses.features, ...params.buildings.features]
-    .flatMap((feature) => {
-      const coordinate = representativeCoordinate(feature);
-      return coordinate ? [coordinate] : [];
-    });
-
-  const features = params.parcels.features.filter((parcel) => {
-    if (parcelHasExplicitOccupant(parcel)) return true;
-    const parcelBbox = bboxForGeometry(parcel.geometry);
-    if (!parcelBbox) return false;
-
-    return occupantCoordinates.some((coordinate) =>
-      pointInBbox(coordinate, parcelBbox) && parcelContainsPoint(parcel, coordinate)
-    );
+/** Exclude identified non-residential parcels without requiring an occupant point. */
+export function filterResidentialParcelsForDisplay(parcels: FeatureCollection): FeatureCollection {
+  const features = parcels.features.filter((parcel) => {
+    const properties = parcel.properties ?? {};
+    const explicitResidential = [properties.parcel_intent, properties.land_use, properties.landuse, properties.property_type]
+      .some(value => typeof value === 'string' && /residential/i.test(value));
+    return isResidentialParcelFeature(parcel) && (explicitResidential || isDisplayableParcelFeature(parcel));
   });
-
-  return features.length === params.parcels.features.length
-    ? params.parcels
-    : { ...params.parcels, features };
+  return features.length === parcels.features.length ? parcels : { ...parcels, features };
 }
 
 function centroidForFeature(feature: GeoJSON.Feature): [number, number] | null {
@@ -1851,7 +1809,16 @@ export async function readCurrentCampaignMapBundle(
     return null;
   }
 
-  return (data as CurrentCampaignMapBundleRow | null) ?? null;
+  if (!data) return null;
+  const row = data as CurrentCampaignMapBundleRow;
+  const counts = row.counts as JsonRecord | undefined;
+  const pointer = counts?._external_map_payload;
+  if (pointer !== undefined) {
+    if (!isExternalMapPointer(pointer)) throw new Error('Invalid external campaign map payload pointer');
+    const external = await readExternalMapPayload(pointer, campaignId) as Partial<CurrentCampaignMapBundleRow>;
+    return { ...row, ...external, counts: row.counts };
+  }
+  return row;
 }
 
 export async function readCurrentCampaignMapBundleMetadata(
@@ -2009,27 +1976,41 @@ async function upsertCanonicalBundle(
     p_built_at: payload.builtAt,
     p_expires_at: payload.expiresAt,
   };
+  // PostgREST and Postgres time out on large JSON values. Store the immutable
+  // geometry and field data in S3 and publish a small atomic pointer instead.
+  if (Buffer.byteLength(JSON.stringify(latestArgs)) > 4 * 1024 * 1024) {
+    const { data: snapshot, error: snapshotError } = await supabase.from('campaign_snapshots')
+      .select('bucket').eq('campaign_id', payload.campaignId).single();
+    if (snapshotError || !snapshot?.bucket) throw new Error('Campaign storage bucket unavailable');
+    const pointer = await putExternalMapPayload(snapshot.bucket, payload.campaignId, {
+      buildings_geojson: payload.buildings, addresses_geojson: payload.addresses,
+      parcels_geojson: payload.parcels, roads_geojson: payload.roads, links: payload.links,
+      address_orphans: payload.addressOrphans, building_orphans: payload.buildingOrphans,
+      building_units: payload.buildingUnits, reconciliation: payload.reconciliation,
+      reconciliation_report: payload.reconciliationReport,
+    });
+    latestArgs.p_buildings_geojson = EMPTY_FEATURE_COLLECTION;
+    latestArgs.p_addresses_geojson = EMPTY_FEATURE_COLLECTION;
+    latestArgs.p_parcels_geojson = EMPTY_FEATURE_COLLECTION;
+    latestArgs.p_roads_geojson = EMPTY_FEATURE_COLLECTION;
+    latestArgs.p_links = [];
+    latestArgs.p_address_orphans = [];
+    latestArgs.p_building_orphans = [];
+    latestArgs.p_counts = { ...payload.counts, _external_map_payload: pointer };
+  }
   const latest = await supabase.rpc('rpc_upsert_campaign_map_bundle', latestArgs);
   if (latest.error) {
-    const legacyArgs = {
-      p_campaign_id: payload.campaignId,
-      p_asset_signature: payload.assetSignature,
-      p_source_version: payload.sourceVersion,
-      p_buildings_geojson: payload.buildings,
-      p_addresses_geojson: payload.addresses,
-      p_parcels_geojson: payload.parcels,
-      p_roads_geojson: payload.roads,
-      p_links: payload.links,
-      p_display_mode_hint: payload.displayModeHint,
-      p_counts: payload.counts,
-      p_layer_fetched_at: payload.layerFetchedAt,
-      p_links_status: payload.linksStatus,
-      p_built_at: payload.builtAt,
-      p_expires_at: payload.expiresAt,
-    };
+    // Only try the older signature when PostgREST cannot find the newer one.
+    // Retrying database failures with another large payload masks the original
+    // error and can add load while the database is already struggling.
+    if (latest.error.code !== 'PGRST202') {
+      throw new Error(`Failed to persist campaign map bundle: ${latest.error.message}`);
+    }
+    const { p_address_orphans: _addressOrphans, p_building_orphans: _buildingOrphans, ...legacyArgs } = latestArgs;
+    void _addressOrphans; void _buildingOrphans;
     const legacy = await supabase.rpc('rpc_upsert_campaign_map_bundle', legacyArgs);
     if (legacy.error) {
-      throw new Error(`Failed to persist campaign map bundle: ${legacy.error.message}`);
+      throw new Error(`Failed to persist campaign map bundle (current: ${latest.error.message}; legacy: ${legacy.error.message})`);
     }
   }
 
@@ -2057,6 +2038,9 @@ export async function prebuildCampaignMapBundle(
     linksStatusOverride?: string | null;
     parcelDisplayMode?: 'filtered' | 'raw';
     forceRebuild?: boolean;
+    // Build a candidate without updating address ownership or publishing it.
+    dryRun?: boolean;
+    preserveExistingOwnership?: boolean;
   }
 ) {
   const [
@@ -2189,15 +2173,48 @@ export async function prebuildCampaignMapBundle(
   const rawBuildings = scopedGeometry?.buildings?.features.length
     ? scopedGeometry.buildings
     : baseBuildings;
-  const parcels = useRawScopedParcels && scopedGeometry?.parcels?.features.length
+  const candidateParcels = useRawScopedParcels && scopedGeometry?.parcels?.features.length
     ? scopedGeometry.parcels
     : filteredBaseParcels.features.length > 0
     ? filteredBaseParcels
     : scopedGeometry?.parcels?.features.length
       ? scopedGeometry.parcels
       : filteredBaseParcels;
+  const hiddenParcels = await fetchAllInPages<{ parcel_id: string; external_id: string }>(async (from, to) =>
+    await supabase.from('campaign_hidden_parcels').select('parcel_id,external_id')
+      .eq('campaign_id', campaignId).range(from, to)
+  );
+  const hiddenParcelIds = new Set(hiddenParcels.flatMap(row => [row.parcel_id, row.external_id]).map(id => id.trim().toLowerCase()));
+  const unclassifiedParcels = hiddenParcelIds.size === 0 ? candidateParcels : {
+    ...candidateParcels,
+    features: candidateParcels.features.filter(feature => {
+      const props = (feature.properties ?? {}) as JsonRecord;
+      return ![feature.id, props.id, props.parcel_id, props.external_id]
+        .some(id => typeof id === 'string' && hiddenParcelIds.has(id.trim().toLowerCase()));
+    }),
+  };
+  // Exclude road corridors before ownership and pin placement, so a road-side
+  // address cannot be assigned to a road polygon.
+  const residentialParcels = filterResidentialParcelsForDisplay(unclassifiedParcels);
+  const roadCentrelines = await measure('durham_road_centrelines', recordTiming, () =>
+    fetchDurhamRoadCentrelines(residentialParcels)
+  );
+  const parcels = roadCentrelines ? filterRoadCentrelineParcels(residentialParcels, roadCentrelines) : residentialParcels;
+  // Scoped PMTiles contain the source's original footprints. Suppress campaign
+  // deletions after hydration too, including when geometry came from cache.
+  const hiddenRows = await fetchAllInPages<{ public_building_id: string }>(async (from, to) =>
+    await supabase.from('campaign_hidden_buildings').select('public_building_id')
+      .eq('campaign_id', campaignId).range(from, to)
+  );
+  const hiddenBuildingIds = new Set(hiddenRows.map(row => row.public_building_id.trim().toLowerCase()));
+  const visibleRawBuildings = hiddenBuildingIds.size === 0 ? rawBuildings : {
+    ...rawBuildings,
+    features: rawBuildings.features.filter(feature =>
+      !featureIdentifierCandidates(feature).some(id => hiddenBuildingIds.has(id.toLowerCase()))
+    ),
+  };
   const renderableBuildings = applyBuildingResolutions(
-    filterRenderableBuildingCollection(campaignId, rawBuildings),
+    filterRenderableBuildingCollection(campaignId, visibleRawBuildings),
     buildingResolutions
   );
   const links = await measure('links', recordTiming, () => fetchCanonicalLinks(supabase, campaignId));
@@ -2218,17 +2235,25 @@ export async function prebuildCampaignMapBundle(
     fieldManualPinIds
   );
   const isPendingProvisionBundle = normalizedWorkflowStatus(options?.linksStatusOverride) === 'pending_provision';
-  const parcelOwnership = isPendingProvisionBundle
-    ? []
-    : selectCanonicalAddressParcelOwnershipForBundle(enriched.addresses, parcels);
-  if (!isPendingProvisionBundle) {
-    await measure('parcel_ownership_persist', recordTiming, () =>
-      persistAddressParcelOwnership({
-        supabase,
-        campaignId,
-        ownership: parcelOwnership,
-        sourceVersion,
-      })
+  // A display-only refresh must not replace existing address ownership.
+  let parcelOwnership: AddressParcelOwnership[];
+  if (isPendingProvisionBundle) {
+    parcelOwnership = [];
+  } else if (options?.preserveExistingOwnership) {
+    const rows = await fetchAllInPages<{ address_id: string; parcel_id: string; campaign_parcel_id: string | null; match_type: 'contains' | 'address_identity'; confidence: number; parcel_area_sqm: number; distance_meters: number }>(async (from, to) =>
+      await supabase.from('campaign_address_parcel_links')
+        .select('address_id,parcel_id,campaign_parcel_id,match_type,confidence,parcel_area_sqm,distance_meters')
+        .eq('campaign_id', campaignId).range(from, to)
+    );
+    const visibleIds = new Set(parcels.features.map(feature => parcelFeatureExternalId(feature)?.toLowerCase()).filter(Boolean));
+    parcelOwnership = rows.filter(row => visibleIds.has(row.parcel_id.toLowerCase())).map(row => ({
+      addressId: row.address_id, parcelId: row.parcel_id, campaignParcelId: row.campaign_parcel_id,
+      matchType: row.match_type, confidence: row.confidence, parcelAreaSqm: row.parcel_area_sqm, distanceMeters: row.distance_meters,
+    }));
+  } else {
+    parcelOwnership = selectCanonicalAddressParcelOwnershipForBundle(enriched.addresses, parcels);
+    if (!options?.dryRun) await measure('parcel_ownership_persist', recordTiming, () =>
+      persistAddressParcelOwnership({ supabase, campaignId, ownership: parcelOwnership, sourceVersion })
     );
   }
   const ownershipApplied = applyAddressParcelOwnership({
@@ -2246,22 +2271,9 @@ export async function prebuildCampaignMapBundle(
     applyParcelPinPlacements(ownershipApplied.addresses, placements), addressAdjustments
   );
   const buildings = manualPinsApplied.buildings;
-  const ownedParcels = await measure('parcel_occupancy_filter', recordTiming, async () => {
-    const filtered = filterParcelsWithoutBuildingsOrAddresses({
-      parcels: ownershipApplied.parcels,
-      addresses,
-      buildings,
-    });
-    const removed = ownershipApplied.parcels.features.length - filtered.features.length;
-    if (removed > 0) {
-      console.log('[CampaignMapBundlePrebuilder] Filtered parcels without buildings or addresses:', {
-        campaignId,
-        removed,
-        kept: filtered.features.length,
-      });
-    }
-    return filtered;
-  });
+  // Address and building coordinates are often offset from their lots. Display
+  // classification is independent of address ownership and pin placement.
+  const ownedParcels = ownershipApplied.parcels;
   const buildingOrphans = enriched.buildingOrphans;
   const computedLinksStatus = 'ready';
   const linksStatus = typeof options?.linksStatusOverride === 'string' && options.linksStatusOverride.trim()
@@ -2293,6 +2305,7 @@ export async function prebuildCampaignMapBundle(
     building_orphans: buildingOrphans.length,
     links_status: linksStatus,
     parcel_links: parcelOwnership.length,
+    parcel_ownership_digest: stableHash(parcelOwnership.map(row => [row.addressId, row.parcelId, row.matchType]).sort((a, b) => a.join('|').localeCompare(b.join('|')))),
     reconciliation_revision: reconciliationRevision,
     unit_split_signatures: buildingUnits.map((unit) => unit.split_signature),
   });
@@ -2312,7 +2325,7 @@ export async function prebuildCampaignMapBundle(
   };
   const displayModeHint = buildings.features.length > 0 ? 'buildings' : 'addresses';
 
-  await measure('persist', recordTiming, () =>
+  if (!options?.dryRun) await measure('persist', recordTiming, () =>
     upsertCanonicalBundle(supabase, {
       campaignId,
       assetSignature,

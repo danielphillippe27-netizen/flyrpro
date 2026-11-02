@@ -44,7 +44,7 @@ async function ensureContactForCallSms(params: {
       full_name: name,
       phone: phone || null,
       email,
-      address: '',
+      address: getPayloadText(payload, 'diallerLeadAddress'),
       status: 'warm',
       last_contacted: params.now,
       created_at: params.now,

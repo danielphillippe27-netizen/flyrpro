@@ -1,3 +1,4 @@
+import { invalidateDeletedMap } from '@/app/api/campaigns/_utils/invalidate-deleted-map';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
@@ -31,6 +32,8 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (!result.found) {
       return NextResponse.json({ error: 'Building not found' }, { status: 404 });
     }
+
+    await invalidateDeletedMap(admin, campaignId);
 
     return NextResponse.json({
       deleted: true,

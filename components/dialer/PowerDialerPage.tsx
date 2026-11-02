@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { AlertCircle, CheckCircle2, ChevronRight, Clock, Download, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneIncoming, PhoneOff, Play, Save, Send, Star, Trash2, Upload, X } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Download, ExternalLink, ListPlus, Loader2, Mail, MessageSquare, Mic, Pause, PhoneIncoming, PhoneOff, Play, Save, Send, Star, Trash2, Upload, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -158,6 +158,25 @@ function getLeadRecordingExportHref(lead: DiallerLead | null | undefined, worksp
   if (!lead?.latest_call_recording?.available || !workspaceId) return null;
   const params = new URLSearchParams({ workspaceId });
   return `/api/dialer/leads/${encodeURIComponent(lead.id)}/recording?${params.toString()}`;
+}
+
+function diallerWebsite(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    const url = new URL(/^[a-z][a-z\d+.-]*:/i.test(value.trim()) ? value.trim() : `https://${value.trim()}`);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function googleRatingLabel(lead: DiallerLead | null | undefined): string | null {
+  const rating = lead?.metadata?.googleRating;
+  const count = lead?.metadata?.googleReviewCount;
+  const parts: string[] = [];
+  if (typeof rating === 'number' && Number.isFinite(rating) && rating >= 0 && rating <= 5) parts.push(`${rating.toFixed(1)} / 5`);
+  if (typeof count === 'number' && Number.isInteger(count) && count >= 0) parts.push(`${count.toLocaleString()} ratings`);
+  return parts.length ? parts.join(' · ') : null;
 }
 
 function formatRecordingDuration(totalSeconds: number | null | undefined): string | null {
@@ -401,7 +420,7 @@ function parseFocusedLeadIds(value: string | null): string[] {
         .map((id) => id.trim())
         .filter(Boolean)
     )
-  ).slice(0, 100);
+  );
 }
 
 function scorePhoneColumn(rows: string[][], columnIndex: number, phoneMarket: SupportedPhoneMarket): number {
@@ -466,6 +485,7 @@ function leadsFromCsv(text: string, phoneMarket: SupportedPhoneMarket): Array<{ 
 export function PowerDialerPage() {
   const { currentWorkspaceId, setCurrentWorkspaceId } = useWorkspace();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const {
     activeLeadId,
     activeCallId,
@@ -888,7 +908,7 @@ export function PowerDialerPage() {
           leads: dialableContacts.map(({ contact, phone }) => ({
             name: contact.full_name?.trim() || 'Lead',
             phone: phone.e164 || contact.phone?.trim() || '',
-            company: contact.address?.trim() || null,
+            address: contact.address?.trim() || null,
             email: contact.email?.trim() || null,
           })),
         }),
@@ -897,8 +917,14 @@ export function PowerDialerPage() {
       if (!response.ok) throw new Error(data.error || 'Failed to add this list to the dialler.');
 
       const importedLeads = data.leads ?? [];
-      setLeads((currentLeads) => [...currentLeads, ...importedLeads]);
+      const combinedIds = Array.from(new Set([...leads.map((lead) => lead.id), ...importedLeads.map((lead) => lead.id)]));
+      setLeads((currentLeads) => Array.from(new Map([...currentLeads, ...importedLeads].map((lead) => [lead.id, lead])).values()));
       setActiveLeadId((currentId) => currentId ?? importedLeads[0]?.id ?? null);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('workspaceId', currentWorkspaceId);
+      params.set('leadIds', combinedIds.join(','));
+      params.set('listName', leads.length ? 'Combined lists' : (area ? `${list.name} - ${area.label}` : list.name));
+      router.replace(`/dialer?${params.toString()}`, { scroll: false });
       setMessage(`${data.importedCount ?? importedLeads.length} leads added from ${area ? `${list.name} - ${area.label}` : list.name}.`);
       setListPickerOpen(false);
     } catch (addError) {
@@ -1832,7 +1858,7 @@ export function PowerDialerPage() {
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {activeLead?.company?.trim() || '—'}
+                {activeLead?.address?.trim() || activeLead?.company?.trim() || '—'}
               </div>
               <div className="mt-2 truncate text-[26px] font-semibold leading-tight text-foreground sm:text-[28px]">
                 {activeLead?.name?.trim() || '—'}
@@ -1845,6 +1871,21 @@ export function PowerDialerPage() {
                   </span>
                 ) : null}
               </div>
+              {activeLead && (googleRatingLabel(activeLead) || diallerWebsite(activeLead.website)) && (
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                  {googleRatingLabel(activeLead) && (
+                    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                      <Star className="h-4 w-4 text-amber-500" aria-hidden="true" />
+                      <span>Google: {googleRatingLabel(activeLead)}</span>
+                    </span>
+                  )}
+                  {diallerWebsite(activeLead.website) && (
+                    <a href={diallerWebsite(activeLead.website)!} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline">
+                      Website <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {activeLead ? (

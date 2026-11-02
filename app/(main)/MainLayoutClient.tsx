@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useFieldSales } from '@/lib/field-sales/client';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
@@ -11,7 +10,7 @@ import AppTopHeader from '@/components/layout/AppTopHeader';
 import { MainLayoutNavProvider, useMainLayoutNav } from '@/components/layout/MainLayoutNavContext';
 import { MainRouteGuard } from '@/components/guard/MainRouteGuard';
 import { DialerRuntimeProvider } from '@/components/dialer/DialerRuntimeProvider';
-import { Home, Trophy, Users, Settings, Target, Gauge, Plug, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
+import { Home, Trophy, Users, Settings, Target, Gauge, MessageCircle, Activity, Clock, CalendarDays, CornerDownRight, Plus, UserRoundPlus, BriefcaseBusiness, PhoneCall, Handshake, FileText, PlayCircle, Inbox, KanbanSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { DashboardAccessLevel } from '@/app/api/_utils/workspace';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -37,7 +36,6 @@ const baseTabs = [
   { href: '/calendar', icon: CalendarDays, label: 'Calendar' },
   { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
-  { href: '/settings/integrations', icon: Plug, label: 'Integrations' },
 ];
 
 const supportTab = { href: '/support', icon: MessageCircle, label: 'Support' };
@@ -86,7 +84,6 @@ const memberTabs = baseTabs.filter((tab) =>
     '/follow-up',
     '/leaderboard',
     '/stats',
-    '/settings/integrations',
   ].includes(tab.href)
 );
 
@@ -94,12 +91,9 @@ type TabDef = { href: string; icon: LucideIcon; label: string };
 
 function tabIsActive(tab: TabDef, pathname: string | null): boolean {
   if (tab.href === '/campaigns' && (pathname === '/farms' || pathname?.startsWith('/farms/'))) return true;
-  const isIntegrations = tab.href === '/settings/integrations';
-  const isSettings = tab.href === '/settings';
-  const onIntegrations = pathname?.startsWith('/settings/integrations');
-  if (isIntegrations) return pathname === '/settings/integrations';
-  if (isSettings) {
-    return pathname === '/settings' || (!!pathname?.startsWith('/settings/') && !onIntegrations);
+  if (tab.href === '/settings') {
+    return pathname === '/settings' || !!pathname?.startsWith('/settings/') ||
+      pathname === '/sales' || (!!pathname?.startsWith('/sales/') && !pathname.startsWith('/sales/pipeline'));
   }
   return pathname === tab.href || !!pathname?.startsWith(tab.href + '/');
 }
@@ -111,6 +105,7 @@ function MainNavItems({
   variant,
   sidebarExpanded,
   onNavigate,
+  settingsOnly = false,
 }: {
   tabs: TabDef[];
   pathname: string | null;
@@ -118,13 +113,13 @@ function MainNavItems({
   variant: 'rail' | 'drawer';
   sidebarExpanded?: boolean;
   onNavigate?: () => void;
+  settingsOnly?: boolean;
 }) {
   const showLabels = variant === 'drawer' || sidebarExpanded;
   const { currentWorkspace } = useWorkspace();
   const copy = getIndustryCopy(currentWorkspace?.industry);
   const createCampaignLabel = copy.actions.createCampaign;
-  const showCreate = accessLevel !== 'salesperson';
-  const hasSalesTab = tabs.some(tab => tab.href === '/sales');
+  const showCreate = !settingsOnly && accessLevel !== 'salesperson';
 
   return (
     <>
@@ -152,11 +147,9 @@ function MainNavItems({
           </span>
         </Link>
       ) : null}
-      {tabs.map((tab) => {
+      {tabs.filter(tab => (tab.href === '/settings') === settingsOnly).map((tab) => {
         const Icon = tab.icon;
         const label = copy.navLabels[tab.href] ?? tab.label;
-        const isSettings = tab.href === '/settings';
-        const pinMemberSettingsToBottom = accessLevel === 'member' && (hasSalesTab ? tab.href === '/sales' : isSettings);
         const isActive = tabIsActive(tab, pathname);
 
         return (
@@ -167,7 +160,6 @@ function MainNavItems({
             className={cn(
               'flex items-center gap-2 py-2.5 rounded-md w-full transition-colors min-h-[42px]',
               variant === 'drawer' ? 'px-3 justify-start' : sidebarExpanded ? 'px-2.5 justify-start' : 'justify-center px-0',
-              pinMemberSettingsToBottom && 'mt-auto',
               isActive
                 ? 'text-primary bg-primary/10'
                 : 'text-gray-500 hover:text-gray-700 dark:text-sidebar-foreground/80 dark:hover:text-sidebar-foreground hover:bg-muted/50'
@@ -229,6 +221,9 @@ function MainLayoutShell({
               sidebarExpanded={sidebarExpanded}
             />
           </div>
+          <div className="settings-nav-footer shrink-0 border-t border-border/50 px-1.5 pt-2">
+            <MainNavItems tabs={tabs} pathname={pathname} accessLevel={accessLevel} variant="rail" sidebarExpanded={sidebarExpanded} settingsOnly />
+          </div>
         </nav>
 
         {/* Mobile: slide-in navigation */}
@@ -246,6 +241,9 @@ function MainLayoutShell({
                 onNavigate={closeDrawer}
               />
             </nav>
+            <div className="settings-nav-footer shrink-0 border-t border-border/50 px-2 py-3">
+              <MainNavItems tabs={tabs} pathname={pathname} accessLevel={accessLevel} variant="drawer" onNavigate={closeDrawer} settingsOnly />
+            </div>
           </SheetContent>
         </Sheet>
 
@@ -345,13 +343,15 @@ function DemoFlowClickGuard({
 
 export default function MainLayoutClient({
   children,
+  canUseInbox = false,
 }: {
   children: ReactNode;
+  canUseInbox?: boolean;
 }) {
   return (
     <WorkspaceProvider>
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
-        <MainLayoutContent>{children}</MainLayoutContent>
+        <MainLayoutContent canUseInbox={canUseInbox}>{children}</MainLayoutContent>
       </Suspense>
     </WorkspaceProvider>
   );
@@ -359,13 +359,14 @@ export default function MainLayoutClient({
 
 function MainLayoutContent({
   children,
+  canUseInbox,
 }: {
   children: ReactNode;
+  canUseInbox: boolean;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
-  const { data: fieldSales } = useFieldSales({}, true);
   const isSelfServeDemoFlow = searchParams.get('source') === 'self-serve-demo';
   const isSelfServeCampaignCreate =
     pathname === '/campaigns/create' && isSelfServeDemoFlow;
@@ -375,20 +376,13 @@ function MainLayoutContent({
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
-      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,href:'/inbox/business',label:'Business inbox'}:tab);items.splice(1,0,{href:'/inbox',icon:Inbox,label:'Inbox'});}
+      items = items.filter(tab => canUseInbox || tab.href !== '/inbox');
+      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,label:'Business inbox'}:tab);if (canUseInbox) items.splice(1,0,{href:'/messages',icon:Inbox,label:'Inbox'});}
       if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
         const index = items.findIndex(tab => tab.href === '/settings');
         items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];
       }
-      if (!fieldSales?.enabled || accessLevel === 'salesperson') return items;
-      const salesTab = { href: '/sales', icon: BriefcaseBusiness, label: 'Sales - Beta' };
-      const settingsIndex = items.findIndex((tab) => tab.href === '/settings');
-      if (settingsIndex === -1) return [...items, salesTab];
-      return [
-        ...items.slice(0, settingsIndex),
-        salesTab,
-        ...items.slice(settingsIndex),
-      ];
+      return items;
     };
 
     if (accessLevel === 'salesperson') return withAmbassadorPortal(salespersonWorkspaceTabs);

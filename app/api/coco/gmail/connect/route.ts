@@ -27,7 +27,15 @@ export async function POST(request: NextRequest) {
     await requireCrmWorkspace(api, body.workspaceId);
     if (!body.read && !body.send)
       throw new CrmRequestError("Choose Gmail read or sending access.");
-    const config = gmailConfig();
+    let config;
+    try {
+      config = gmailConfig();
+    } catch {
+      throw new CrmRequestError(
+        "Gmail sending and import are not set up on WolfGrid yet. Google sign-in does not connect your mailbox. Contact WolfGrid support to enable Gmail connections.",
+        503,
+      );
+    }
     const origin = request.nextUrl.origin;
     if (
       !/^https:\/\/(wolfgrid\.app|flyrpro-[a-z0-9-]+\.vercel\.app)$/.test(

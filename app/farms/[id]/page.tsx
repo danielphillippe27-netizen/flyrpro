@@ -215,7 +215,7 @@ export default function FarmPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('overview');
   }, []);
-  const [overviewScope, setOverviewScope] = useState<DashboardScope>('current_cycle');
+  const [overviewScope, setOverviewScope] = useState<DashboardScope>('all_time');
   const [chartSessionIds, setChartSessionIds] = useState<string[] | null>(null);
   const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
   const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
@@ -1258,6 +1258,7 @@ export default function FarmPage() {
         <TabsContent value="overview" className="mt-1 space-y-4">
           <FarmPerformanceDashboard
             name={farm.name}
+            campaignAddresses={linkedCampaignAddresses}
             addresses={addresses}
             touches={resolvedTouches}
             outcomes={touchOutcomes}
@@ -1269,6 +1270,9 @@ export default function FarmPage() {
           <DurhamCommercialReview farmId={farm.id} />
           <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan
+            campaignAddresses={linkedCampaignAddresses}
+            addresses={addresses}
+            outcomes={touchOutcomes}
             drafts={planDrafts}
             touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
             saving={savingPlan}

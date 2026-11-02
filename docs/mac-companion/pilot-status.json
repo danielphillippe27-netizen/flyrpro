@@ -1,11 +1,12 @@
 {
-  "updated_at": "2026-10-28T06:00:08.658383+00:00",
-  "release": "0.5.1 Contacts and Inbox share WolfGrid light and dark themes",
+  "updated_at": "2026-10-28T08:03:48.657446+00:00",
+  "release": "0.6.1 shared web: Gmail server configuration enabled for Daniel pilot",
   "deployment": {
-    "id": "dpl_BbEd7qc5CrFLgt8hizJ9SBz3gNEQ",
-    "url": "https://flyrpro-8u8wsco0b-danielphillippe27-netizens-projects.vercel.app",
+    "id": "dpl_F8mis18n1CjYi3iGrh2VUwDwchEq",
+    "url": "https://wolfgrid.app",
     "state": "READY",
-    "protection": "Vercel Deployment Protection retained; app uses temporary share entry, then normal WolfGrid sign-in"
+    "protection": "Live website uses normal WolfGrid authentication; no Vercel preview entry in the Mac app",
+    "immutable_url": "https://flyrpro-6obz0qf9y-danielphillippe27-netizens-projects.vercel.app"
   },
   "migrations_applied": [
     "20261028020000_mac_companion.sql",
@@ -19,7 +20,7 @@
   ],
   "pilot_allowlist": "Daniel existing account only",
   "native": {
-    "installed_path": "/Applications/WolfGrid Mac Preview.app",
+    "installed_path": "/Applications/WolfGrid.app",
     "macos_minimum": "15.0",
     "architectures": [
       "arm64",
@@ -28,10 +29,10 @@
     "signature": "Apple Development: JOSEPH DANIEL PHILLIPPE (B8K32UV629)",
     "hardened_runtime": true,
     "notarized": false,
-    "zip": "/Volumes/Samsung SSD/WolfGrid/Wolfgrid-WEB/apps/mac/build/WolfGrid-Mac-Preview.zip",
-    "sha256": "6d2a133e51100cf74d03ee00929267e844aa3c20ba6f5ab6c258a65593183a66",
-    "version": "0.5.1",
-    "build": "20",
+    "zip": "/Volumes/Samsung SSD/WolfGrid/Wolfgrid-WEB/apps/mac/build/WolfGrid-Mac.zip",
+    "sha256": "628b6673a3eacc5ed3771fa527a1f5954f338682c736aea027ce6651db3e933b",
+    "version": "0.6.1",
+    "build": "22",
     "entitlements": [
       "com.apple.security.personal-information.addressbook",
       "com.apple.security.personal-information.calendars"
@@ -136,13 +137,160 @@
         "personalKeyConnected": true
       },
       "installation": "Signed universal app installed in Applications; current running session left open; update loads on next launch"
+    },
+    "shared_live_release": {
+      "source_baseline": "379f36a53055bbc9e2a036f2dbdec2e88cfaa5b4",
+      "previous_live_deployment": "dpl_D4cKa5m5rUK8ZHX5d8Lo4q8hwDTc",
+      "runtime_changes": [
+        "app/(main)/MainLayoutClient.tsx",
+        "app/(main)/inbox/page.tsx",
+        "app/(main)/messages/page.tsx"
+      ],
+      "live_api": {
+        "deployment": "https://wolfgrid.app",
+        "authenticatedStatus": 200,
+        "farmStatus": 200,
+        "pmTiles": {
+          "schema": "tiles-v3",
+          "archiveStatus": 206,
+          "headerBytes": 127
+        },
+        "privateMessages": 0,
+        "contacts": 1,
+        "syncEnabled": true,
+        "aiMessagesEnabled": true,
+        "openAiCanSave": true,
+        "modelConfigured": true,
+        "personalKeyConnected": true
+      },
+      "passed": [
+        "Native identifier, group exclusion, replay and OAuth fixture tests",
+        "Sync runtime cancellation, account changes and recovery",
+        "CRM API authentication, origin and ownership checks",
+        "AI consent, private context and key lifecycle tests",
+        "Contact review, inbox and live light/dark theme browser tests",
+        "Signed universal binary; production origin without preview entry"
+      ],
+      "installation": "Installed in Applications for next launch; running preview session preserved",
+      "configuration": "Dedicated AI encryption key preserved from pilot; production settings persist across website releases; Daniel pilot allowlist retained"
+    },
+    "app_name": {
+      "display_name": "WolfGrid",
+      "bundle_name": "WolfGrid",
+      "bundle_identifier": "app.wolfgrid.mac.preview",
+      "same_native_identity": true,
+      "live_origin": "https://wolfgrid.app",
+      "native_toolbar_removed": true
+    },
+    "combined_contact_lists": {
+      "single_sidebar_list": true,
+      "matching": "Case-insensitive stage OR contact label; All Contacts resets the single selection; Unlabeled retains its existing no-label meaning.",
+      "saved_records_changed": false,
+      "passed": [
+        "Browser: duplicate options absent, label/stage union, stage-only and label-only matches, empty list and All Contacts reset",
+        "Existing desktop/mobile and light/dark CRM checks",
+        "ESLint: no errors",
+        "Production build and promotion"
+      ],
+      "native_ui": "Native verification unavailable due to computer-use capture error; source browser checks passed. No native app update required."
+    },
+    "manual_add_contact": {
+      "shared_web_component": true,
+      "plus_menu": [
+        "Add Contact",
+        "Google (Gmail)",
+        "Apple"
+      ],
+      "checks": [
+        "Actual form submits name, phone and chosen label through existing create action",
+        "New contact selected; previous search and list filter reset so the saved contact appears",
+        "Existing light/dark and desktop/mobile CRM tests pass",
+        "ESLint passes",
+        "Production build and live domain promotion verified"
+      ],
+      "native_app_rebuild_required": false
+    },
+    "apple_style_inbox_and_settings": {
+      "changes": [
+        "Phone Call control uses tel: and requires a phone number",
+        "Floating profile/name and call controls; transparent overlay with no header divider",
+        "Narrower independent conversation scroll pane with floating search",
+        "Compact rows, circular avatars, separators, rounded floating composer",
+        "Sales and Integrations accessible inside Settings; Settings outside scrollable desktop/mobile navigation"
+      ],
+      "passed": [
+        "Native Mac UI: Call conversation contact resolves to tel:; no header divider; floating profile visible",
+        "Native Mac UI: Settings footer visible at bottom; Sales - Beta and Integrations links present inside Settings",
+        "Browser fixture: long conversation list scrolls while thread scroll position and search position remain fixed",
+        "Existing manual contact creation, combined lists, drafts, private context isolation, light/dark, desktop/mobile checks",
+        "Owner/member/founder/salesperson shell navigation checks",
+        "ESLint and production build"
+      ],
+      "no_calls_placed": true,
+      "native_app_rebuild_required": false
+    },
+    "contact_profile_redesign": {
+      "layout": [
+        "Compact alphabetical list with independent scrolling",
+        "Large circular glass profile, centered name and round actions",
+        "Read-only phone/email/address/notes/list rows by default",
+        "Explicit Edit entry; save returns to profile; cancel resets and closes",
+        "Conversations and tasks retained in expandable section"
+      ],
+      "themes": {
+        "dark": "black and red gradient with translucent detail rows",
+        "light": "light grey and red gradient with translucent detail rows"
+      },
+      "passed": [
+        "Native Mac UI: Abigail profile, dark red gradient and Edit control visibly verified",
+        "Native Mac UI: edit form opened; Cancel returned to profile without saving",
+        "Source browser: notes save returned to read profile; manual creation and combined filters preserved",
+        "Light/dark profile snapshots and mobile overflow checks",
+        "Existing inbox scrolling and call-control checks",
+        "ESLint and production build"
+      ],
+      "real_contact_data_changed": false,
+      "native_app_rebuild_required": false
+    },
+    "gmail_setup_feedback": {
+      "configured": false,
+      "sending_available": false,
+      "live_authenticated_status": 200,
+      "checks": [
+        "Missing server configuration returns explicit setup explanation before OAuth ticket creation",
+        "Composer preserves editable drafts and hides unusable connect button",
+        "CRM browser and Gmail API fixtures pass",
+        "Production build and promotion pass"
+      ],
+      "no_email_sent": true,
+      "remaining": "Configure Gmail OAuth client, secret, registered callback and dedicated encryption before mailbox connection is available"
+    },
+    "gmail_server_setup": {
+      "google_project": "flyer-ai-469921",
+      "dedicated_client": "WolfGrid Gmail",
+      "existing_login_client_unchanged": true,
+      "gmail_api_enabled": true,
+      "test_user": "daniel.phillippe27@gmail.com",
+      "production_server_configured": true,
+      "independent_token_encryption": true,
+      "live_status": 200,
+      "live_oauth_start": 200,
+      "oauth_scopes": "openid email https://www.googleapis.com/auth/gmail.send",
+      "pkce": "S256",
+      "mailbox_connected": false,
+      "no_email_sent": true,
+      "remaining": [
+        "User must approve final Google mailbox consent",
+        "End-to-end callback and actual sending remain unverified",
+        "Google app remains in Testing; public verification is not complete"
+      ]
     }
   },
   "remaining_acceptance": [
     "User-controlled master sync remains paused; enable it in Mac setup to validate ongoing imports and device recovery.",
     "Real attachment upload/download and concurrent-device acceptance remain unverified.",
-    "Configure Gmail OAuth client/secret/registered callback and encryption settings; none are currently configured on Vercel.",
-    "Developer ID signing, notarization and public installation/update checks."
+    "Developer ID signing, notarization and public installation/update checks.",
+    "Gmail server configuration deployed; Daniel must complete Google mailbox consent. Actual send and public OAuth verification remain unverified."
   ],
   "limitations": [
     "No real OpenAI generation performed",

@@ -1,3 +1,4 @@
+import { canUseInbox } from "@/lib/coco/inbox-access";
 import { redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import CocoCrm from "@/components/coco/CocoCrm";
@@ -8,5 +9,5 @@ export default async function ContactsPage() {
     data: { user },
   } = await api.auth.getUser();
   if (!user) redirect("/login?next=/contacts");
-  return <CocoCrm initialArea="Clients" />;
+  return <CocoCrm initialArea="Clients" canUseInbox={canUseInbox(user.email)} />;
 }

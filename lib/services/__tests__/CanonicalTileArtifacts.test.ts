@@ -52,15 +52,25 @@ async function main() {
   assert.equal(await canonicalTileAvailability(database(true, true, 'succeeded', 'pending_provision'), 'campaign', 'ios'), 'preparing');
   assert.equal(await canonicalTileAvailability(database(true, true, 'failed', 'linking_failed'), 'campaign', 'ios'), 'failed');
   assert.equal(await canonicalTileAvailability(database(true, false), 'campaign', 'other'), 'disabled');
-  const beforeSettings = (createdAt: string): SupabaseClient => ({ from(table: string) {
+  const beforeSettings = (createdAt: string, provisionStatus?: string): SupabaseClient => ({ from(table: string) {
     const chain = { select() { return chain; }, eq() { return chain; }, async maybeSingle() {
       if (table === 'campaign_map_tile_settings') return { data: null, error: null };
-      if (table === 'campaigns') return { data: { created_at: createdAt }, error: null };
+      if (table === 'campaigns') return { data: { created_at: createdAt, provision_status: provisionStatus }, error: null };
       return { data: { new_campaigns_after: '2026-10-28T00:00:00Z' }, error: null };
     } }; return chain;
   } }) as unknown as SupabaseClient;
   assert.equal(await canonicalTileAvailability(beforeSettings('2026-10-28T01:00:00Z'), 'campaign', 'web'), 'preparing');
+  assert.equal(await canonicalTileAvailability(beforeSettings('2026-10-28T01:00:00Z', 'failed'), 'campaign', 'web'), 'failed');
   assert.equal(await canonicalTileAvailability(beforeSettings('2026-10-27T23:00:00Z'), 'campaign', 'web'), 'disabled');
+  const noCurrent = (status: string): SupabaseClient => ({ from(table: string) {
+    const chain = { select() { return chain; }, eq() { return chain; }, async maybeSingle() {
+      if (table === 'campaign_map_tile_settings') return { data: { ios_enabled: true }, error: null };
+      if (table === 'campaign_map_bundles') return { data: null, error: null };
+      return { data: { provision_status: status }, error: null };
+    } }; return chain;
+  } }) as unknown as SupabaseClient;
+  assert.equal(await canonicalTileAvailability(noCurrent('failed'), 'campaign', 'ios'), 'failed');
+  assert.equal(await canonicalTileAvailability(noCurrent('pending'), 'campaign', 'ios'), 'preparing');
   let metadataReads = 0;
   let metadataSelection = '';
   const metadataDb = { from() {

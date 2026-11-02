@@ -6,7 +6,7 @@ import Contacts
     @StateObject private var bridge = Bridge()
     @Environment(\.openWindow) private var openWindow
     var body: some Scene {
-        WindowGroup(id: "wolfgrid") {
+        WindowGroup("WolfGrid", id: "wolfgrid") {
             WolfGridWebView(bridge: bridge).frame(minWidth: 1000, minHeight: 720)
         }
         .windowStyle(.hiddenTitleBar)
@@ -114,18 +114,18 @@ struct WolfGridWebView: NSViewRepresentable {
            let url = URL(string: raw), trusted(url), url.path == "/" {
             entryWindows.insert(ObjectIdentifier(view)); return url
         }
-        return origin.appendingPathComponent("inbox")
+        return origin.appendingPathComponent("messages")
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if entryWindows.remove(ObjectIdentifier(webView)) != nil {
-            webView.load(URLRequest(url: origin.appendingPathComponent("inbox")))
+            webView.load(URLRequest(url: origin.appendingPathComponent("messages")))
         }
     }
     func openCrmPage(_ path: String) {
         guard ["inbox","contacts","settings/integrations/apple"].contains(path) else { return }
         let views = visibleViews.values.compactMap { $0.value }
         let view = views.first { $0.window?.isKeyWindow == true } ?? (views.count == 1 ? views.first : nil)
-        view?.load(URLRequest(url: origin.appendingPathComponent(path)))
+        view?.load(URLRequest(url: origin.appendingPathComponent(path == "inbox" ? "messages" : path)))
     }
     func openMacSetup() {
         let views = visibleViews.values.compactMap { $0.value }
@@ -153,7 +153,7 @@ struct WolfGridWebView: NSViewRepresentable {
             alert.informativeText = "This app can open Messages read-only and the schema is supported. No message content was read by this check."
         } catch {
             alert.messageText = "Messages access needs attention"
-            alert.informativeText = error.localizedDescription + "\n\nEnable WolfGrid Mac Preview in System Settings → Privacy & Security → Full Disk Access, then quit and reopen the app."
+            alert.informativeText = error.localizedDescription + "\n\nEnable WolfGrid in System Settings → Privacy & Security → Full Disk Access, then quit and reopen the app."
         }
         alert.addButton(withTitle: "OK"); alert.runModal()
     }

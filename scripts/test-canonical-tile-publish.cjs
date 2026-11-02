@@ -10,6 +10,7 @@ const { spawn } = require('node:child_process');
 
 async function main() {
   const [worker, builder] = process.argv.slice(2);
+  const large = process.argv.includes('--large');
   assert(worker && builder && path.isAbsolute(worker) && path.isAbsolute(builder), 'Supply bundled worker and builder paths');
   const campaignId = '11111111-1111-4111-8111-111111111111';
   const addressId = '22222222-2222-4222-8222-222222222222';
@@ -18,7 +19,8 @@ async function main() {
   const feature = (geometry, properties) => ({ type: 'Feature', geometry, properties });
   const collection = (features) => ({ type: 'FeatureCollection', features });
   const row = { campaign_id: campaignId, asset_signature: 'test-revision', source_version: '1', is_current: true,
-    addresses_geojson: collection([feature(point, { id: addressId, address_id: addressId, source_geometry: point })]),
+    addresses_geojson: collection([feature(point, { id: addressId, address_id: addressId, source_geometry: point,
+      ...(large ? { large_fixture: 'map-record'.repeat(500000) } : {}) })]),
     buildings_geojson: collection([feature(polygon, { id: 'building-1', building_id: 'building-1', address_id: addressId })]),
     parcels_geojson: collection([feature(polygon, { id: 'parcel-1', parcel_id: 'parcel-1', address_ids: [addressId] })]),
     roads_geojson: collection([]), links: [{ building_id: 'building-1', address_id: addressId, confidence: 1 }],
@@ -67,11 +69,15 @@ async function main() {
     assert.equal(result.code, 0, result.output); assert.equal(unexpected, undefined);
     assert.equal(updates.length, 1); assert.equal(updates[0].body.status, 'succeeded'); assert.equal(updates[0].lease, 'eq.local-lease');
     assert(artifact && artifact.canonical_signature === row.asset_signature);
-    assert.equal(artifact.compact_bundle.schema, 'tiles-v3');
-    assert.equal(artifact.compact_bundle.records.addresses[0].id, addressId);
+    const compact = large
+      ? JSON.parse(require('node:zlib').gunzipSync(objects.get(artifact.compact_bundle.key)).toString())
+      : artifact.compact_bundle;
+    if (large) assert.equal(artifact.compact_bundle.kind, 'wolfgrid-map-json-gzip-v1');
+    assert.equal(compact.schema, 'tiles-v3');
+    assert.equal(compact.records.addresses[0].id, addressId);
     for (const key of [artifact.archive_key, artifact.details_key, artifact.geometry_key]) assert(objects.has(key), `Missing uploaded artifact ${key}`);
     assert.equal(crypto.createHash('sha256').update(objects.get(artifact.archive_key)).digest('hex'), artifact.sha256);
-    assert.equal(crypto.createHash('sha256').update(objects.get(artifact.geometry_key)).digest('hex'), artifact.compact_bundle.tiles.geometry_pack.sha256);
+    assert.equal(crypto.createHash('sha256').update(objects.get(artifact.geometry_key)).digest('hex'), compact.tiles.geometry_pack.sha256);
     assert.equal(objects.get(artifact.geometry_key).subarray(0, 4).toString(), 'WGP1');
     assert.equal(objects.get(artifact.geometry_key).readUInt32LE(4), 4);
     console.log('PASS: synthetic worker built, validated and published matching tiles, exact shapes and compact field data to local fake services');

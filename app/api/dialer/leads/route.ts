@@ -42,6 +42,7 @@ type ImportLeadPayload = {
     phone?: string | null;
     company?: string | null;
     email?: string | null;
+    address?: string | null;
   }>;
 };
 
@@ -56,6 +57,7 @@ type DiallerLeadInsert = {
   phone_area_label?: string | null;
   company: string | null;
   email: string | null;
+  address: string | null;
   disposition: null;
   lead_state?: 'queued';
   source?: string;
@@ -229,7 +231,7 @@ function parseUuidList(value: string | null | undefined): string[] {
         .map((id) => id.trim())
         .filter((id) => UUID_PATTERN.test(id))
     )
-  ).slice(0, 100);
+  );
 }
 
 function normalizePublicOrigin(value: string | null | undefined): string | null {
@@ -1113,7 +1115,7 @@ async function upsertContactFollowUp(context: {
     phone_area_code: normalizedPhone.areaCode,
     phone_area_label: normalizedPhone.areaLabel,
     email: cleanText(lead.email) || null,
-    address: '',
+    address: cleanText(lead.address) || cleanText(typeof existing?.address === 'string' ? existing.address : '') || '',
     status: 'warm',
     notes,
     follow_up_at: followUpAt,
@@ -1164,7 +1166,7 @@ async function upsertDiallerContact(context: {
     phone_last_validated_at: now,
     phone_validation_error: normalizedPhone.error,
     email: cleanText(lead.email) || null,
-    address: '',
+    address: cleanText(lead.address) || cleanText(typeof existing?.address === 'string' ? existing.address : '') || '',
     status: 'warm',
     notes,
     last_contacted: now,
@@ -1340,6 +1342,7 @@ export async function POST(request: NextRequest) {
           createdByUserId: context.requestUser.id,
           name: cleanText(row.name) || 'Lead',
           company: cleanText(row.company) || null,
+          address: cleanText(row.address) || null,
           phone: normalizedPhone.e164,
           email: cleanText(row.email) || null,
           countryCode: normalizedPhone.countryCode,
@@ -1362,6 +1365,13 @@ export async function POST(request: NextRequest) {
             ? (masterResult.row as unknown as DiallerLead)
             : await findReusableDiallerLeadForMaster(context, masterResult.row);
         if (reusableLead) {
+          const address = cleanText(row.address);
+          if (address && !cleanText(reusableLead.address)) {
+            const { data: updated } = await context.admin.from('sales_leads')
+              .update({ address }).eq('id', reusableLead.id).eq('workspace_id', context.workspaceId)
+              .eq('user_id', context.requestUser.id).is('address', null).select('*').maybeSingle();
+            if (updated) Object.assign(reusableLead, updated);
+          }
           reusedLeads.push(reusableLead);
           reusedMasterCount += 1;
           continue;
@@ -1385,6 +1395,7 @@ export async function POST(request: NextRequest) {
       phone_area_label: normalizedPhone.areaLabel,
       company: cleanText(row.company) || null,
       email: cleanText(row.email) || null,
+      address: cleanText(row.address) || null,
       disposition: null,
       lead_state: 'queued',
       source: 'dialler_import',

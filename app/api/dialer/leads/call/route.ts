@@ -133,6 +133,7 @@ export async function POST(request: NextRequest) {
         diallerLeadName: cleanText(diallerLead.name) || 'Lead',
         diallerLeadPhone: cleanText(diallerLead.phone),
         diallerLeadEmail: cleanText(diallerLead.email) || null,
+        diallerLeadAddress: cleanText(diallerLead.address) || null,
         diallerLeadCompany: cleanText(diallerLead.company) || null,
         destinationCountryCode: normalized.countryCode,
         destinationAreaCode: normalized.areaCode,

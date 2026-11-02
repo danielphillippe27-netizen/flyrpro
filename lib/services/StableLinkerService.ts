@@ -14,6 +14,7 @@
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
+import RBush from 'rbush';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 
@@ -113,6 +114,8 @@ export interface BuildingFeature {
 
 interface SpatialJoinOptions {
   resetExisting?: boolean;
+  /** Add missing links without replacing existing or manual assignments. */
+  preserveExisting?: boolean;
   persistenceMode?: 'silver' | 'gold';
   parcelsGeoJSON?: { features: ParcelFeature[] } | null;
 }
@@ -204,6 +207,8 @@ interface CampaignAddress {
   locality?: string | null;
   region?: string | null;
   postal_code?: string | null;
+  source?: string | null;
+  match_source?: string | null;
   geom: unknown;
 }
 
@@ -216,6 +221,8 @@ interface CampaignAddressWithPoint extends Omit<CampaignAddress, 'geom'> {
 
 export class StableLinkerService {
   private supabase: SupabaseClient;
+  private buildingSpatialIndex?: { buildings: BuildingFeature[]; tree: RBush<{ minX: number; minY: number; maxX: number; maxY: number; building: BuildingFeature; order: number }> };
+  private parcelSpatialIndex?: { parcels: PreparedParcel[]; tree: RBush<{ minX: number; minY: number; maxX: number; maxY: number; parcel: PreparedParcel; order: number }>; byAddress: Map<string, { parcel: PreparedParcel; order: number }> };
 
   constructor(supabase: SupabaseClient) {
     this.supabase = supabase;
@@ -314,14 +321,23 @@ export class StableLinkerService {
       const rawAddresses = await fetchAllInPages<CampaignAddress>(async (from, to) =>
         await this.supabase
           .from('campaign_addresses')
-          .select('id, gers_id, formatted, house_number, street_name, locality, region, postal_code, geom')
+          .select('id, gers_id, formatted, house_number, street_name, locality, region, postal_code, source, match_source, geom')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
       );
       
+      if (options.preserveExisting && (options.resetExisting || options.persistenceMode === 'gold')) {
+        throw new Error('Preserving existing links requires silver persistence without reset.');
+      }
+      const existingLinks = options.preserveExisting
+        ? await fetchAllInPages<{ address_id: string; building_id: string }>(async (from, to) =>
+            await this.supabase.from('building_address_links').select('address_id, building_id')
+              .eq('campaign_id', campaignId).order('address_id', { ascending: true }).range(from, to))
+        : [];
+      const existingAddressIds = new Set(existingLinks.map(link => link.address_id.toLowerCase()));
       // Parse geom field which may be string or object from Supabase
-      const addresses: CampaignAddressWithPoint[] = (rawAddresses || []).flatMap((addr) => {
+      const allAddresses: CampaignAddressWithPoint[] = (rawAddresses || []).flatMap((addr) => {
         const geom = this.parsePointGeometry(addr.geom);
         if (!geom) {
           console.warn(`[StableLinker] Skipping address ${addr.id}; unsupported point geometry`);
@@ -330,7 +346,12 @@ export class StableLinkerService {
         return [{ ...addr, geom }];
       });
 
-      if (!addresses || addresses.length === 0) {
+      const addresses = options.preserveExisting
+        ? allAddresses.filter(address => !existingAddressIds.has(address.id.toLowerCase()) &&
+            !['manual', 'field_manual_pin'].includes((address.match_source ?? '').toLowerCase()) &&
+            !['manual', 'field_manual_pin'].includes((address.source ?? '').toLowerCase()))
+        : allAddresses;
+      if (addresses.length === 0) {
         console.log('[StableLinker] No addresses found for campaign');
         return {
           matched: 0,
@@ -399,15 +420,29 @@ export class StableLinkerService {
       const conflictCount = 0;
       const densityWarningCount = 0;
       const preparedParcels = this.prepareParcels(options.parcelsGeoJSON?.features ?? []);
+      const buildingTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; building: BuildingFeature; order: number }>();
+      buildingTree.load(validBuildings.map((building, order) => {
+        const [minX, minY, maxX, maxY] = this.buildingBbox(building);
+        return { minX, minY, maxX, maxY, building, order };
+      }));
+      this.buildingSpatialIndex = { buildings: validBuildings, tree: buildingTree };
+      const parcelTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; parcel: PreparedParcel; order: number }>();
+      const byAddress = new Map<string, { parcel: PreparedParcel; order: number }>();
+      parcelTree.load(preparedParcels.map((parcel, order) => {
+        const [minX, minY, maxX, maxY] = parcel.bbox;
+        if (parcel.normalizedAddressText && !byAddress.has(parcel.normalizedAddressText)) byAddress.set(parcel.normalizedAddressText, { parcel, order });
+        return { minX, minY, maxX, maxY, parcel, order };
+      }));
+      this.parcelSpatialIndex = { parcels: preparedParcels, tree: parcelTree, byAddress };
       const inferredMultiAddressBuildingIds = this.inferMultiAddressBuildingIds(
-        addresses,
+        allAddresses,
         validBuildings,
         preparedParcels
       );
       if (inferredMultiAddressBuildingIds.size > 0) {
         console.log(`[StableLinker] Inferred ${inferredMultiAddressBuildingIds.size} multi-address building(s) from footprint/parcel evidence`);
       }
-      const claimedSingleUnitBuildingIds = new Set<string>();
+      const claimedSingleUnitBuildingIds = new Set(existingLinks.map(link => link.building_id.toLowerCase()));
       console.log(`[StableLinker] Starting matching for ${addresses.length} addresses...`);
 
       for (const address of addresses) {
@@ -442,7 +477,8 @@ export class StableLinkerService {
         campaignId,
         matches,
         overtureRelease,
-        options.persistenceMode ?? 'silver'
+        options.persistenceMode ?? 'silver',
+        options.preserveExisting === true
       );
       await this.saveOrphans(campaignId, orphans);
 
@@ -607,12 +643,24 @@ export class StableLinkerService {
     parcels: PreparedParcel[]
   ): MatchCandidate | null {
     const addressCoords = address.geom.coordinates;
-    const exactParcel = parcels.find((candidate) =>
-      this.parcelAddressMatches(address, candidate.normalizedAddressText)
-    );
-    const parcel = exactParcel ?? parcels.find((candidate) =>
-      this.pointInPreparedParcel(addressCoords, candidate)
-    );
+    const index = this.parcelSpatialIndex?.parcels === parcels ? this.parcelSpatialIndex : undefined;
+    let exactParcel: PreparedParcel | undefined;
+    let pointParcel: PreparedParcel | undefined;
+    if (index) {
+      const civic = this.normalizedCivicText(`${address.house_number ?? ''} ${address.street_name ?? ''}`);
+      const locality = this.normalizedCivicText(address.locality);
+      const region = this.normalizedCivicText(address.region);
+      const postal = this.normalizedCivicText(address.postal_code);
+      const suffixes = ['', locality, region, [locality, region].filter(Boolean).join(' '), [locality, region, postal].filter(Boolean).join(' ')];
+      const exact = civic ? suffixes.map(suffix => index.byAddress.get([civic, suffix].filter(Boolean).join(' '))).filter((v): v is { parcel: PreparedParcel; order: number } => !!v).sort((a, b) => a.order - b.order)[0] : undefined;
+      exactParcel = exact?.parcel;
+      if (!exactParcel) pointParcel = index.tree.search({ minX: addressCoords[0], maxX: addressCoords[0], minY: addressCoords[1], maxY: addressCoords[1] })
+        .sort((a, b) => a.order - b.order).find(entry => this.pointInPreparedParcel(addressCoords, entry.parcel))?.parcel;
+    } else {
+      exactParcel = parcels.find(candidate => this.parcelAddressMatches(address, candidate.normalizedAddressText));
+      if (!exactParcel) pointParcel = parcels.find(candidate => this.pointInPreparedParcel(addressCoords, candidate));
+    }
+    const parcel = exactParcel ?? pointParcel;
     if (!parcel) return null;
 
     return nearby
@@ -933,7 +981,17 @@ export class StableLinkerService {
     buildings: BuildingFeature[],
     k: number
   ): Array<{ building: BuildingFeature; distance: number }> {
-    const distances = buildings.map(building => {
+    const index = this.buildingSpatialIndex;
+    let candidates = buildings;
+    if (k === NEAREST_BUILDING_CANDIDATE_LIMIT && index?.buildings === buildings && Math.abs(point[1]) < 85) {
+      // The matcher discards anything beyond 75m. A conservative bounding box
+      // keeps identical candidates while avoiding a full footprint scan per home.
+      const lat = 0.001; // > 75m, including projection/rounding margin
+      const lon = lat / Math.cos((Math.abs(point[1]) + lat) * Math.PI / 180);
+      candidates = index.tree.search({ minX: point[0] - lon, maxX: point[0] + lon, minY: point[1] - lat, maxY: point[1] + lat })
+        .sort((a, b) => a.order - b.order).map(entry => entry.building);
+    }
+    const distances = candidates.map(building => {
       const distance = this.calculatePointToBuildingDistance(point, building);
       return { building, distance };
     });
@@ -1348,7 +1406,8 @@ export class StableLinkerService {
     campaignId: string,
     matches: MatchResult[],
     overtureRelease: string,
-    persistenceMode: 'silver' | 'gold'
+    persistenceMode: 'silver' | 'gold',
+    preserveExisting = false
   ): Promise<void> {
     const validMatches = matches.filter(m => m.matchType !== 'orphan');
     
@@ -1381,7 +1440,7 @@ export class StableLinkerService {
       const batch = records.slice(i, i + batchSize);
       const { error } = await this.supabase
         .from('building_address_links')
-        .upsert(batch, { onConflict: 'campaign_id,address_id' });
+        .upsert(batch, { onConflict: 'campaign_id,address_id', ignoreDuplicates: preserveExisting });
       
       if (error) {
         console.error(`[StableLinker] Error saving batch ${i / batchSize + 1}:`, error.message);

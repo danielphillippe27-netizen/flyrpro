@@ -1,3 +1,4 @@
+import { readCurrentCampaignMapBundle } from '@/lib/services/CampaignMapBundlePrebuilder';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import * as turf from '@turf/turf';
@@ -634,12 +635,7 @@ export class TerritoryIQService {
         .from('campaign_addresses')
         .select('id, coordinate, geom, distance_m, postal_code')
         .eq('campaign_id', campaignId),
-      this.supabase
-        .from('campaign_map_bundles')
-        .select('asset_signature, source_version, buildings_geojson, roads_geojson, built_at')
-        .eq('campaign_id', campaignId)
-        .eq('is_current', true)
-        .maybeSingle(),
+      readCurrentCampaignMapBundle(this.supabase, campaignId),
       this.supabase.rpc('get_territory_iq_census_areas_for_campaign', { p_campaign_id: campaignId }),
       this.supabase.rpc('get_territory_iq_enrichments_for_campaign', { p_campaign_id: campaignId }),
     ]);
@@ -657,7 +653,7 @@ export class TerritoryIQService {
       return this.emptyResponse(profile, addresses.length);
     }
 
-    const bundle = asRecord(bundleResult.data);
+    const bundle = asRecord(bundleResult);
     const buildings = featureCollection(bundle.buildings_geojson).features;
     const censusAreas = featureCollection(censusResult.data).features as Array<
       GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon, CensusProperties>

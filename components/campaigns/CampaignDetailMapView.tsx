@@ -70,6 +70,7 @@ import {
   type ParcelResolutionParcel,
 } from '@/lib/map/parcelClickResolution';
 import { useFullscreen } from '@/lib/hooks/useFullscreen';
+import { recordCampaignReplay } from '@/lib/map/recordCampaignReplay';
 
 const PARCEL_SOURCE_ID = 'campaign-parcels';
 const PARCEL_LABEL_SOURCE_ID = 'campaign-parcels-labels';
@@ -144,7 +145,7 @@ type DemoCameraShot =
   | 'angledPullback'
   | 'slideLeft'
   | 'streetSegments';
-type DemoCameraSpeed = 'normal' | 'superSlow';
+type DemoCameraSpeed = 'fast' | 'normal' | 'superSlow';
 type DemoSegmentCameraAngle = 'fixed' | 'bird' | 'threeD' | 'street';
 type DemoFitCameraOptions = {
   pitch: number;
@@ -636,6 +637,12 @@ function getParcelAddressStatusKey(address: CampaignAddress): MapStatusKey {
   return 'TOUCHED';
 }
 
+function demoRecordedStatusColor(address: CampaignAddress): string {
+  const status = getCampaignAddressMapStatus(address);
+  if (['lead', 'interested', 'hot_lead'].includes(status)) return MAP_STATUS_CONFIG.LEADS.color;
+  return MAP_STATUS_CONFIG[getParcelAddressStatusKey(address)].color;
+}
+
 function getParcelAddressLabel(parcel: CampaignParcel): string {
   const properties = parcel.properties ?? {};
   const houseNumberCandidates = [
@@ -858,9 +865,15 @@ export function CampaignDetailMapView({
   const [demoSegmentCameraAngle, setDemoSegmentCameraAngle] = useState<DemoSegmentCameraAngle>('fixed');
   const [showDemoControls, setShowDemoControls] = useState(false);
   const [activeDemoCameraShot, setActiveDemoCameraShot] = useState<DemoCameraShot | null>(null);
+  const demoVideoRef = useRef<ReturnType<typeof recordCampaignReplay> | null>(null);
+  const [demoVideoArmed, setDemoVideoArmed] = useState(false);
+  const [demoVideoStarting, setDemoVideoStarting] = useState(false);
+  const [demoVideoFinishing, setDemoVideoFinishing] = useState(false);
+  const [demoVideoError, setDemoVideoError] = useState<string | null>(null);
   const [demoPlaybackColorOverrides, setDemoPlaybackColorOverrides] = useState<Record<string, string> | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapInitFailed, setMapInitFailed] = useState(false);
+  const [mapPreparationFailed, setMapPreparationFailed] = useState(false);
   const [mapBundleResolved, setMapBundleResolved] = useState(false);
   const [mapBundleAvailable, setMapBundleAvailable] = useState(false);
   const [loadingAnimationData, setLoadingAnimationData] = useState<object | null>(null);
@@ -1326,6 +1339,7 @@ export function CampaignDetailMapView({
     mapBundleAvailableRef.current = false;
     setMapLoaded(false);
     setMapInitFailed(false);
+    setMapPreparationFailed(false);
     mapBundleSignatureRef.current = null;
     lastMapBundleLoadKeyRef.current = null;
   }, [campaignId, resolvedInitialMapViewMode, resolvedInitialParcelOverlay]);
@@ -1361,7 +1375,7 @@ export function CampaignDetailMapView({
         url.searchParams.set('format', 'tiles-v3');
         url.searchParams.set('platform', 'web');
         const requestOptions: RequestInit = {
-          credentials: 'include',
+          credentials: 'same-origin',
           headers: {
             Accept: 'application/json',
             ...(signature ? { 'If-None-Match': `"${signature.replace(/"/g, '')}"` } : {}),
@@ -1379,6 +1393,7 @@ export function CampaignDetailMapView({
             break;
           }
           if (status !== 'preparing' || attempt >= 89) {
+            if (status === 'failed' && !cancelled) setMapPreparationFailed(true);
             throw new Error(status === 'failed' ? 'Campaign map preparation failed' : 'Campaign map is not ready');
           }
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
@@ -1392,7 +1407,12 @@ export function CampaignDetailMapView({
           throw new Error(`Campaign map bundle request failed with status ${response.status}`);
         }
 
-        const payload = await response.json();
+        let payload = await response.json();
+        if (payload?.schema === 'external-map-v1' && typeof payload.url === 'string') {
+          const externalResponse = await fetch(payload.url, { credentials: 'omit' });
+          if (!externalResponse.ok) throw new Error(`Campaign map download failed with status ${externalResponse.status}`);
+          payload = await externalResponse.json();
+        }
         const canonicalTiles = isCanonicalTileBundle(payload) ? payload : undefined;
         const bundle: CampaignMapBundle = canonicalTiles ? {
           campaign_id: canonicalTiles.campaign_id, asset_signature: canonicalTiles.asset_signature,
@@ -1411,6 +1431,7 @@ export function CampaignDetailMapView({
         mapBundleAvailableRef.current = true;
         setMapBundleAvailable(true);
         setMapInitFailed(false);
+        setMapPreparationFailed(false);
         setMapBundle(bundle);
 
         if (SHOW_PARCEL_VIEW) {
@@ -3143,7 +3164,7 @@ export function CampaignDetailMapView({
     clearDemoCameraTimers();
     map.current?.stop();
     setActiveDemoCameraShot(null);
-    setDemoPlaybackColorOverrides(null);
+    if (!demoVideoRef.current) setDemoPlaybackColorOverrides(null);
   }, [clearDemoCameraTimers]);
 
   const playDemoCamera = useCallback(
@@ -3156,7 +3177,7 @@ export function CampaignDetailMapView({
       const centerTuple: [number, number] = [center.lng, center.lat];
       const sweep = bounds ? demoSweepEndpoints(bounds) : null;
       const fallbackZoom = Math.max(15, Math.min(17.2, currentMap.getZoom() || 15));
-      const speedMultiplier = demoCameraSpeed === 'superSlow' ? 2.6 : 1;
+      const speedMultiplier = demoCameraSpeed === 'superSlow' ? 2.6 : demoCameraSpeed === 'fast' ? 0.55 : 1;
       const speed = (milliseconds: number) => Math.round(milliseconds * speedMultiplier);
 
       clearDemoCameraTimers();
@@ -3193,6 +3214,34 @@ export function CampaignDetailMapView({
           easing: easeInOutCubic,
         });
       };
+
+      // Recording a camera move also reveals the campaign outcomes as it plays.
+      if (demoVideoRef.current && shot !== 'streetSegments' && demoAddressTargets.length) {
+        const shotDurations: Record<Exclude<DemoCameraShot, 'streetSegments'>, number> = {
+          orbit: 11980, birdToStreet: 5400, birdFlyThrough: 7600,
+          craneReveal: 6600, angledPullback: 5600, slideLeft: 5200,
+          flyThrough: 8700, streetSweep: 7600,
+        };
+        const addresses = new Map(mapAddresses.map((address) => [address.id, address]));
+        const revealed: Record<string, string> = {};
+        const batchSize = Math.max(1, Math.ceil(demoAddressTargets.length / 100));
+        setDemoPlaybackColorOverrides({});
+        for (let start = 0; start < demoAddressTargets.length; start += batchSize) {
+          const batch = demoAddressTargets.slice(start, start + batchSize);
+          const delay = 1000 + (shotDurations[shot] - 1500) * (start / demoAddressTargets.length);
+          schedule(() => {
+            for (const target of batch) {
+              const address = addresses.get(target.addressId);
+              revealed[target.addressId] = demoColorMode === 'random'
+                ? DEMO_RANDOM_COLORS[deterministicColorIndex(target.addressId, DEMO_RANDOM_COLORS.length)]
+                : demoColorMode === 'status' && address
+                  ? demoRecordedStatusColor(address)
+                  : DEMO_GREEN_COLOR;
+            }
+            setDemoPlaybackColorOverrides({ ...revealed });
+          }, delay);
+        }
+      }
 
       if (shot === 'orbit') {
         fitCampaign({
@@ -3413,6 +3462,7 @@ export function CampaignDetailMapView({
         setDemoPlaybackColorOverrides({});
 
         const litColors: Record<string, string> = {};
+        const addresses = new Map(mapAddresses.map((address) => [address.id, address]));
         let delay = 1050;
         let previousStreetKey: string | null = null;
         orderedTargets.forEach((target, index) => {
@@ -3422,10 +3472,13 @@ export function CampaignDetailMapView({
           previousStreetKey = target.streetKey;
 
           schedule(() => {
+            const address = addresses.get(target.addressId);
             litColors[target.addressId] =
               demoColorMode === 'random'
                 ? DEMO_RANDOM_COLORS[deterministicColorIndex(target.addressId, DEMO_RANDOM_COLORS.length)]
-                : DEMO_GREEN_COLOR;
+                : demoColorMode === 'status' && address
+                  ? demoRecordedStatusColor(address)
+                  : DEMO_GREEN_COLOR;
             setDemoPlaybackColorOverrides({ ...litColors });
           }, delay);
           delay += index < 35 ? 110 : 70;
@@ -3495,8 +3548,44 @@ export function CampaignDetailMapView({
       }, 1100);
       finishAfter(7600);
     },
-    [clearDemoCameraTimers, demoAddressTargets, demoCameraSpeed, demoColorMode, demoSegmentCameraAngle, getCampaignMapBounds, mapLoaded, movieMapControlsEnabled],
+    [clearDemoCameraTimers, demoAddressTargets, demoCameraSpeed, demoColorMode, demoSegmentCameraAngle, getCampaignMapBounds, mapAddresses, mapLoaded, movieMapControlsEnabled],
   );
+
+  useEffect(() => {
+    if (activeDemoCameraShot !== null || !demoVideoRef.current || demoVideoArmed) return;
+    const recording = demoVideoRef.current;
+    setDemoVideoFinishing(true);
+    const timeout = window.setTimeout(() => {
+      if (demoVideoRef.current === recording) {
+        recording.stop(true);
+        demoVideoRef.current = null;
+      }
+      setDemoVideoFinishing(false);
+    }, 400);
+    return () => window.clearTimeout(timeout);
+  }, [activeDemoCameraShot, demoVideoArmed]);
+
+  useEffect(() => () => {
+    demoVideoRef.current?.stop(false);
+    demoVideoRef.current = null;
+  }, []);
+
+  const armDemoVideo = useCallback(() => {
+    const currentMap = map.current;
+    if (!currentMap || !mapLoaded) return;
+    try {
+      if (!demoAddressTargets.length) {
+        throw new Error('This campaign has no mapped homes available for a replay.');
+      }
+      if (typeof MediaRecorder === 'undefined' || !HTMLCanvasElement.prototype.captureStream) {
+        throw new Error('This browser cannot record map videos. Try a current version of Safari or Chrome.');
+      }
+      setDemoVideoError(null);
+      setDemoVideoArmed(true);
+    } catch (error) {
+      setDemoVideoError(error instanceof Error ? error.message : 'Could not start video recording.');
+    }
+  }, [demoAddressTargets.length, mapLoaded]);
 
   useEffect(() => {
     return () => {
@@ -3658,8 +3747,8 @@ export function CampaignDetailMapView({
       {mapInitFailed ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background p-6">
           <div className="max-w-sm rounded-lg border border-border bg-card p-5 text-center shadow-lg">
-            <p className="text-sm font-semibold text-foreground">Map could not be loaded.</p>
-            <p className="mt-1 text-sm text-muted-foreground">Please refresh the page.</p>
+            <p className="text-sm font-semibold text-foreground">{mapPreparationFailed ? 'Map preparation failed.' : 'Map could not be loaded.'}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{mapPreparationFailed ? 'Your farm and addresses are saved. Please contact support to retry map preparation.' : 'Please refresh the page.'}</p>
             <Button className="mt-4" size="sm" onClick={() => window.location.reload()}>
               Refresh
             </Button>
@@ -3792,6 +3881,7 @@ export function CampaignDetailMapView({
                     <button
                       key={mode}
                       type="button"
+                      disabled={demoVideoStarting || demoVideoFinishing || (!!activeDemoCameraShot && !!demoVideoRef.current)}
                       onClick={() => handleDemoColorModeChange(mode)}
                       className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
                         demoColorMode === mode
@@ -3816,6 +3906,7 @@ export function CampaignDetailMapView({
                     <button
                       key={angle}
                       type="button"
+                      disabled={demoVideoStarting || demoVideoFinishing || (!!activeDemoCameraShot && !!demoVideoRef.current)}
                       onClick={() => setDemoSegmentCameraAngle(angle)}
                       className={`flex h-8 min-w-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium transition-colors ${
                         demoSegmentCameraAngle === angle
@@ -3829,14 +3920,16 @@ export function CampaignDetailMapView({
                     </button>
                   ))}
                 </div>
-                <div className="mt-1.5 grid grid-cols-2 gap-1">
+                <div className="mt-1.5 grid grid-cols-3 gap-1">
                   {[
+                    { speed: 'fast' as DemoCameraSpeed, label: 'Fast' },
                     { speed: 'normal' as DemoCameraSpeed, label: 'Normal' },
                     { speed: 'superSlow' as DemoCameraSpeed, label: 'Super slow' },
                   ].map(({ speed, label }) => (
                     <button
                       key={speed}
                       type="button"
+                      disabled={demoVideoStarting || demoVideoFinishing || (!!activeDemoCameraShot && !!demoVideoRef.current)}
                       onClick={() => setDemoCameraSpeed(speed)}
                       className={`flex h-8 min-w-0 items-center justify-center rounded-md px-2 text-[11px] font-medium transition-colors ${
                         demoCameraSpeed === speed
@@ -3865,7 +3958,38 @@ export function CampaignDetailMapView({
                     <button
                       key={shot}
                       type="button"
-                      onClick={() => playDemoCamera(shot)}
+                      disabled={demoVideoStarting || demoVideoFinishing || (!!activeDemoCameraShot && !!demoVideoRef.current)}
+                      onClick={() => {
+                        if (!demoVideoArmed || !map.current) {
+                          playDemoCamera(shot);
+                          return;
+                        }
+                        void (async () => {
+                          setDemoVideoStarting(true);
+                          let recording: ReturnType<typeof recordCampaignReplay> | null = null;
+                          try {
+                            const attribution = mapContainer.current?.querySelector('.mapboxgl-ctrl-attrib-inner')?.textContent?.trim() ?? '';
+                            recording = recordCampaignReplay(map.current!, attribution, (error) => {
+                              demoVideoRef.current = null;
+                              setDemoVideoError(error.message);
+                              stopDemoCamera();
+                            });
+                            demoVideoRef.current = recording;
+                            setDemoVideoError(null);
+                            await recording.ready;
+                            if (demoVideoRef.current !== recording) return;
+                            playDemoCamera(shot);
+                            setDemoVideoArmed(false);
+                          } catch (error) {
+                            recording?.stop(false);
+                            if (demoVideoRef.current === recording) demoVideoRef.current = null;
+                            setDemoVideoError(error instanceof Error ? error.message : 'Could not start video recording.');
+                            setDemoVideoArmed(false);
+                          } finally {
+                            setDemoVideoStarting(false);
+                          }
+                        })();
+                      }}
                       className={`flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
                         activeDemoCameraShot === shot
                           ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -3879,6 +4003,25 @@ export function CampaignDetailMapView({
                     </button>
                   ))}
                 </div>
+                <button
+                  type="button"
+                  disabled={!!activeDemoCameraShot || demoVideoStarting || demoVideoFinishing || !mapLoaded}
+                  onClick={() => {
+                    if (demoVideoArmed) {
+                      demoVideoRef.current?.stop(false);
+                      demoVideoRef.current = null;
+                      setDemoVideoArmed(false);
+                    } else {
+                      armDemoVideo();
+                    }
+                  }}
+                  className="mt-1.5 h-9 w-full rounded-md bg-red-600 px-2 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {demoVideoArmed ? 'Cancel recording' : 'Record replay video'}
+                </button>
+                {demoVideoArmed ? <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Choose a camera shot to record. Keep this tab open until the simulated reveal downloads.</p> : null}
+                {demoVideoFinishing ? <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Finishing video…</p> : null}
+                {demoVideoError ? <p role="alert" className="mt-1 text-xs text-red-600">{demoVideoError}</p> : null}
                 {activeDemoCameraShot ? (
                   <button
                     type="button"
@@ -3887,7 +4030,7 @@ export function CampaignDetailMapView({
                     title="Stop demo camera"
                   >
                     <Square className="h-3.5 w-3.5" />
-                    Stop
+                    {demoVideoRef.current ? 'Stop & save' : 'Stop'}
                   </button>
                 ) : null}
               </div>

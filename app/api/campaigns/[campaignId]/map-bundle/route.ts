@@ -1,3 +1,4 @@
+import { signedCurrentExternalTileBundle } from '@/lib/services/CanonicalTileArtifacts';
 import { areaCampaignMapBundle } from '@/lib/storm-maps/intelligence/area-campaign';
 import { NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -174,6 +175,17 @@ export async function GET(
     const tileFormat = request.nextUrl.searchParams.get('format');
     if (tileFormat === 'tiles-v2' || tileFormat === 'tiles-v3') {
       const platform = request.nextUrl.searchParams.get('platform') ?? 'web';
+      if (!(tileFormat === 'tiles-v2' && request.nextUrl.searchParams.get('include') === 'canonical')) {
+        const external = await signedCurrentExternalTileBundle(supabase, campaignId, platform, tileFormat === 'tiles-v3');
+        if (external) {
+          const headers = { ETag: etagForSignature(external.assetSignature), 'Cache-Control': 'private, no-store' };
+          if (signature === external.assetSignature) return new Response(null, { status: 304, headers });
+          // Browsers must fetch object storage separately without forwarding
+          // cookies or conditional headers across origins.
+          if (platform === 'web') return Response.json({ schema: 'external-map-v1', url: external.url }, { headers });
+          return new Response(null, { status: 302, headers: { ...headers, Location: external.url } });
+        }
+      }
       const tiled = tileFormat === 'tiles-v3'
         ? await measured('bundle', spans, () => readCanonicalCompactBundle(supabase, campaignId, platform, request.nextUrl.origin))
         : await measured('bundle', spans, () => readCanonicalTileBundle(supabase, campaignId, platform, request.nextUrl.origin));

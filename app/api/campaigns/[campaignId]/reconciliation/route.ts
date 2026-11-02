@@ -55,6 +55,13 @@ export async function GET(
   try {
     const targets = await fetchGeometryTargetStates(admin, campaignId);
     body = mergeGeometryTargetProgress(baseBody, targets);
+    const { data: currentMap, error: currentMapError } = await admin.from('campaign_map_bundles')
+      .select('counts').eq('campaign_id', campaignId).eq('is_current', true).maybeSingle();
+    if (currentMapError) throw new Error(currentMapError.message);
+    body.current_map = currentMap?.counts ?? null;
+    if (data?.mode === 'shadow') {
+      body.shadow_run = { status: data.status, completed_at: data.completed_at, report: data.report ?? {} };
+    }
     if (targets.length && ['completed', 'review_needed'].includes(String(body.status))) {
       const { data: bundle, error: bundleError } = await admin.from('campaign_map_bundles')
         .select('asset_signature,reconciliation').eq('campaign_id', campaignId).eq('is_current', true).maybeSingle();

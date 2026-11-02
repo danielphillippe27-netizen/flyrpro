@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Home, MessageSquare, Target, Users } from "lucide-react";
-import type { FarmAddress, FarmLead, FarmTouchAddress } from "@/types/database";
+import type { FarmAddress, CampaignAddress, FarmLead, FarmTouchAddress } from "@/types/database";
 import type { EnrichedFarmTouch } from "@/lib/farms/analytics";
 import { buildFarmPerformance } from "@/lib/farms/performance";
 
@@ -14,6 +14,7 @@ const panel = "rounded-2xl border border-border/60 bg-card shadow-sm";
 export function FarmPerformanceDashboard({
   name,
   addresses,
+  campaignAddresses,
   touches,
   outcomes,
   leads,
@@ -23,6 +24,7 @@ export function FarmPerformanceDashboard({
 }: {
   name: string;
   addresses: FarmAddress[];
+  campaignAddresses: CampaignAddress[];
   touches: EnrichedFarmTouch[];
   outcomes: FarmTouchAddress[];
   leads: FarmLead[];
@@ -41,10 +43,18 @@ export function FarmPerformanceDashboard({
       }),
     [addresses, touches, outcomes, leads, currentCycle, scope],
   );
+  const campaignVisited = useMemo(() => new Set(campaignAddresses.filter((home) => home.visited).map((home) => home.id)), [campaignAddresses]);
+  const outcomeHomes = useMemo(() => {
+    const sessionIds = new Set(touches.map((touch) => touch.id));
+    return new Set(outcomes.filter((outcome) => sessionIds.has(outcome.farm_touch_id) && outcome.status !== "none" && outcome.status !== "do_not_knock" && Number.isFinite(Date.parse(outcome.occurred_at)) && Date.parse(outcome.occurred_at) <= Date.now()).map((outcome) => outcome.farm_address_id));
+  }, [outcomes, touches]);
+  const additionalHomes = scope === "all_time" ? addresses.filter((home) => home.campaign_address_id && campaignVisited.has(home.campaign_address_id) && !outcomeHomes.has(home.id)).length : 0;
+  const homesVisited = data.total.homes + additionalHomes;
+  const coverage = addresses.length ? homesVisited / addresses.length : 0;
   const metrics = [
     {
       label: "Homes Visited",
-      value: number(data.total.homes),
+      value: number(homesVisited),
       hint: "Unique homes reached",
       icon: Home,
     },
@@ -109,7 +119,7 @@ export function FarmPerformanceDashboard({
               Farm coverage
             </p>
             <p className="mt-2 text-5xl font-semibold tracking-tighter tabular-nums sm:text-6xl">
-              {percent(data.total.coverage)}
+              {percent(coverage)}
             </p>
           </div>
         </div>
@@ -117,13 +127,13 @@ export function FarmPerformanceDashboard({
           className="relative mt-4 h-2 overflow-hidden rounded-full bg-muted"
           role="progressbar"
           aria-label="Farm coverage"
-          aria-valuenow={Math.round(data.total.coverage * 100)}
+          aria-valuenow={Math.round(coverage * 100)}
           aria-valuemin={0}
           aria-valuemax={100}
         >
           <div
             className="h-full rounded-full bg-[#E33449] transition-[width] duration-500 motion-reduce:transition-none"
-            style={{ width: `${data.total.coverage * 100}%` }}
+            style={{ width: `${coverage * 100}%` }}
           />
         </div>
         <p className="mt-3 text-xs text-muted-foreground">

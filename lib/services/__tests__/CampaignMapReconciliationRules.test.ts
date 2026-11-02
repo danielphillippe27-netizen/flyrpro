@@ -15,6 +15,8 @@ import {
   configuredMaxReverseGeocodes,
   configuredReverseGeocodingStorageMode,
   neighborhoodContextForCandidate,
+  streetSegmentSuggestions,
+  streetLinkConflictSuggestions,
   normalizedCivicAddressIdentity,
   normalizedAddressIdentity,
   isBuildingAvailableForCivicAssignment,
@@ -42,8 +44,8 @@ assert(
   'temporary testing mode must disable permanent Mapbox storage'
 );
 assert(
-  configuredReverseGeocodingStorageMode('permanent') === 'permanent',
-  'permanent storage must remain available only when explicitly configured'
+  configuredReverseGeocodingStorageMode('permanent') === 'temporary',
+  'reconciliation must never enable permanent reverse-geocode storage'
 );
 assert(
   configuredReverseGeocodingStorageMode(undefined) === 'temporary',
@@ -530,6 +532,54 @@ assert(
   !sequenceCandidate.evidence.includes('same_parcel'),
   'sequence-only evidence must remain review-only and must not satisfy automatic-link hard constraints'
 );
+
+const streetRoad = {
+  type: 'Feature', geometry: { type: 'LineString', coordinates: [[-79.7003, 43.58], [-79.6995, 43.58]] },
+  properties: { name: 'Summergrove Crescent' },
+} as GeoJSON.Feature<GeoJSON.LineString>;
+const streetSuggestions = (extraBuildings: GeoJSON.Feature[] = [], roads: GeoJSON.Feature[] = [streetRoad]) =>
+  streetSegmentSuggestions({
+    roads, addresses: [linkedAddress1696, orphanAddress1698, linkedAddress1700],
+    buildings: [linkedBuilding1696, candidateBuilding1698, linkedBuilding1700, ...extraBuildings],
+    links: [
+      { address_id: 'address-1696', building_id: 'building-1696', user_confirmed: true },
+      { address_id: 'address-1700', building_id: 'building-1700', user_confirmed: true },
+    ], protectedAddressIds: new Set(), protectedBuildingIds: new Set(),
+  });
+assert(streetSuggestions().some(s => s.addressId === 'address-1698' && s.buildingId === 'building-1698'),
+  'trusted same-side anchors on a named segment should identify the intervening building for review');
+const oppositeBuilding = {
+  ...candidateBuilding1698, properties: { building_id: 'opposite-building' },
+  geometry: { type: 'Polygon', coordinates: [[[-79.69994, 43.57984], [-79.69986, 43.57984],
+    [-79.69986, 43.57992], [-79.69994, 43.57992], [-79.69994, 43.57984]]] },
+} as GeoJSON.Feature<GeoJSON.Polygon>;
+assert(streetSuggestions([oppositeBuilding]).length === 1,
+  'a building on the opposite side must not compete with the same-side row');
+const competingBuilding = { ...candidateBuilding1698, properties: { building_id: 'competing-building' } };
+assert(streetSuggestions([competingBuilding]).length === 0,
+  'multiple buildings in the expected position must remain unresolved');
+assert(streetSegmentSuggestions({
+  roads: [streetRoad], addresses: [linkedAddress1696, orphanAddress1698, linkedAddress1700],
+  buildings: [linkedBuilding1696, candidateBuilding1698, linkedBuilding1700],
+  links: [
+    { address_id: 'address-1696', building_id: 'building-1696', match_type: 'point_on_surface', confidence: 0.9, distance_meters: 2 },
+    { address_id: 'address-1700', building_id: 'building-1700', match_type: 'point_on_surface', confidence: 0.9, distance_meters: 2 },
+  ], protectedAddressIds: new Set(), protectedBuildingIds: new Set(),
+}).length === 1, 'high-confidence close spatial links should be usable as anchors');
+const conflictInput = {
+  roads: [streetRoad], addresses: [linkedAddress1696, orphanAddress1698, linkedAddress1700],
+  buildings: [linkedBuilding1696, candidateBuilding1698, linkedBuilding1700, oppositeBuilding],
+  links: [
+    { address_id: 'address-1696', building_id: 'building-1696', user_confirmed: true },
+    { address_id: 'address-1700', building_id: 'building-1700', user_confirmed: true },
+    { address_id: 'address-1698', building_id: 'opposite-building', confidence: 0.5, unit_count: 1 },
+  ], protectedAddressIds: new Set<string>(), protectedBuildingIds: new Set<string>(),
+};
+assert(streetLinkConflictSuggestions(conflictInput).some(s => s.addressId === 'address-1698' && s.buildingId === 'building-1698'),
+  'a weak link on the wrong road side should be identified for review by the anchored row');
+assert(streetLinkConflictSuggestions({ ...conflictInput, protectedAddressIds: new Set(['address-1698']) }).length === 0,
+  'protected addresses must not be suggested for reassignment');
+assert(streetSuggestions([], []).length === 0, 'missing road geometry must not infer a street segment');
 
 assert(
   !shouldAutoHideOverlappingDuplicate({

@@ -81,9 +81,28 @@ export async function POST(request: NextRequest, context: { params: Promise<{ fa
     if (countError) throw countError;
     const { error } = await admin.from('farms').update({ address_count: count ?? 0, last_generated_at: new Date().toISOString() }).eq('id', farm.id);
     if (error) throw error;
+    if (farm.linked_campaign_id) {
+      const { error: resetError } = await admin.from('campaigns').update({
+        provision_status: 'pending', provision_message: null,
+      }).eq('id', farm.linked_campaign_id).eq('provision_status', 'failed').is('map_ready_at', null);
+      if (resetError) console.error('[farm map] Could not reset preparation status:', farm.id, resetError);
+    }
     after(async () => {
       try { await prepareFarmMap(admin, farm.id, country, resolution.regionCode); }
-      catch (error) { console.error('[farm map] Preparation failed:', farm.id, error); }
+      catch (error) {
+        console.error('[farm map] Preparation failed:', farm.id, error);
+        // Do not replace the state of an already usable map when an import is
+        // retried. For a new farm, expose the failure instead of polling forever.
+        if (!farm.linked_campaign_id) return;
+        const { data: current, error: currentError } = await admin.from('campaign_map_bundles')
+          .select('campaign_id').eq('campaign_id', farm.linked_campaign_id).eq('is_current', true).maybeSingle();
+        if (!currentError && !current) {
+          const { error: statusError } = await admin.from('campaigns').update({
+            provision_status: 'failed', provision_message: 'Map preparation failed. Please try again later.',
+          }).eq('id', farm.linked_campaign_id).is('map_ready_at', null);
+          if (statusError) console.error('[farm map] Could not record preparation failure:', farm.id, statusError);
+        }
+      }
     });
     return NextResponse.json({ importedCount: included.length, totalCount: count ?? 0, excludedCount: newExclusions });
   } catch (error) { return NextResponse.json({ error: formatApiError(error) }, { status: 500 }); }

@@ -1,3 +1,7 @@
+# Shared live app · Mac 0.6.0
+
+Installed at /Applications/WolfGrid Mac Preview.app. Quit and reopen to move from the old preview onto https://wolfgrid.app. Sign in once on the live origin. Web releases now reach the Mac app automatically. Native bridge features still need app updates. CRM private messages use /messages; the business inbox remains at /inbox. The private pilot allowlist and personal settings remain in force.
+
 # Current setup · Mac 0.3.1
 
 Open `/Applications/WolfGrid Mac Preview.app`, sign in and click **Enable sync with WolfGrid contacts**. If prompted, allow WolfGrid in System Settings → Privacy & Security → Full Disk Access, then quit and reopen the app. Existing and future uniquely matched CRM contacts sync automatically, including available downloaded history. **Pause sync** keeps saved history.

@@ -8,11 +8,10 @@ import {
 export const READ = "https://www.googleapis.com/auth/gmail.readonly",
   SEND = "https://www.googleapis.com/auth/gmail.send";
 export async function cocoGmailStatus(userId: string) {
-  let configured = true;
   try {
     gmailConfig();
   } catch {
-    configured = false;
+    return { configured: false, connected: false, email: null, can_read: false, can_send: false };
   }
   const { data, error } = await createAdminClient()
     .from("personal_gmail_connections")
@@ -22,7 +21,7 @@ export async function cocoGmailStatus(userId: string) {
   if (error) throw Error("Gmail connection storage is unavailable.");
   if (!data)
     return {
-      configured,
+      configured: true,
       connected: false,
       email: null,
       can_read: false,
@@ -33,7 +32,7 @@ export async function cocoGmailStatus(userId: string) {
   );
   const scopes = tokens.scopes ?? [SEND];
   return {
-    configured,
+    configured: true,
     connected: true,
     email: data.email,
     can_read: scopes.includes(READ),

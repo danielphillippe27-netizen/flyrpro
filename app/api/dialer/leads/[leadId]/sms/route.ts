@@ -117,7 +117,7 @@ async function upsertLeadContact(context: Exclude<Awaited<ReturnType<typeof getD
     phone_last_validated_at: now,
     phone_validation_error: normalizedPhone.error,
     email: cleanText(lead.email) || null,
-    address: '',
+    address: cleanText(lead.address) || cleanText(typeof existing?.address === 'string' ? existing.address : '') || '',
     status: 'warm',
     notes: cleanText(lead.notes) || null,
     last_contacted: now,

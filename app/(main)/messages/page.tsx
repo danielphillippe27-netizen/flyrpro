@@ -1,1 +1,14 @@
-export {default,dynamic} from '../inbox/page';
+import { canUseInbox } from "@/lib/coco/inbox-access";
+import { redirect } from "next/navigation";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import CocoCrm from "@/components/coco/CocoCrm";
+export const dynamic = "force-dynamic";
+export default async function InboxPage() {
+  const api = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await api.auth.getUser();
+  if (!user) redirect("/login?next=/messages");
+  if (!canUseInbox(user.email)) redirect("/leads");
+  return <CocoCrm initialArea="Inbox" canUseInbox />;
+}

@@ -1,3 +1,4 @@
+import { isExternalMapPointer, readExternalMapPayload, signedExternalMapPayloadURL } from './ExternalMapPayload';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CanonicalTileBundle } from '@/lib/map/canonicalTileBundle';
 import type { CanonicalCompactBundle } from './CanonicalCompactBundle';
@@ -39,8 +40,12 @@ async function readBundle(
     .eq('campaign_id', campaignId).eq('canonical_signature', current.asset_signature)
     .order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (error || !data) return null;
-  const bundle = ('compact_bundle' in data ? data.compact_bundle : data.bundle) as CanonicalTileBundle | CanonicalCompactBundle | null;
-  if (!bundle) return null;
+  const stored = 'compact_bundle' in data ? data.compact_bundle : data.bundle;
+  const bundle = (isExternalMapPointer(stored) ? await readExternalMapPayload(stored, campaignId) : stored) as CanonicalTileBundle | CanonicalCompactBundle | null;
+  if (!bundle?.tiles?.geometry_revision) {
+    console.warn('[canonical-tiles] Invalid stored tile manifest', { campaignId, compact });
+    return null;
+  }
   const prefix = `${baseUrl}/api/campaigns/${encodeURIComponent(campaignId)}/map-tiles/${bundle.tiles.geometry_revision}`;
   return { ...bundle, tiles: { ...bundle.tiles, tile_url_template: `${prefix}/{z}/{x}/{y}.mvt`, archive_url: `${prefix}/archive`,
     ...(bundle.tiles.geometry_pack ? { geometry_pack: { ...bundle.tiles.geometry_pack, url: `${prefix}/geometry` } } : {}) } };
@@ -54,6 +59,21 @@ export async function readCanonicalCompactBundle(db: SupabaseClient, campaignId:
   return await readBundle(db, campaignId, platform, baseUrl, true) as CanonicalCompactBundle | null;
 }
 
+/** Redirect large immutable manifests only after platform/current revision checks. */
+export async function signedCurrentExternalTileBundle(db: SupabaseClient, campaignId: string, platform: string, compact: boolean) {
+  if (!['web', 'ios', 'android'].includes(platform)) return null;
+  const { data: settings, error: settingsError } = await db.from('campaign_map_tile_settings').select('*').eq('campaign_id', campaignId).maybeSingle();
+  if (settingsError || !settings?.[`${platform}_enabled`]) return null;
+  const { data: current, error: currentError } = await db.from('campaign_map_bundles').select('asset_signature, links_status').eq('campaign_id', campaignId).eq('is_current', true).maybeSingle();
+  if (currentError || !current || (current.links_status && current.links_status !== 'ready')) return null;
+  const { data, error } = await db.from('campaign_map_tile_artifacts').select(compact ? 'compact_bundle' : 'bundle')
+    .eq('campaign_id', campaignId).eq('canonical_signature', current.asset_signature).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error || !data) return null;
+  const pointer = 'compact_bundle' in data ? data.compact_bundle : data.bundle;
+  if (!isExternalMapPointer(pointer) || !pointer.asset_signature) return null;
+  return { assetSignature: pointer.asset_signature, url: await signedExternalMapPayloadURL(pointer, campaignId) };
+}
+
 /** Report why a tile-only client cannot open a campaign yet.  A missing
  * artifact is never treated as permission to fall back silently. */
 export async function canonicalTileAvailability(db: SupabaseClient, campaignId: string, platform: string) {
@@ -65,13 +85,14 @@ export async function canonicalTileAvailability(db: SupabaseClient, campaignId: 
   // campaign from an older one so clients cannot fall back during provisioning.
   if (!settings) {
     const [campaign, rollout] = await Promise.all([
-      db.from('campaigns').select('created_at').eq('id', campaignId).maybeSingle(),
+      db.from('campaigns').select('created_at,provision_status').eq('id', campaignId).maybeSingle(),
       db.from('campaign_map_tile_rollout_control').select('new_campaigns_after').eq('singleton', true).maybeSingle(),
     ]);
     if (campaign.error || rollout.error || !campaign.data || !rollout.data) return 'unavailable' as const;
     const createdAt = Date.parse(campaign.data.created_at);
     const cutover = Date.parse(rollout.data.new_campaigns_after);
     if (!Number.isFinite(createdAt) || !Number.isFinite(cutover)) return 'unavailable' as const;
+    if (createdAt >= cutover && campaign.data.provision_status === 'failed') return 'failed' as const;
     return createdAt >= cutover
       ? 'preparing' as const : 'disabled' as const;
   }
@@ -79,7 +100,11 @@ export async function canonicalTileAvailability(db: SupabaseClient, campaignId: 
   const { data: current, error: currentError } = await db.from('campaign_map_bundles')
     .select('asset_signature, links_status').eq('campaign_id', campaignId).eq('is_current', true).maybeSingle();
   if (currentError) return 'unavailable' as const;
-  if (!current) return 'preparing' as const;
+  if (!current) {
+    const campaign = await db.from('campaigns').select('provision_status').eq('id', campaignId).maybeSingle();
+    if (campaign.error) return 'unavailable' as const;
+    return campaign.data?.provision_status === 'failed' ? 'failed' as const : 'preparing' as const;
+  }
   if (current.links_status === 'linking_failed') return 'failed' as const;
   if (current.links_status && current.links_status !== 'ready') return 'preparing' as const;
   const { data: job, error: jobError } = await db.from('campaign_map_tile_jobs')

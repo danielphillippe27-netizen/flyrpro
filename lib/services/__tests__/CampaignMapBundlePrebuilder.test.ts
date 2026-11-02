@@ -8,7 +8,7 @@ import {
   applyAddressParcelOwnership,
   dedupeCanonicalBuildingLinksForBundle,
   enrichFeatureCollectionsWithLinks,
-  filterParcelsWithoutBuildingsOrAddresses,
+  filterResidentialParcelsForDisplay,
   selectCanonicalAddressParcelOwnershipForBundle,
 } from '../CampaignMapBundlePrebuilder';
 
@@ -299,45 +299,13 @@ function run() {
     assertEqual(addressProps.label_visibility_mode, 'all_modes');
   });
 
-  test('parcel occupancy filter keeps address and building parcels but removes empty parcels', () => {
-    const addressOnly = parcelFeature('parcel-address', rectangle(-79.003, 43.000, -79.002, 43.001));
-    const buildingOnly = parcelFeature('parcel-building', rectangle(-79.001, 43.000, -79.000, 43.001));
-    const empty = parcelFeature('parcel-empty', rectangle(-78.999, 43.000, -78.998, 43.001));
-    const addresses: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: [addressFeature('address-only', -79.0025, 43.0005)],
-    };
-    const buildings: GeoJSON.FeatureCollection = {
-      type: 'FeatureCollection',
-      features: [buildingFeature('building-only')],
-    };
-
-    const filtered = filterParcelsWithoutBuildingsOrAddresses({
-      parcels: { type: 'FeatureCollection', features: [addressOnly, buildingOnly, empty] },
-      addresses,
-      buildings,
-    });
-
-    assertEqual(filtered.features.map((feature) => feature.id), ['parcel-address', 'parcel-building']);
-  });
-
-  test('parcel occupancy filter honors canonical address links when source points are offset', () => {
-    const linkedParcel = parcelFeature(
-      'parcel-linked',
-      rectangle(-79.003, 43.000, -79.002, 43.001),
-      { linked_address_ids: ['address-offset'], address_count: 1 }
-    );
-
-    const filtered = filterParcelsWithoutBuildingsOrAddresses({
-      parcels: { type: 'FeatureCollection', features: [linkedParcel] },
-      addresses: {
-        type: 'FeatureCollection',
-        features: [addressFeature('address-offset', -79.004, 43.0005)],
-      },
-      buildings: { type: 'FeatureCollection', features: [] },
-    });
-
-    assertEqual(filtered.features.map((feature) => feature.id), ['parcel-linked']);
+  test('display keeps empty residential lots and excludes roads and laneways', () => {
+    const empty = parcelFeature('empty', rectangle(-79.003, 43, -79.002, 43.001), { parcel_intent: 'residential' });
+    const road = parcelFeature('road', rectangle(-79.002, 43, -79.001, 43.001), { parcel_intent: 'road allowance' });
+    const lane = parcelFeature('lane', rectangle(-79.001, 43, -79, 43.001), { land_use: 'laneway' });
+    const narrowHome = parcelFeature('narrow-home', rectangle(-79.004, 43, -79.003, 43.001), { parcel_intent: 'residential', area_sqm: 500, perimeter_m: 400 });
+    const filtered = filterResidentialParcelsForDisplay({ type: 'FeatureCollection', features: [empty, road, lane, narrowHome] });
+    assertEqual(filtered.features.map((feature) => feature.id), ['empty', 'narrow-home']);
   });
 
   if (testsFailed > 0) {
