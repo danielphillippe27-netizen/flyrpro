@@ -1,3 +1,4 @@
+import { dispatchCanonicalTileBuild } from '@/lib/services/CanonicalTileDispatch';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
@@ -1275,14 +1276,16 @@ async function prewarmCanonicalMapBundle(
 ) {
   const timings: Record<string, number> = {};
   try {
-    await prebuildCampaignMapBundle(supabase, campaignId, (name, durationMs) => {
+    const bundle = await prebuildCampaignMapBundle(supabase, campaignId, (name, durationMs) => {
       timings[name] = Math.round(durationMs);
     }, {
       scopedGeometry,
       linksStatusOverride: options?.linksStatusOverride,
       parcelDisplayMode: options?.parcelDisplayMode,
     });
+    const tileWorkerDispatched = await dispatchCanonicalTileBuild(supabase, bundle);
     console.log('[Provision] Canonical map-bundle prebuilt:', {
+      tileWorkerDispatched,
       campaignId,
       linksStatusOverride: options?.linksStatusOverride ?? null,
       parcelDisplayMode: options?.parcelDisplayMode ?? 'filtered',
