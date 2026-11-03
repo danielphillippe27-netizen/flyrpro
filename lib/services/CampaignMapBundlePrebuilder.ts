@@ -716,6 +716,17 @@ export function uniqueAddressParcelOwnership(rows: AddressParcelOwnership[]): Ad
   });
 }
 
+export function excludeOverlayParcelConflicts(rows: AddressParcelOwnership[], features: Record<string, JsonRecord>, aliases: Map<string, string>): AddressParcelOwnership[] {
+  const occupied = new Map<string, Set<string>>();
+  for (const [id, edit] of Object.entries(features)) {
+    if (!id.startsWith('address:') || edit.hidden === true || edit.parcelLinkSet !== true || typeof edit.parcelId !== 'string') continue;
+    const raw = edit.parcelId.toLowerCase(), parcel = aliases.get(raw) ?? raw;
+    if (!occupied.has(parcel)) occupied.set(parcel, new Set());
+    occupied.get(parcel)!.add(id.slice(8).toLowerCase());
+  }
+  return rows.filter(row => [...(occupied.get(row.parcelId.toLowerCase()) ?? [])].every(id => id === row.addressId.toLowerCase()));
+}
+
 function isUuid(value: string | null | undefined): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -2272,6 +2283,18 @@ export async function prebuildCampaignMapBundle(
     }));
   } else {
     parcelOwnership = selectCanonicalAddressParcelOwnershipForBundle(enriched.addresses, parcels);
+    const { data: edits, error: editsError } = await supabase.from('campaign_map_edit_states')
+      .select('features').eq('campaign_id', campaignId).maybeSingle();
+    if (editsError) throw new Error(`Failed to check parcel corrections: ${editsError.message}`);
+    const parcelAliases = new Map<string, string>();
+    for (const feature of parcels.features) {
+      const owner = parcelFeatureExternalId(feature)?.toLowerCase();
+      if (!owner) continue;
+      for (const alias of [feature.id, feature.properties?.id, feature.properties?.parcel_id, feature.properties?.external_id]) {
+        if (typeof alias === 'string') parcelAliases.set(alias.toLowerCase(), owner);
+      }
+    }
+    parcelOwnership = excludeOverlayParcelConflicts(parcelOwnership, edits?.features ?? {}, parcelAliases);
     if (!options?.dryRun) await measure('parcel_ownership_persist', recordTiming, () =>
       persistAddressParcelOwnership({ supabase, campaignId, ownership: parcelOwnership, sourceVersion })
     );

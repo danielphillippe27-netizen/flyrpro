@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uniqueAddressParcelOwnership, applyAddressParcelOwnership } from '../CampaignMapBundlePrebuilder';
+import { uniqueAddressParcelOwnership, applyAddressParcelOwnership, excludeOverlayParcelConflicts } from '../CampaignMapBundlePrebuilder';
 const row=(addressId:string,parcelId:string)=>({addressId,parcelId,campaignParcelId:null,matchType:'contains' as const,confidence:1,parcelAreaSqm:100,distanceMeters:0});
 test('one-to-one ownership rejects collisions in either direction without choosing by order',()=>{
  assert.deepEqual(uniqueAddressParcelOwnership([row('a','p'),row('b','p')]),[]);
@@ -14,4 +14,11 @@ test('ambiguous source ownership never creates reverse parcel links',()=>{
  const result=applyAddressParcelOwnership({addresses,parcels,ownership:[row('a','p'),row('a','q')]});
  assert.equal(result.addresses.features[0].properties?.has_parcel_link,false);
  for(const p of result.parcels.features) assert.deepEqual(p.properties?.address_ids,[]);
+});
+
+test('automatic rebuild defers to explicit parcel corrections instead of failing or taking their parcel',()=>{
+ const aliases=new Map([['uuid-p','p']]);
+ assert.deepEqual(excludeOverlayParcelConflicts([row('a','p')],{'address:b':{parcelLinkSet:true,parcelId:'uuid-p'}},aliases),[]);
+ assert.equal(excludeOverlayParcelConflicts([row('a','p')],{'address:a':{parcelLinkSet:true,parcelId:'uuid-p'}},aliases).length,1);
+ assert.equal(excludeOverlayParcelConflicts([row('a','p')],{'address:b':{hidden:true,parcelLinkSet:true,parcelId:'uuid-p'}},aliases).length,1);
 });
