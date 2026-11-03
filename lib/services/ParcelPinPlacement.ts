@@ -65,6 +65,17 @@ export function planParcelPinPlacements(input: {
     const parcel = text(address.properties?.parcel_id);
     if (parcel) groups.set(parcel, [...(groups.get(parcel) ?? []), address]);
   }
+  const currentOwners = new Map<string, Set<string>>();
+  for (const address of input.addresses) {
+    const p = address.properties ?? {};
+    const addressId = text(p.address_id ?? p.id ?? address.id);
+    const linkedId = text(p.building_gers_id ?? p.linked_building_id ?? p.building_id);
+    const building = byAlias.get(linkedId);
+    const key = building ? buildingIdentifiers(building)[0] : linkedId;
+    if (key) currentOwners.set(key, new Set([...(currentOwners.get(key) ?? []), addressId]));
+  }
+  const normalizeStreet = (value: unknown) => text(value).replace(/[^a-z0-9 ]/g, '').replace(/\b(street|road|avenue|drive|lane|court|boulevard)\b/g,
+    word => ({street:'st',road:'rd',avenue:'ave',drive:'dr',lane:'ln',court:'ct',boulevard:'blvd'}[word]!)).replace(/\s+/g, ' ').trim();
   const placements: ParcelPinPlacement[] = [];
   for (const [parcelId, addresses] of groups) {
     const parcel = parcels.get(parcelId);
@@ -102,6 +113,15 @@ export function planParcelPinPlacements(input: {
       // missing footprint can still use parcel-only placement when no eligible
       // replacement exists; the original building link remains untouched.
       const winner = linkedId ? candidates.find(c => c.feature === linked) : candidates.length === 1 ? candidates[0] : null;
+      if (winner && !linkedId) {
+        const key = buildingIdentifiers(winner.feature)[0];
+        const owners = currentOwners.get(key);
+        const addressStreet = normalizeStreet(p.street_name);
+        const bp = winner.feature.properties ?? {};
+        const buildingStreet = normalizeStreet(bp.street_name ?? bp.primary_street ?? bp.addr_street);
+        if ((owners && [...owners].some(id => id !== addressId)) ||
+            (addressStreet && buildingStreet && addressStreet !== buildingStreet)) continue;
+      }
       if (preservePoint && coordinates) {
         placements.push({ addressId, parcelId,
           buildingId: winner ? buildingIdentifiers(winner.feature)[0] ?? null : null,
@@ -126,7 +146,11 @@ export function planParcelPinPlacements(input: {
       }
     } catch { /* Ambiguous or invalid geometry remains unchanged. */ }
   }
-  return placements;
+  // Different parcels can intersect the same row footprint. Do not infer a
+  // multi-address building from that geometry; retain only existing associations.
+  const claims = new Map<string, number>();
+  for (const placement of placements) if (placement.buildingId) claims.set(placement.buildingId, (claims.get(placement.buildingId) ?? 0) + 1);
+  return placements.filter(p => !p.buildingId || (claims.get(p.buildingId) ?? 0) === 1 || currentOwners.get(p.buildingId)?.has(p.addressId));
 }
 
 export function applyParcelPinPlacements(collection: GeoJSON.FeatureCollection, placements: ParcelPinPlacement[]): GeoJSON.FeatureCollection {

@@ -1112,7 +1112,7 @@ async function runCampaignPostProcessing(params: {
         normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
         overtureRelease,
         {
-          resetExisting: true,
+          preserveExisting: true,
           persistenceMode: source === 'diamond' ? 'gold' : 'silver',
           parcelsGeoJSON: scopedGeometry?.parcels?.features.length
             ? scopedGeometry.parcels as never

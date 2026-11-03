@@ -935,7 +935,7 @@ export class ParcelEnrichmentService {
         { features: campaignBuildings.features },
         '2026-01-21.0',
         {
-          resetExisting: true,
+          preserveExisting: true,
           persistenceMode: 'gold',
           parcelsGeoJSON: parcelBridgeGeoJSON,
         }
@@ -980,7 +980,7 @@ export class ParcelEnrichmentService {
       snapshot.buildingsGeoJSON,
       snapshot.overtureRelease,
       {
-        resetExisting: true,
+        preserveExisting: true,
         parcelsGeoJSON: parcelBridgeGeoJSON,
       }
     );

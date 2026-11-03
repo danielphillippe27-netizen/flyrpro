@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     buildings as unknown as { features: BuildingFeature[] },
     '2026-01-21.0',
     {
-      resetExisting: true,
+      preserveExisting: true,
       persistenceMode: campaign.provision_source === 'diamond' ? 'gold' : 'silver',
       parcelsGeoJSON: parcels?.features?.length ? parcels as never : null,
     }

@@ -171,6 +171,21 @@ export function canAutoCreateSyntheticOnParcel(input: {
   return input.residentialBuildingCountOnParcel <= 1;
 }
 
+/** Only isolated, unoccupied candidate pairs may be assigned automatically. */
+export function strictAutomaticAssignmentEdges(
+  edges: GlobalAssignmentEdge[], occupiedAddressIds: Set<string>, occupiedBuildingIds: Set<string>
+): GlobalAssignmentEdge[] {
+  const buildingDegrees = new Map<string, number>(), addressDegrees = new Map<string, number>();
+  for (const edge of edges) {
+    const b = edge.buildingId.toLowerCase(), a = edge.addressId.toLowerCase();
+    buildingDegrees.set(b, (buildingDegrees.get(b) ?? 0) + 1);
+    addressDegrees.set(a, (addressDegrees.get(a) ?? 0) + 1);
+  }
+  return edges.filter(edge => buildingDegrees.get(edge.buildingId.toLowerCase()) === 1 &&
+    addressDegrees.get(edge.addressId.toLowerCase()) === 1 &&
+    !occupiedAddressIds.has(edge.addressId.toLowerCase()) && !occupiedBuildingIds.has(edge.buildingId.toLowerCase()));
+}
+
 /**
  * Maximum-cardinality, maximum-weight one-to-one assignment. Dummy columns
  * allow buildings to remain unresolved; real edges receive a cardinality
@@ -2770,7 +2785,7 @@ export class CampaignMapReconciliationService {
     const orderedBuildings = input.buildings
       .filter((building) => {
         const id = featureId(building)?.toLowerCase();
-        if (!id || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
+        if (!id || buildingIdentifiers(building).some(alias => input.linkedBuildingIds.has(alias) || currentAddressIdsByBuilding.has(alias)) || isExplicitNonResidentialBuilding(building) || isAccessoryBuilding(building) ||
             input.protectedBuildingIds.has(id) || buildingIdentifiers(building).some(alias => parcelResolvedBuildings.has(alias))) return false;
         const parcel = resolveParcelId(building)?.toLowerCase();
         if (parcel && geometryTargetParcels.has(parcel)) return false;
@@ -2965,7 +2980,12 @@ export class CampaignMapReconciliationService {
 
     }
 
-    const assignments = solveGlobalOneToOneAssignment(edges);
+    // Global matching must not improve coverage by giving a losing candidate
+    // its second-choice neighbor. Only isolated, unoccupied pairs auto-apply.
+    const strictEdges = strictAutomaticAssignmentEdges(edges,
+      new Set([...currentLinkByAddress.keys(), ...input.linkedAddressIds]),
+      new Set([...currentAddressIdsByBuilding.keys(), ...input.linkedBuildingIds]));
+    const assignments = solveGlobalOneToOneAssignment(strictEdges);
     const assignmentDecisions = assignments.flatMap(({ buildingId, addressId: addressIdValue }) => {
       const evidence = edgeEvidence.get(`${buildingId.toLowerCase()}:${addressIdValue.toLowerCase()}`);
       if (!evidence) return [];
@@ -3605,8 +3625,14 @@ export class CampaignMapReconciliationService {
     run: ReconciliationRunRow,
     decisions: ReconciliationDecision[]
   ): Promise<number> {
+    for (const decision of decisions) {
+      if (decision.action === 'reassign_address') {
+        decision.status = 'requires_review';
+        await this.markDecision(decision.id, 'requires_review', 'Existing assignments require reviewed cleanup');
+      }
+    }
     const assignments = decisions.flatMap((decision) =>
-      decision.address_id && decision.building_id
+      decision.status === 'proposed' && decision.address_id && decision.building_id
         ? [{
             decision_id: decision.id,
             address_id: decision.address_id,
@@ -3630,20 +3656,25 @@ export class CampaignMapReconciliationService {
     }
     const applied = Math.max(0, Number(data ?? 0));
     for (const decision of decisions) {
-      decision.status = applied > 0 ? 'applied' : 'stale';
+      if (decision.status === 'proposed') decision.status = applied > 0 ? 'applied' : 'stale';
     }
     return applied;
   }
 
   private async applyDecision(decision: ReconciliationDecision): Promise<boolean> {
     if (decision.status !== 'proposed') return false;
+    if (decision.action === 'reassign_address') {
+      await this.markDecision(decision.id, 'requires_review', 'Existing assignments require reviewed cleanup');
+      decision.status = 'requires_review';
+      return false;
+    }
     if (!await this.preconditionsStillMatch(decision)) {
       await this.markDecision(decision.id, 'stale', 'Decision preconditions changed before apply');
       decision.status = 'stale';
       return false;
     }
     if (
-      (decision.action === 'link_address' || decision.action === 'reassign_address') &&
+      decision.action === 'link_address' &&
       decision.address_id &&
       decision.building_id
     ) {
@@ -3942,7 +3973,7 @@ export class CampaignMapReconciliationService {
 
   private async markDecision(
     decisionIdValue: string,
-    status: 'applied' | 'stale' | 'rejected' | 'rolled_back',
+    status: 'applied' | 'stale' | 'rejected' | 'rolled_back' | 'requires_review',
     reason?: string
   ): Promise<void> {
     const now = new Date().toISOString();
