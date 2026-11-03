@@ -60,6 +60,7 @@ export async function POST(request: Request, context: Context) {
       p_campaign_id: campaignId, p_actor_id: auth.user!.id, p_mutation_id: body.clientMutationId,
       p_base_revision: body.baseRevision, p_changes: changes,
     });
+    if (error?.code === "23505") return NextResponse.json({ error: "This parcel already has an address. Unlink it before assigning another." }, { status: 422 });
     if (error) throw error;
     return NextResponse.json(data, { status: data.conflict ? 409 : 200, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

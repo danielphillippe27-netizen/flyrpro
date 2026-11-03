@@ -697,6 +697,25 @@ type AddressParcelOwnership = {
   distanceMeters: number;
 };
 
+/** Ambiguous ownership stays unlinked; never choose a winner by input order. */
+export function uniqueAddressParcelOwnership(rows: AddressParcelOwnership[]): AddressParcelOwnership[] {
+  const parcelsByAddress = new Map<string, Set<string>>();
+  const addressesByParcel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const a = row.addressId.toLowerCase(), p = row.parcelId.toLowerCase();
+    if (!parcelsByAddress.has(a)) parcelsByAddress.set(a, new Set());
+    if (!addressesByParcel.has(p)) addressesByParcel.set(p, new Set());
+    parcelsByAddress.get(a)!.add(p);
+    addressesByParcel.get(p)!.add(a);
+  }
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    const a = row.addressId.toLowerCase(), p = row.parcelId.toLowerCase();
+    if (parcelsByAddress.get(a)!.size !== 1 || addressesByParcel.get(p)!.size !== 1 || seen.has(a)) return false;
+    seen.add(a); return true;
+  });
+}
+
 function isUuid(value: string | null | undefined): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -769,7 +788,7 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
     }
   }
 
-  return addresses.features.flatMap<AddressParcelOwnership>((address) => {
+  const proposed = addresses.features.flatMap<AddressParcelOwnership>((address) => {
     const addressId = addressFeatureIdentifier(address);
     const coordinate = pointCoordinate(address);
     if (!addressId || !coordinate) return [];
@@ -835,6 +854,7 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
       distanceMeters: winner.centroid ? distanceMeters(coordinate, winner.centroid) : 0,
     }];
   });
+  return uniqueAddressParcelOwnership(proposed);
 }
 
 function isAddressProxyBuildingFeature(feature: GeoJSON.Feature): boolean {
@@ -1434,7 +1454,7 @@ export function applyAddressParcelOwnership(params: {
   const ownershipByAddressId = new Map<string, AddressParcelOwnership>();
   const addressIdsByParcelId = new Map<string, string[]>();
 
-  for (const row of params.ownership) {
+  for (const row of uniqueAddressParcelOwnership(params.ownership)) {
     ownershipByAddressId.set(row.addressId.toLowerCase(), row);
     const key = row.parcelId.toLowerCase();
     addressIdsByParcelId.set(key, [...(addressIdsByParcelId.get(key) ?? []), row.addressId]);
@@ -1567,7 +1587,7 @@ async function persistAddressParcelOwnership(params: {
 
   if (params.ownership.length === 0) return;
 
-  const rows = params.ownership.map((row) => ({
+  const rows = uniqueAddressParcelOwnership(params.ownership).map((row) => ({
     campaign_id: params.campaignId,
     address_id: row.addressId,
     campaign_parcel_id: row.campaignParcelId,
