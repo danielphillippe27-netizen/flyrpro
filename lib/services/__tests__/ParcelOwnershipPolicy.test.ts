@@ -22,3 +22,10 @@ test('automatic rebuild defers to explicit parcel corrections instead of failing
  assert.equal(excludeOverlayParcelConflicts([row('a','p')],{'address:a':{parcelLinkSet:true,parcelId:'uuid-p'}},aliases).length,1);
  assert.equal(excludeOverlayParcelConflicts([row('a','p')],{'address:b':{hidden:true,parcelLinkSet:true,parcelId:'uuid-p'}},aliases).length,1);
 });
+test('new parcel ownership clears the old internal parcel ID',()=>{
+ const addresses:any={type:'FeatureCollection',features:[{type:'Feature',geometry:{type:'Point',coordinates:[0,0]},properties:{id:'a',campaign_parcel_id:'old-lot',house_number:'1'}}]};
+ const parcels:any={type:'FeatureCollection',features:[]};
+ const result=applyAddressParcelOwnership({addresses,parcels,ownership:[row('a','new-lot')]});
+ assert.equal(result.addresses.features[0].properties?.parcel_id,'new-lot');
+ assert.equal(result.addresses.features[0].properties?.campaign_parcel_id,null);
+});

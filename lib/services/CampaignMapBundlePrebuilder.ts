@@ -1523,7 +1523,7 @@ export function applyAddressParcelOwnership(params: {
       const hasHouseLabel = !!houseNumberLabel(properties);
       if (ownership) {
         properties.parcel_id = ownership.parcelId;
-        properties.campaign_parcel_id = ownership.campaignParcelId ?? properties.campaign_parcel_id;
+        properties.campaign_parcel_id = ownership.campaignParcelId ?? null;
         properties.parcel_match_type = ownership.matchType;
         properties.parcel_confidence = ownership.confidence;
         properties.has_parcel_link = true;
