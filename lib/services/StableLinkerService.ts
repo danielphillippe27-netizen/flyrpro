@@ -15,6 +15,8 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import RBush from 'rbush';
+import { booleanIntersects } from '@turf/turf';
+import type { Polygon, MultiPolygon } from 'geojson';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
 
@@ -665,9 +667,12 @@ export class StableLinkerService {
 
     return nearby
       .filter((candidate) => {
-        const centroid = this.buildingCentroid(candidate.building);
-        return this.pointInPreparedParcel(centroid, parcel) ||
-          this.bboxesIntersect(this.buildingBbox(candidate.building), parcel.bbox);
+        if (!this.bboxesIntersect(this.buildingBbox(candidate.building), parcel.bbox)) return false;
+        // Bounds discover candidates; only the actual footprint can verify a parcel bridge.
+        // This preserves shared roofs crossing townhouse parcel boundaries and respects holes.
+        return booleanIntersects(candidate.building.geometry as Polygon | MultiPolygon, {
+          type: 'MultiPolygon', coordinates: parcel.polygons,
+        });
       })
       .map((candidate) => ({
         ...candidate,

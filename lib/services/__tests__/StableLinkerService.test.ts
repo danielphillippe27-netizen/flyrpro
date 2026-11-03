@@ -431,6 +431,30 @@ async function run() {
     assertEqual(match.buildingId, 'parcel-main-home');
   });
 
+  test('Parcel bridge rejects disjoint footprints whose bounding rectangles overlap', () => {
+    const service = createStableLinkerHarness();
+    // Two triangles separated by a diagonal gap, despite overlapping bounds.
+    const parcel = makeParcel('road-shaped', [
+      [-79.001, 43], [-79, 43], [-79.001, 43.001], [-79.001, 43],
+    ]);
+    const building = makeBuilding('unrelated-roof', [
+      [-79, 43.001], [-79.0004, 43.001], [-79, 43.0006], [-79, 43.001],
+    ], { primaryStreet: 'Westover Drive' });
+    const address = makeAddress('25', -79.0006, 43.0002, 'Dan Sheehan Lane');
+    const match = service.matchAddressToBuilding(address, [building], service.prepareParcels([parcel]));
+    assertTrue(match.matchType !== 'parcel_verified', 'Rectangle overlap must not verify a parcel');
+  });
+
+  test('Parcel bridge respects holes rather than verifying a building inside an excluded area', () => {
+    const service = createStableLinkerHarness();
+    const parcel = makeParcel('parcel-with-hole', rectangle(-79.001, 43, -79, 43.001));
+    parcel.geometry.coordinates.push(rectangle(-79.0008, 43.0002, -79.0002, 43.0008));
+    const building = makeBuilding('inside-hole', rectangle(-79.0007, 43.0003, -79.0003, 43.0007));
+    const address = makeAddress('25', -79.0009, 43.0005, 'Dan Sheehan Lane');
+    const match = service.matchAddressToBuilding(address, [building], service.prepareParcels([parcel]));
+    assertTrue(match.matchType !== 'parcel_verified', 'A parcel hole is not parcel evidence');
+  });
+
   test('Exact parcel civic address moves a road-side point to its unique parcel building', () => {
     const service = new StableLinkerService({} as any);
     const correctBuilding = makeBuilding(

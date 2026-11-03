@@ -70,6 +70,7 @@ async function main() {
     } }; return chain;
   } }) as unknown as SupabaseClient;
   assert.equal(await canonicalTileAvailability(noCurrent('failed'), 'campaign', 'ios'), 'failed');
+  assert.equal(await canonicalTileAvailability(noCurrent('ready'), 'campaign', 'ios'), 'failed');
   assert.equal(await canonicalTileAvailability(noCurrent('pending'), 'campaign', 'ios'), 'preparing');
   let metadataReads = 0;
   let metadataSelection = '';

@@ -100,7 +100,7 @@ async function main() {
       service.reverseGeocode = async (point: number[]) => {queried.push(JSON.stringify(point));return null;};
       service.heartbeatRun = async()=>{};
       const input = {run:{id:'run',campaign_id:'campaign'},buildings:[home,accessory],addresses:[linked],parcels:[parcel],
-        linkedBuildingIds:new Set(['home']),linkedAddressIds:new Set(['address']),orphanBuildingIds:new Set(['garage']),orphanAddressIds:new Set(),protectedAddressIds:new Set(),protectedBuildingIds:new Set()};
+        linkedBuildingIds:new Set(['home']),linkedAddressIds:new Set(['address']),orphanBuildingIds:new Set(['garage']),orphanAddressIds:new Set(),protectedAddressIds:new Set(),protectedBuildingIds:new Set(),streetSuggestions:[]};
       const decisions = await service.globalReverseGeocodeDecisions(input);
       assert.equal(queried.length,0,'home plus garage must not trigger reverse lookup, even without garage metadata');
       assert.equal(decisions.length,0,'existing home link must remain unchanged');
@@ -109,7 +109,7 @@ async function main() {
     const mock = {from:()=>{const chain:any={select:()=>chain,eq:()=>chain,maybeSingle:async()=>({data:null}),then:(resolve:any)=>Promise.resolve({data:[]}).then(resolve)};return chain;}};
     const service = new CampaignMapReconciliationService(mock as any) as any;
     const decisions = await service.globalReverseGeocodeDecisions({run:{id:'run',campaign_id:'campaign'},buildings:[home],addresses:[address],parcels:[parcel],
-      linkedBuildingIds:new Set(),linkedAddressIds:new Set(),orphanBuildingIds:new Set(['home']),orphanAddressIds:new Set(['address']),protectedAddressIds:new Set(),protectedBuildingIds:new Set()});
+      linkedBuildingIds:new Set(),linkedAddressIds:new Set(),orphanBuildingIds:new Set(['home']),orphanAddressIds:new Set(['address']),protectedAddressIds:new Set(),protectedBuildingIds:new Set(),streetSuggestions:[]});
     assert.equal(decisions.length,1,'parcel links work without reverse geocoding');
     assert.equal(decisions[0].building_id,'home');assert.equal(decisions[0].proposed_state.move_source,false);
   } finally {

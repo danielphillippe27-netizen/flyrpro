@@ -697,6 +697,36 @@ type AddressParcelOwnership = {
   distanceMeters: number;
 };
 
+/** Ambiguous ownership stays unlinked; never choose a winner by input order. */
+export function uniqueAddressParcelOwnership(rows: AddressParcelOwnership[]): AddressParcelOwnership[] {
+  const parcelsByAddress = new Map<string, Set<string>>();
+  const addressesByParcel = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const a = row.addressId.toLowerCase(), p = row.parcelId.toLowerCase();
+    if (!parcelsByAddress.has(a)) parcelsByAddress.set(a, new Set());
+    if (!addressesByParcel.has(p)) addressesByParcel.set(p, new Set());
+    parcelsByAddress.get(a)!.add(p);
+    addressesByParcel.get(p)!.add(a);
+  }
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    const a = row.addressId.toLowerCase(), p = row.parcelId.toLowerCase();
+    if (parcelsByAddress.get(a)!.size !== 1 || addressesByParcel.get(p)!.size !== 1 || seen.has(a)) return false;
+    seen.add(a); return true;
+  });
+}
+
+export function excludeOverlayParcelConflicts(rows: AddressParcelOwnership[], features: Record<string, JsonRecord>, aliases: Map<string, string>): AddressParcelOwnership[] {
+  const occupied = new Map<string, Set<string>>();
+  for (const [id, edit] of Object.entries(features)) {
+    if (!id.startsWith('address:') || edit.hidden === true || edit.parcelLinkSet !== true || typeof edit.parcelId !== 'string') continue;
+    const raw = edit.parcelId.toLowerCase(), parcel = aliases.get(raw) ?? raw;
+    if (!occupied.has(parcel)) occupied.set(parcel, new Set());
+    occupied.get(parcel)!.add(id.slice(8).toLowerCase());
+  }
+  return rows.filter(row => [...(occupied.get(row.parcelId.toLowerCase()) ?? [])].every(id => id === row.addressId.toLowerCase()));
+}
+
 function isUuid(value: string | null | undefined): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -769,7 +799,7 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
     }
   }
 
-  return addresses.features.flatMap<AddressParcelOwnership>((address) => {
+  const proposed = addresses.features.flatMap<AddressParcelOwnership>((address) => {
     const addressId = addressFeatureIdentifier(address);
     const coordinate = pointCoordinate(address);
     if (!addressId || !coordinate) return [];
@@ -835,6 +865,7 @@ export function selectCanonicalAddressParcelOwnershipForBundle(
       distanceMeters: winner.centroid ? distanceMeters(coordinate, winner.centroid) : 0,
     }];
   });
+  return uniqueAddressParcelOwnership(proposed);
 }
 
 function isAddressProxyBuildingFeature(feature: GeoJSON.Feature): boolean {
@@ -1434,7 +1465,7 @@ export function applyAddressParcelOwnership(params: {
   const ownershipByAddressId = new Map<string, AddressParcelOwnership>();
   const addressIdsByParcelId = new Map<string, string[]>();
 
-  for (const row of params.ownership) {
+  for (const row of uniqueAddressParcelOwnership(params.ownership)) {
     ownershipByAddressId.set(row.addressId.toLowerCase(), row);
     const key = row.parcelId.toLowerCase();
     addressIdsByParcelId.set(key, [...(addressIdsByParcelId.get(key) ?? []), row.addressId]);
@@ -1492,7 +1523,7 @@ export function applyAddressParcelOwnership(params: {
       const hasHouseLabel = !!houseNumberLabel(properties);
       if (ownership) {
         properties.parcel_id = ownership.parcelId;
-        properties.campaign_parcel_id = ownership.campaignParcelId ?? properties.campaign_parcel_id;
+        properties.campaign_parcel_id = ownership.campaignParcelId ?? null;
         properties.parcel_match_type = ownership.matchType;
         properties.parcel_confidence = ownership.confidence;
         properties.has_parcel_link = true;
@@ -1567,7 +1598,7 @@ async function persistAddressParcelOwnership(params: {
 
   if (params.ownership.length === 0) return;
 
-  const rows = params.ownership.map((row) => ({
+  const rows = uniqueAddressParcelOwnership(params.ownership).map((row) => ({
     campaign_id: params.campaignId,
     address_id: row.addressId,
     campaign_parcel_id: row.campaignParcelId,
@@ -2252,6 +2283,18 @@ export async function prebuildCampaignMapBundle(
     }));
   } else {
     parcelOwnership = selectCanonicalAddressParcelOwnershipForBundle(enriched.addresses, parcels);
+    const { data: edits, error: editsError } = await supabase.from('campaign_map_edit_states')
+      .select('features').eq('campaign_id', campaignId).maybeSingle();
+    if (editsError) throw new Error(`Failed to check parcel corrections: ${editsError.message}`);
+    const parcelAliases = new Map<string, string>();
+    for (const feature of parcels.features) {
+      const owner = parcelFeatureExternalId(feature)?.toLowerCase();
+      if (!owner) continue;
+      for (const alias of [feature.id, feature.properties?.id, feature.properties?.parcel_id, feature.properties?.external_id]) {
+        if (typeof alias === 'string') parcelAliases.set(alias.toLowerCase(), owner);
+      }
+    }
+    parcelOwnership = excludeOverlayParcelConflicts(parcelOwnership, edits?.features ?? {}, parcelAliases);
     if (!options?.dryRun) await measure('parcel_ownership_persist', recordTiming, () =>
       persistAddressParcelOwnership({ supabase, campaignId, ownership: parcelOwnership, sourceVersion })
     );

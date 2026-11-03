@@ -63,8 +63,10 @@ export async function prepareFarmMap(db: SupabaseClient, farmId: string, country
   }
   const bundle = await prebuildCampaignMapBundle(db, campaignId);
   const buildings = bundle.buildings as unknown as { features: BuildingFeature[] };
-  if (!buildings.features.length) throw new Error('Farm map has no buildings available to link.');
-  await new StableLinkerService(db).runSpatialJoin(campaignId, buildings,
+  const parcelCount = parcelGeometry?.features.length ?? bundle.parcels?.features.length ?? 0;
+  if (!buildings.features.length && !parcelCount) throw new Error('Farm map has no buildings or parcels available.');
+  // A parcel-only farm is a valid starting point for manual field collection.
+  if (buildings.features.length) await new StableLinkerService(db).runSpatialJoin(campaignId, buildings,
     snapshot.metadata?.overture_release ?? '2026-01-21.0', {
       persistenceMode: 'silver', preserveExisting: true,
       parcelsGeoJSON: (parcelGeometry ?? bundle.parcels) as NonNullable<Parameters<StableLinkerService['runSpatialJoin']>[3]>['parcelsGeoJSON'],

@@ -103,7 +103,11 @@ export async function canonicalTileAvailability(db: SupabaseClient, campaignId: 
   if (!current) {
     const campaign = await db.from('campaigns').select('provision_status').eq('id', campaignId).maybeSingle();
     if (campaign.error) return 'unavailable' as const;
-    return campaign.data?.provision_status === 'failed' ? 'failed' as const : 'preparing' as const;
+    // A completed provisioning run with no current bundle cannot make tile
+    // progress on its own: there is no current signature to enqueue. Report
+    // an actionable failure instead of keeping clients waiting indefinitely.
+    return ['failed', 'ready'].includes(campaign.data?.provision_status ?? '')
+      ? 'failed' as const : 'preparing' as const;
   }
   if (current.links_status === 'linking_failed') return 'failed' as const;
   if (current.links_status && current.links_status !== 'ready') return 'preparing' as const;
