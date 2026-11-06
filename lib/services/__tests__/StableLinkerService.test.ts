@@ -144,20 +144,15 @@ type StableLinkerHarness = {
     address: AddressFixture,
     buildings: BuildingFixture[],
     parcels?: unknown[],
-    claimedSingleUnitBuildingIds?: Set<string>,
-    inferredMultiAddressBuildingIds?: Set<string>
+    claimedSingleUnitBuildingIds?: Set<string>
   ): MatchResult;
-  inferMultiAddressBuildingIds(
-    addresses: AddressFixture[],
-    buildings: BuildingFixture[],
-    parcels: unknown[]
-  ): Set<string>;
   saveMatches(
     campaignId: string,
     matches: MatchResult[],
     overtureRelease: string,
     persistenceMode: 'silver' | 'gold'
   ): Promise<void>;
+  generateSummary(matches: MatchResult[], total: number): { matched: number; orphans: number; coveragePercent: number };
   detectMultiUnitBuildings(matches: MatchResult[]): void;
   assignOrphan(orphanId: string, buildingId: string, userId: string): Promise<void>;
 };
@@ -308,6 +303,18 @@ function createMockSupabase(state: MockState) {
   return {
     from(table: string) {
       return new MockQueryBuilder(table, state);
+    },
+    rpc(name: string, args: any) {
+      if (name === 'save_strict_automatic_links') {
+        const rows = state.buildingAddressLinks ?? [];
+        rows.push(...args.p_records);
+        state.buildingAddressLinks = rows;
+        if (args.p_write_gold) for (const record of args.p_records) {
+          const address = state.campaignAddresses?.find(a => a.id === record.address_id);
+          if (address) { address.building_id = /^[a-f0-9-]{36}$/i.test(record.building_id) ? record.building_id : null; address.building_gers_id = record.building_id; }
+        }
+      }
+      return Promise.resolve({ data: null, error: null });
     },
   };
 }
@@ -574,7 +581,7 @@ async function run() {
     }
 
     assertTrue(thrown instanceof Error);
-    assertTrue((thrown as Error).message.includes('Failed to save building address links'));
+    assertTrue((thrown as Error).message.includes('requires transactional RPC persistence'));
   });
 
   await testAsync('Gold persistence: non-UUID building ids are stored as public ids only', async () => {
@@ -583,7 +590,7 @@ async function run() {
         {
           id: 'address-1',
           campaign_id: 'campaign-1',
-          building_id: '550e8400-e29b-41d4-a716-446655440000',
+          building_id: null,
           building_gers_id: null,
         },
       ],
@@ -638,7 +645,7 @@ async function run() {
     assertEqual(match.buildingId, 'detached-b');
   });
 
-  test('Canonical linker allows multiple addresses for townhouse/multi-unit buildings', () => {
+  test('Unit counts cannot authorize another automatic address on an occupied building', () => {
     const service = createStableLinkerHarness();
     const alreadyMatched = makeBuilding(
       'detached-a',
@@ -654,11 +661,10 @@ async function run() {
       new Set(['detached-a'])
     );
 
-    assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'detached-a');
+    assertEqual(match.matchType, 'orphan');
   });
 
-  test('Canonical linker infers multi-address row buildings from parcel bridge evidence', () => {
+  test('Shared row geometry does not infer permission for multiple addresses', () => {
     const service = createStableLinkerHarness();
     const rowBuilding = makeBuilding(
       'fewster-row',
@@ -673,24 +679,20 @@ async function run() {
       makeParcel('parcel-10', rectangle(-79.00536, 43.00518, -79.00518, 43.00534)),
       makeParcel('parcel-12', rectangle(-79.00516, 43.00518, -79.00498, 43.00534)),
     ]);
-    const inferred = service.inferMultiAddressBuildingIds(addresses, [rowBuilding], parcels);
 
-    assertTrue(inferred.has('fewster-row'), 'Expected row building to accept multiple linked addresses');
 
     const claimed = new Set(['fewster-row']);
     const secondMatch = service.matchAddressToBuilding(
       addresses[1],
       [rowBuilding],
       parcels,
-      claimed,
-      inferred
+      claimed
     );
 
-    assertEqual(secondMatch.matchType, 'parcel_verified');
-    assertEqual(secondMatch.buildingId, 'fewster-row');
+    assertEqual(secondMatch.matchType, 'orphan');
   });
 
-  test('Canonical linker infers same-street nearby-only row buildings for townhouse cards', () => {
+  test('Same-street nearby points do not infer a multi-address building', () => {
     const service = createStableLinkerHarness();
     const rowBuilding = makeBuilding(
       'moyse-row',
@@ -701,20 +703,16 @@ async function run() {
       makeAddress('45', -79.00590, 43.00618, 'Moyse Drive'),
       makeAddress('47', -79.00584, 43.00619, 'Moyse Drive'),
     ];
-    const inferred = service.inferMultiAddressBuildingIds(addresses, [rowBuilding], []);
 
-    assertTrue(inferred.has('moyse-row'), 'Expected same-street nearby addresses to mark a row building as multi-address');
 
     const match = service.matchAddressToBuilding(
       addresses[1],
       [rowBuilding],
       [],
-      new Set(['moyse-row']),
-      inferred
+      new Set(['moyse-row'])
     );
 
-    assertEqual(match.matchType, 'proximity_verified');
-    assertEqual(match.buildingId, 'moyse-row');
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Known multi-address building without parcels cannot bypass the 10m proximity cap', () => {
@@ -730,7 +728,6 @@ async function run() {
       address,
       [rowBuilding],
       [],
-      new Set(),
       new Set()
     );
 
@@ -832,9 +829,9 @@ async function run() {
         matchType: 'proximity_verified',
         confidence: 0.8,
         distanceMeters: 5,
-        streetScore: 1,
-        isMultiUnit: false,
-        unitCount: 1,
+        addressGersId: null, streetMatchScore: 1, buildingAreaSqm: 100,
+        buildingClass: 'residential', buildingHeight: null, unitArrangement: 'single',
+        isMultiUnit: false, unitCount: 1,
       },
     ], 2);
 
@@ -892,7 +889,7 @@ async function run() {
     assertEqual(match.matchType, 'orphan');
   });
 
-  test('Dense ambiguity: equal-distance retained buildings resolve deterministically', () => {
+  test('Dense ambiguity: overlapping retained buildings stay unresolved', () => {
     const service = createStableLinkerHarness();
     const left = makeBuilding(
       'left',
@@ -908,8 +905,7 @@ async function run() {
 
     const match = service.matchAddressToBuilding(address, [left, right]);
 
-    assertEqual(match.matchType, 'containment_verified');
-    assertEqual(match.buildingId, 'left');
+    assertEqual(match.matchType, 'orphan');
   });
 
   await testAsync('Orphan/manual assignment: manual assign updates orphan state and inserts manual link', async () => {
@@ -982,6 +978,116 @@ async function run() {
     await indexed.runSpatialJoin('campaign-1', { features: buildings }, 'test', { parcelsGeoJSON: parcels });
     await baseline.runSpatialJoin('campaign-1', { features: buildings }, 'test', { parcelsGeoJSON: parcels });
     assertEqual(indexedState.buildingAddressLinks, baselineState.buildingAddressLinks);
+  });
+
+  async function strictRun(addresses: any[], buildings: BuildingFixture[], parcels: ParcelFixture[] = [], links: any[] = []) {
+    const state: MockState = { campaignAddresses: addresses.map(a => ({ ...a, campaign_id: 'strict-campaign' })), buildingAddressLinks: links };
+    const service = new StableLinkerService(createMockSupabase(state) as unknown as SupabaseLike);
+    const summary = await service.runSpatialJoin('strict-campaign', { features: buildings }, 'test', { parcelsGeoJSON: { features: parcels } });
+    return { state, summary };
+  }
+
+  await testAsync('Screenshot regression: eight addresses on two streets cannot claim one home', async () => {
+    const home = makeBuilding('home', rectangle(-79.0002, 42.9998, -78.9998, 43.0002), { unitsCount: 8 });
+    const addresses = ['210','211','212','214','1109','1112','1116','1119'].map((id, i) => makeAddress(id, -79, 43, i < 4 ? 'E Parks St' : 'S Tennessee Ave'));
+    const lot = makeParcel('shared', rectangle(-79.001,42.999,-78.999,43.001));
+    const result = await strictRun(addresses, [home], [lot]);
+    assertEqual(result.summary.matched, 0);
+    assertEqual(result.summary.orphans, 8);
+    assertEqual(result.state.buildingAddressLinks, []);
+    assertEqual(result.state.campaignAddresses?.[0].geom, addresses[0].geom);
+  });
+
+  await testAsync('Occupied home cannot accept another address even with unit-count metadata', async () => {
+    const home = makeBuilding('home', rectangle(-79.0002,42.9998,-78.9998,43.0002), { unitsCount: 8 });
+    const existing = { campaign_id: 'strict-campaign', address_id: '10', building_id: 'home', match_type: 'manual' };
+    const { state, summary } = await strictRun([makeAddress('10',-79,43,'Main St'), makeAddress('12',-79,43,'Other St')], [home], [], [existing]);
+    assertEqual(summary.added, 0);
+    assertEqual(summary.matched, 1);
+    assertEqual(state.buildingAddressLinks, [existing]);
+  });
+
+  await testAsync('Gold-only assignments reserve both the address and building', async () => {
+    const home = makeBuilding('home', rectangle(-79.0002,42.9998,-78.9998,43.0002));
+    const result = await strictRun([{...makeAddress('10',-79,43,'Main St'),building_gers_id:'home'},makeAddress('12',-79,43,'Main St')], [home]);
+    assertEqual(result.summary.added,0);
+    assertEqual(result.summary.matched,1);
+    assertEqual(result.summary.orphans,1);
+  });
+
+  await testAsync('Shared parcel counts linked addresses before checking uniqueness', async () => {
+    const home = makeBuilding('home',rectangle(-79.0002,42.9998,-78.9998,43.0002));
+    const lot = makeParcel('shared',rectangle(-79.001,42.999,-78.999,43.001));
+    const result = await strictRun([{...makeAddress('10',-79.0008,43,'Main St'),building_gers_id:'elsewhere'},makeAddress('12',-79.0006,43,'Main St')],[home],[lot]);
+    assertEqual(result.summary.added,0);
+  });
+
+  await testAsync('A parcel with two buildings cannot select a preferred roof', async () => {
+    const buildings = [makeBuilding('home',rectangle(-79.0003,43,-79.0001,43.0002)),makeBuilding('other',rectangle(-78.9997,43,-78.9995,43.0002))];
+    const result=await strictRun([makeAddress('10',-79,42.9998,'Main St')],buildings,[makeParcel('shared',rectangle(-79.001,42.999,-78.999,43.001))]);
+    assertEqual(result.summary.matched,0);
+  });
+
+  await testAsync('Unique parcel bridge succeeds and repeated optimization preserves it', async () => {
+    const buildings=[makeBuilding('home',rectangle(-79.0003,43,-79.0001,43.0002))];
+    const lot=makeParcel('unique',rectangle(-79.001,42.999,-78.999,43.001));
+    const { state,summary }=await strictRun([makeAddress('10',-79,42.9998,'Main St')],buildings,[lot]);
+    assertEqual(summary.matchBreakdown.parcelVerified,1);
+    const again=await new StableLinkerService(createMockSupabase(state) as unknown as SupabaseLike).runSpatialJoin('strict-campaign',{features:buildings});
+    assertEqual(again.added,0);assertEqual(again.matched,1);assertEqual(again.coveragePercent,100);assertEqual(state.buildingAddressLinks?.length,1);
+  });
+
+  await testAsync('Different street blocks a unique parcel bridge', async () => {
+    const result=await strictRun([makeAddress('10',-79,42.9998,'Tennessee Ave')],
+      [makeBuilding('home',rectangle(-79.0003,43,-79.0001,43.0002),{streetName:'Parks St'})],
+      [makeParcel('unique',rectangle(-79.001,42.999,-78.999,43.001))]);
+    assertEqual(result.summary.matched,0);
+  });
+
+  await testAsync('Competing addresses are order independent and never redirected', async () => {
+    const addresses=[makeAddress('10',-79,43,'Main St'),makeAddress('12',-79,43,'Main St')];
+    const buildings=[makeBuilding('home',rectangle(-79.0001,42.9999,-78.9999,43.0001),{streetName:'Main St'}),makeBuilding('neighbor',rectangle(-78.99985,42.9999,-78.99965,43.0001),{streetName:'Main St'})];
+    for (const input of [addresses,[...addresses].reverse()]) {
+      const result=await strictRun(input,buildings);
+      assertEqual(result.summary.matched,0);assertEqual(result.summary.orphans,2);
+    }
+  });
+
+  await testAsync('A strong containment claim beats a weaker proximity claim without redirecting it', async () => {
+    const buildings=[makeBuilding('home',rectangle(-79.0001,42.9999,-78.9999,43.0001),{streetName:'Main St'})];
+    for (const addresses of [[makeAddress('10',-79,43,'Main St'),makeAddress('12',-78.99985,43,'Main St')], [makeAddress('12',-78.99985,43,'Main St'),makeAddress('10',-79,43,'Main St')]]) {
+      const result=await strictRun(addresses,buildings);
+      assertEqual(result.state.buildingAddressLinks?.map(l=>l.address_id),['10']);
+      assertEqual(result.summary.orphans,1);
+    }
+  });
+
+  await testAsync('Read-only preview makes no persistence calls', async () => {
+    const state: MockState={campaignAddresses:[{...makeAddress('10',-79,43,'Main St'),campaign_id:'strict-campaign'}],buildingAddressLinks:[]};
+    const client={...createMockSupabase(state),rpc(){throw new Error('Preview attempted a write');}};
+    const result=await new StableLinkerService(client as unknown as SupabaseLike).runSpatialJoin('strict-campaign',
+      {features:[makeBuilding('home',rectangle(-79.0001,42.9999,-78.9999,43.0001))]},'preview',{dryRun:true});
+    assertEqual(result.added,1);assertEqual(result.preview?.proposedLinks.length,1);assertEqual(state.buildingAddressLinks,[]);
+  });
+
+  await testAsync('Occupied row-ID aliases reserve their canonical building', async () => {
+    const home={...makeBuilding('public-home',rectangle(-79.0001,42.9999,-78.9999,43.0001)),id:'row-id'};
+    const result=await strictRun([makeAddress('10',-79,43,'Main St')],[home],[],[{campaign_id:'strict-campaign',address_id:'elsewhere',building_id:'row-id',match_type:'manual'}]);
+    assertEqual(result.summary.added,0);
+  });
+
+  test('An occupied preferred home cannot redirect an address to the next roof', () => {
+    const service=createStableLinkerHarness();
+    const home=makeBuilding('home',rectangle(-79.0001,42.9999,-78.9999,43.0001),{streetName:'Main St'});
+    const neighbor=makeBuilding('neighbor',rectangle(-78.99985,42.9999,-78.99965,43.0001),{streetName:'Main St'});
+    const result=service.matchAddressToBuilding(makeAddress('10',-79,43,'Main St'),[home,neighbor],[],new Set(['home']));
+    assertEqual(result.matchType,'orphan');
+  });
+
+  await testAsync('Automatic reset is rejected before deleting existing links', async () => {
+    const service=new StableLinkerService(createMockSupabase({}) as unknown as SupabaseLike);
+    let rejected=false;try { await service.runSpatialJoin('campaign-1',{features:[]},'test',{resetExisting:true}); } catch { rejected=true; }
+    assertTrue(rejected);
   });
 
   console.log(`\n${'='.repeat(50)}`);

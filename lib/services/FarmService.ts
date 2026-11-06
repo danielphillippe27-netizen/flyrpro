@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { getNextFarmCycleNumber } from '@/lib/farms/analytics';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+import type { FarmActivitySession } from '@/lib/farms/session-totals';
 import type {
   Farm,
   FarmTouch,
@@ -535,6 +536,17 @@ export class FarmLeadService {
 
 export class FarmTouchOutcomeService {
   private static client = createClient();
+
+  static async fetchActivitySessions(farmId: string, campaignId: string | null): Promise<FarmActivitySession[]> {
+    const read = (column: 'farm_id' | 'campaign_id', id: string) => fetchAllInPages(async (from, to) => await this.client
+      .from('sessions').select('id, farm_touch_id, session_mode, doors_hit, conversations')
+      .eq(column, id).order('id').range(from, to));
+    const rows = await Promise.all([
+      read('farm_id', farmId),
+      campaignId ? read('campaign_id', campaignId) : Promise.resolve([]),
+    ]);
+    return [...new Map((rows.flat() as unknown as FarmActivitySession[]).map(row => [row.id, row])).values()];
+  }
 
   static async fetchOutcomes(farmId: string): Promise<FarmTouchAddress[]> {
     const read = (columns: string) => fetchAllInPages(async (from, to) => await this.client

@@ -5120,3 +5120,44 @@
 
 /* Contacts fills the space when the messaging toolbar is unavailable. */
 .coco-crm.contacts-only { --coco-height: calc(100dvh - 65px); }
+
+/* Leads shares the compact Campaigns sidebar header and segmented filters. */
+.coco-crm .contacts-browser { position:relative; background:var(--sidebar, var(--secondary)); }
+.coco-crm .contacts-browser-content { display:flex; flex-direction:column; min-height:0; height:100%; }
+.coco-crm .contacts-browser-content[hidden] { display:none; }
+.coco-crm .contacts-collapse-button { position:absolute; top:2px; right:12px; display:grid; place-items:center; width:18px; height:18px; padding:0; border:0; border-radius:2px; background:transparent; color:var(--coco-muted); cursor:pointer; }
+.coco-crm .contacts-collapse-button:hover { background:var(--muted); color:var(--foreground); }
+.coco-crm .contacts-search-header { display:flex; gap:6px; flex-shrink:0; padding:24px 12px 12px; border-bottom:1px solid var(--border); }
+.coco-crm .contacts-search-input { display:flex; align-items:center; gap:8px; min-width:0; flex:1; height:32px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--background); color:var(--coco-muted); }
+.coco-crm .contacts-search-input:focus-within { outline:2px solid var(--ring); outline-offset:2px; }
+.coco-crm .contacts-search-input input { width:100%; min-width:0; padding:0; border:0; outline:none; background:transparent; color:var(--foreground); font-size:12px; }
+.coco-crm .contacts-create-button { display:grid; place-items:center; flex-shrink:0; width:32px; height:32px; padding:0; border:0; border-radius:6px; background:#dc2626; color:white; cursor:pointer; }
+.coco-crm .contacts-create-button:hover { background:#b91c1c; }
+.coco-crm .contacts-filter-tabs { display:grid; grid-template-columns:1fr 1fr; flex-shrink:0; margin:8px 12px 0; padding:2px; height:32px; border-radius:8px; background:color-mix(in srgb,var(--muted) 50%,transparent); }
+.coco-crm .contacts-filter-tabs button { display:flex; align-items:center; justify-content:center; gap:6px; min-width:0; padding:0 8px; border:0; border-radius:6px; background:transparent; color:var(--coco-muted); font-size:12px; font-weight:500; cursor:pointer; }
+.coco-crm .contacts-filter-tabs button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.coco-crm .contacts-filter-tabs button[aria-pressed=true],.coco-crm .contacts-filter-tabs button.is-active { background:var(--muted); color:var(--foreground); }
+.coco-crm .contacts-list-summary { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.coco-crm .contacts-import-button { display:flex; align-items:center; gap:4px; padding:2px; border:0; background:transparent; color:var(--coco-muted); font-size:11px; cursor:pointer; }
+@media(min-width:761px) {
+ .coco-crm .contacts-workspace { grid-template-columns:280px minmax(0,1fr); }
+ .coco-crm .contacts-workspace.contacts-collapsed { grid-template-columns:36px minmax(0,1fr); }
+ .coco-crm .contacts-collapsed .contacts-browser { height:49px; border-bottom:1px solid var(--border); }
+ .coco-crm .contacts-collapsed .contacts-collapse-button { top:15px; right:9px; }
+}
+@media(max-width:760px) {
+ .coco-crm .contacts-collapsed .contacts-browser { min-height:36px; height:36px; }
+}
+
+/* Contact relationship planning and correspondence. */
+.coco-crm .relationship-panel { grid-column: 1 / -1; }
+.relationship-form { display:grid; gap:12px; padding:16px 0; max-width:680px; }
+.relationship-form label,.relationship-field label { display:grid; gap:6px; flex:1; min-width:140px; }
+.relationship-form input,.relationship-form select,.relationship-form textarea,.relationship-field input,.relationship-field select { width:100%; padding:9px 12px; border:1px solid var(--border, #d6d6d6); border-radius:8px; background:var(--surface, transparent); color:inherit; }
+.relationship-field { display:flex; align-items:end; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.relationship-panel fieldset { border:0; padding:0; margin:16px 0; }
+.relationship-timeline { list-style:none; padding:0; }
+.relationship-timeline li { padding:14px 0; border-bottom:1px solid var(--border, #ddd); }
+.relationship-timeline time { display:block; font-size:12px; opacity:.7; margin-top:4px; }
+.relationship-timeline p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.relationship-hint { font-size:12px; opacity:.75; }

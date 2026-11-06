@@ -26,6 +26,7 @@ import {
   shouldQueueMapReconciliationConvergencePass,
   shouldReverseGeocodeBuilding,
   solveGlobalOneToOneAssignment,
+  strictAutomaticAssignmentEdges,
   shouldAutoHideAuxiliary,
   shouldAutoHideOverlappingDuplicate,
 } from '../CampaignMapReconciliationService';
@@ -108,6 +109,21 @@ assert(
     }),
   'apply mode must continue only while a pass makes measurable orphan progress'
 );
+
+const strictCandidates = [
+  {buildingId:'home-a',addressId:'address-1',weight:1},
+  {buildingId:'home-b',addressId:'address-1',weight:.9},
+  {buildingId:'home-a',addressId:'address-2',weight:.8},
+  {buildingId:'home-c',addressId:'address-3',weight:1},
+];
+assert(JSON.stringify(strictAutomaticAssignmentEdges(strictCandidates,new Set(),new Set())) === JSON.stringify([strictCandidates[3]]),
+  'automatic reconciliation must leave competing candidates unresolved rather than redirecting them');
+assert(strictAutomaticAssignmentEdges(strictCandidates,new Set(['address-3']),new Set()).length === 0,
+  'occupied addresses cannot enter an automatic global assignment');
+assert(strictAutomaticAssignmentEdges(strictCandidates,new Set(),new Set(['home-c'])).length === 0,
+  'occupied buildings cannot enter an automatic global assignment');
+assert(JSON.stringify(strictAutomaticAssignmentEdges([...strictCandidates].reverse(),new Set(),new Set())) === JSON.stringify([strictCandidates[3]]),
+  'strict global decisions must not depend on candidate order');
 
 const globalAssignment = solveGlobalOneToOneAssignment([
   { buildingId: 'building-a', addressId: 'address-1', weight: 10 },

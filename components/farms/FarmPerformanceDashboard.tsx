@@ -5,6 +5,7 @@ import { Home, MessageSquare, Target, Users } from "lucide-react";
 import type { FarmAddress, CampaignAddress, FarmLead, FarmTouchAddress } from "@/types/database";
 import type { EnrichedFarmTouch } from "@/lib/farms/analytics";
 import { buildFarmPerformance } from "@/lib/farms/performance";
+import { farmSessionTotals, type FarmActivitySession } from "@/lib/farms/session-totals";
 
 const number = (value: number) =>
   value.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -17,6 +18,7 @@ export function FarmPerformanceDashboard({
   campaignAddresses,
   touches,
   outcomes,
+  activitySessions,
   leads,
   currentCycle,
   scope,
@@ -27,6 +29,7 @@ export function FarmPerformanceDashboard({
   campaignAddresses: CampaignAddress[];
   touches: EnrichedFarmTouch[];
   outcomes: FarmTouchAddress[];
+  activitySessions: FarmActivitySession[];
   leads: FarmLead[];
   currentCycle: number;
   scope: "current_cycle" | "all_time";
@@ -51,23 +54,31 @@ export function FarmPerformanceDashboard({
   const additionalHomes = scope === "all_time" ? addresses.filter((home) => home.campaign_address_id && campaignVisited.has(home.campaign_address_id) && !outcomeHomes.has(home.id)).length : 0;
   const homesVisited = data.total.homes + additionalHomes;
   const coverage = addresses.length ? homesVisited / addresses.length : 0;
+  const sessionTotals = farmSessionTotals(activitySessions, touches, scope === "current_cycle" ? currentCycle : undefined);
+  const activity = sessionTotals ?? data.total;
   const metrics = [
     {
-      label: "Homes Visited",
+      label: "Door Attempts",
+      value: number(activity.doors),
+      hint: sessionTotals ? "Recorded session activity · Includes repeat visits" : "Recorded address-level attempts",
+      icon: Home,
+    },
+    {
+      label: "Confirmed Unique Homes",
       value: number(homesVisited),
-      hint: "Unique homes reached",
+      hint: "Homes with saved visit records",
       icon: Home,
     },
     {
       label: "Conversations",
-      value: number(data.total.conversations),
+      value: number(activity.conversations),
       hint: "Recorded door conversations",
       icon: MessageSquare,
     },
     {
       label: "Answer Rate",
-      value: percent(data.total.answerRate),
-      hint: `${number(data.total.doors)} door attempts`,
+      value: percent(activity.answerRate),
+      hint: `${number(activity.doors)} door attempts`,
       icon: Users,
     },
     {
@@ -142,8 +153,11 @@ export function FarmPerformanceDashboard({
             : "Coverage across all cycles"}{" "}
           · Each home counted once
         </p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Coverage uses saved home records. Session totals can include repeat visits and visits without a synced home record.
+        </p>
       </section>
-      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-5">
         {metrics.map(({ label, value, hint, icon: Icon }) => (
           <section key={label} className={`${panel} p-5 sm:p-6`}>
             <div className="flex items-center justify-between gap-2 text-muted-foreground">

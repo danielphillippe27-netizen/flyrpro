@@ -59,6 +59,7 @@ export function CanonicalCampaignTilesLayer(props: Props) {
       map.addLayer({ ...common, id: IDS[2], type: 'fill-extrusion', 'source-layer': 'address_circles', minzoom: 13,
         paint: { 'fill-extrusion-color': paintColor, 'fill-extrusion-height': ['case', ['boolean', ['feature-state', 'hidden'], false], 0, 12], 'fill-extrusion-opacity': 1, 'fill-extrusion-rounded-roof': false } });
       map.addLayer({ ...common, id: IDS[3], type: 'circle', 'source-layer': 'addresses', minzoom: 10, maxzoom: 13,
+        layout: { visibility: 'none' },
         paint: { 'circle-color': paintColor, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 13, 5], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 0.8, 'circle-opacity': opacity(1) } });
       map.addLayer({ ...common, id: IDS[4], type: 'line', 'source-layer': 'buildings', minzoom: 10,
         paint: { 'line-color': '#60a5fa', 'line-width': 2,
@@ -76,7 +77,7 @@ export function CanonicalCampaignTilesLayer(props: Props) {
     const refreshVisibility = () => {
       const p = latest.current;
       for (const [id, enabled] of [[IDS[0], p.showParcels], [IDS[1], p.mode === 'buildings'], [IDS[4], p.mode === 'buildings'],
-        [IDS[2], p.mode === 'addresses'], [IDS[3], true], [IDS[5], p.mode === 'addresses' && p.showAddressLabels !== false], [IDS[6], p.mode === 'buildings'], [IDS[7], p.mode === 'addresses']] as const) {
+        [IDS[2], p.mode === 'addresses'], [IDS[3], false], [IDS[5], p.mode === 'addresses' && p.showAddressLabels !== false], [IDS[6], p.mode === 'buildings'], [IDS[7], p.mode === 'addresses']] as const) {
         if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none');
       }
       const hidden = [...new Set(stateRef.current.filter((entry) => entry.state.hidden).map((entry) => entry.id))];

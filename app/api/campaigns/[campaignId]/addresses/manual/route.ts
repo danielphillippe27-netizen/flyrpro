@@ -1,3 +1,5 @@
+import { readCanonicalTileBundle } from "@/lib/services/CanonicalTileArtifacts";
+import { isAutomaticBuildingLocation, findFieldBuilding } from "@/lib/map/fieldBuildingLocation";
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
@@ -19,7 +21,7 @@ function getAuthToken(request: Request): string | null {
 }
 
 type ResolvedBuilding = {
-  rowId: string;
+  rowId: string | null;
   publicId: string;
 };
 
@@ -158,9 +160,18 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const addressProvenance = String(
       payload.address_provenance ?? ""
     ).trim();
-    const resolvedBuilding = requestedBuildingId
+    const automaticLocation = isAutomaticBuildingLocation(addressProvenance);
+    let resolvedBuilding = requestedBuildingId
       ? await resolveBuilding(supabase, requestedBuildingId)
       : null;
+
+    if (requestedBuildingId && !resolvedBuilding && automaticLocation) {
+      // Municipal/PMTiles footprints need not have a row in the legacy table.
+      // Verify membership in this campaign before accepting their public ID.
+      const bundle = await readCanonicalTileBundle(supabase, campaignId, "ios", new URL(request.url).origin);
+      const building = findFieldBuilding(bundle?.records.buildings ?? [], requestedBuildingId);
+      if (building) resolvedBuilding = { rowId: null, publicId: building.id };
+    }
 
     if (requestedBuildingId && !resolvedBuilding) {
       return NextResponse.json(
@@ -169,9 +180,9 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       );
     }
 
-    if (addressProvenance === "field_manual_pin") {
+    if (addressProvenance === "field_manual_pin" || automaticLocation) {
       const suppliedPinId = String(payload.id ?? payload.address_id ?? "").trim();
-      if (suppliedPinId && !UUID_PATTERN.test(suppliedPinId)) {
+      if ((automaticLocation && !suppliedPinId) || (suppliedPinId && !UUID_PATTERN.test(suppliedPinId))) {
         return NextResponse.json({ error: "id must be a UUID" }, { status: 400 });
       }
 
@@ -229,7 +240,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         return NextResponse.json({ error: "Manual pin RPC returned no state" }, { status: 500 });
       }
 
-      if (resolvedBuilding) {
+      if (resolvedBuilding?.rowId) {
         const { error: linkError } = await supabase
           .from("building_address_links")
           .upsert(
@@ -253,7 +264,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
         }
       }
 
-      await invalidateCampaignMapBundle(supabase, campaignId);
+      // Field homes are live overlays; keep the immutable geometry available.
+      if (!automaticLocation) await invalidateCampaignMapBundle(supabase, campaignId);
       return NextResponse.json({
         address: addressRow,
         linked_building_id: resolvedBuilding?.publicId ?? null,

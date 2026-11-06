@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { sessionRouteGeoJson } from '../session-route-geometry';
+const point = (latitude: number, startsNewSegment = false) => ({ latitude, longitude: -79, startsNewSegment });
+const path = JSON.parse(sessionRouteGeoJson([point(43), point(43.001), point(43.2, true), point(43.201)])!);
+assert.equal(path.type, 'LineString');
+assert.deepEqual(path.segmentBreakIndices, [2]);
+assert.deepEqual(path.coordinates[0], [-79, 43]);
+const malformed = JSON.parse(sessionRouteGeoJson([point(43), point(NaN), point(43.2)])!);
+assert.deepEqual(malformed.segmentBreakIndices, [1]);
+assert.deepEqual(JSON.parse(sessionRouteGeoJson([point(43), point(44)])!).segmentBreakIndices, []);
+assert.equal(sessionRouteGeoJson([point(91)]), null);
+console.log('PASS: route gaps, invalid-fix gaps, coordinate order, legacy continuity, invalid coordinate bounds');

@@ -1,16 +1,8 @@
 /**
- * StableLinkerService - Gold Standard Spatial Join
- * 
- * Production-grade spatial matching between Overture building footprints
- * and address points with semantic validation, multi-unit detection,
- * and comprehensive quality assurance.
- * 
- * Implements 5-Tier Matching Hierarchy:
- * - Tier 1: Direct Containment + Street Verification (Confidence 1.0)
- * - Tier 2: Parcel Bridge (Confidence 0.95)
- * - Tier 3: Point-on-Surface (Confidence 0.9)
- * - Tier 4: Proximity + Semantic Match (Confidence 0.8)
- * - Tier 5: Fallback Nearest Valid (Confidence 0.5)
+ * Additive automatic address/building linking. New assignments require an empty
+ * address and building. Containment, unique parcel bridges, and strict nearby
+ * evidence are planned as a batch; conflicts stay unresolved. Multi-address
+ * groups are created only by the explicit manual assignment workflow.
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -18,10 +10,6 @@ import RBush from 'rbush';
 import { booleanIntersects } from '@turf/turf';
 import type { Polygon, MultiPolygon } from 'geojson';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
-import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const GOLD_ADDRESS_UPDATE_BATCH_SIZE = 50;
 
 // Match result types
 export interface MatchResult {
@@ -72,6 +60,10 @@ export interface ProcessingMetadata {
 }
 
 export interface SpatialJoinSummary {
+  /** New links from this run; matched/coverage include preserved assignments. */
+  added?: number;
+  preserved?: number;
+  preview?: { proposedLinks: MatchResult[]; unresolvedAddressIds: string[] };
   matched: number;
   orphans: number;
   suspect: number;
@@ -97,6 +89,10 @@ export interface BuildingFeature {
   };
   properties: {
     gers_id: string;
+    id?: string;
+    building_id?: string;
+    canonical_building_id?: string;
+    public_building_id?: string;
     name: string | null;
     height: number | null;
     layer: string;
@@ -115,6 +111,8 @@ export interface BuildingFeature {
 }
 
 interface SpatialJoinOptions {
+  /** Read-only planning: never persist links, orphan rows, or map artifacts. */
+  dryRun?: boolean;
   resetExisting?: boolean;
   /** Add missing links without replacing existing or manual assignments. */
   preserveExisting?: boolean;
@@ -162,13 +160,9 @@ const FOOTPRINT_EDGE_GRACE_METERS = 10;
 // Containment and same-parcel evidence remain authoritative outside this band.
 export const DETACHED_AUTO_LINK_MAX_METERS = 10;
 export const DETACHED_REVIEW_MAX_METERS = 12;
-// Candidate discovery stays broad so parcel and known multi-unit evidence can
-// still resolve legitimate large parcels/row buildings. It is not an auto-link radius.
+// Candidate discovery stays broad for unique parcel bridges. This is not an auto-link radius.
 const FALLBACK_RADIUS_METERS = 75;
 const PROXIMITY_RADIUS_METERS = DETACHED_AUTO_LINK_MAX_METERS;
-// A building being multi-address is not parcel evidence. Without an actual
-// parcel bridge, every distance-only match is subject to the same 10 m cap.
-const MULTI_ADDRESS_NEARBY_RADIUS_METERS = DETACHED_AUTO_LINK_MAX_METERS;
 const MINIMUM_SEMANTIC_PROXIMITY_SCORE = 0.65;
 
 interface ParcelFeature {
@@ -192,6 +186,8 @@ type PreparedParcel = {
   polygons: number[][][][];
   bbox: [number, number, number, number];
   normalizedAddressText: string;
+  addressIds?: Set<string>;
+  buildingIds?: Set<string>;
 };
 
 function manualLinkRpc(client: SupabaseClient): ManualLinkRpc | null {
@@ -211,6 +207,9 @@ interface CampaignAddress {
   postal_code?: string | null;
   source?: string | null;
   match_source?: string | null;
+  building_id?: string | null;
+  building_gers_id?: string | null;
+  confidence?: number | null;
   geom: unknown;
 }
 
@@ -224,7 +223,7 @@ interface CampaignAddressWithPoint extends Omit<CampaignAddress, 'geom'> {
 export class StableLinkerService {
   private supabase: SupabaseClient;
   private buildingSpatialIndex?: { buildings: BuildingFeature[]; tree: RBush<{ minX: number; minY: number; maxX: number; maxY: number; building: BuildingFeature; order: number }> };
-  private parcelSpatialIndex?: { parcels: PreparedParcel[]; tree: RBush<{ minX: number; minY: number; maxX: number; maxY: number; parcel: PreparedParcel; order: number }>; byAddress: Map<string, { parcel: PreparedParcel; order: number }> };
+  private parcelSpatialIndex?: { parcels: PreparedParcel[]; tree: RBush<{ minX: number; minY: number; maxX: number; maxY: number; parcel: PreparedParcel; order: number }>; byAddress: Map<string, PreparedParcel[]> };
 
   constructor(supabase: SupabaseClient) {
     this.supabase = supabase;
@@ -323,21 +322,32 @@ export class StableLinkerService {
       const rawAddresses = await fetchAllInPages<CampaignAddress>(async (from, to) =>
         await this.supabase
           .from('campaign_addresses')
-          .select('id, gers_id, formatted, house_number, street_name, locality, region, postal_code, source, match_source, geom')
+          .select('id, gers_id, formatted, house_number, street_name, locality, region, postal_code, source, match_source, building_id, building_gers_id, confidence, geom')
           .eq('campaign_id', campaignId)
           .order('id', { ascending: true })
           .range(from, to)
       );
       
-      if (options.preserveExisting && (options.resetExisting || options.persistenceMode === 'gold')) {
-        throw new Error('Preserving existing links requires silver persistence without reset.');
+      // Ordinary optimization is additive. Destructive cleanup is a separate workflow.
+      if (options.resetExisting) {
+        throw new Error('Automatic linking cannot reset existing assignments; use a reviewed cleanup.');
       }
-      const existingLinks = options.preserveExisting
-        ? await fetchAllInPages<{ address_id: string; building_id: string }>(async (from, to) =>
-            await this.supabase.from('building_address_links').select('address_id, building_id')
-              .eq('campaign_id', campaignId).order('address_id', { ascending: true }).range(from, to))
-        : [];
+      const existingLinks = await fetchAllInPages<{ address_id: string; building_id: string; match_type?: MatchResult['matchType']; confidence?: number; distance_meters?: number }>(async (from, to) =>
+        await this.supabase.from('building_address_links').select('address_id, building_id, match_type, confidence, distance_meters')
+          .eq('campaign_id', campaignId).order('address_id', { ascending: true }).range(from, to));
       const existingAddressIds = new Set(existingLinks.map(link => link.address_id.toLowerCase()));
+      const existingByAddress = new Map(existingLinks.map(l => [l.address_id.toLowerCase(), l]));
+      const preservedMatches: MatchResult[] = rawAddresses.flatMap(address => {
+        const link = existingByAddress.get(address.id.toLowerCase());
+        const buildingId = link?.building_id ?? address.building_gers_id ?? address.building_id;
+        if (!buildingId) return [];
+        const source = address.match_source ?? '';
+        const matchType = link?.match_type ?? (source === 'gold_parcel' ? 'parcel_verified' : source === 'gold_exact' ? 'containment_verified' : source.includes('manual') ? 'manual' : 'proximity_verified');
+        return [{ addressId: address.id, addressGersId: address.gers_id, buildingId, matchType,
+          confidence: link?.confidence ?? address.confidence ?? (matchType === 'manual' ? 1 : 0),
+          distanceMeters: link?.distance_meters ?? 0, streetMatchScore: 0, buildingAreaSqm: 0,
+          buildingClass: 'unknown', buildingHeight: null, isMultiUnit: false, unitCount: 1, unitArrangement: 'single' }];
+      });
       // Parse geom field which may be string or object from Supabase
       const allAddresses: CampaignAddressWithPoint[] = (rawAddresses || []).flatMap((addr) => {
         const geom = this.parsePointGeometry(addr.geom);
@@ -348,35 +358,14 @@ export class StableLinkerService {
         return [{ ...addr, geom }];
       });
 
-      const addresses = options.preserveExisting
-        ? allAddresses.filter(address => !existingAddressIds.has(address.id.toLowerCase()) &&
-            !['manual', 'field_manual_pin'].includes((address.match_source ?? '').toLowerCase()) &&
-            !['manual', 'field_manual_pin'].includes((address.source ?? '').toLowerCase()))
-        : allAddresses;
+      const addresses = allAddresses.filter(address => !existingAddressIds.has(address.id.toLowerCase()) &&
+        !address.building_id && !address.building_gers_id &&
+        !['manual', 'field_manual_pin'].includes((address.match_source ?? '').toLowerCase()) &&
+        !['manual', 'field_manual_pin'].includes((address.source ?? '').toLowerCase()));
       if (addresses.length === 0) {
-        console.log('[StableLinker] No addresses found for campaign');
-        return {
-          matched: 0,
-          orphans: 0,
-          suspect: 0,
-          avgConfidence: 0,
-          coveragePercent: 0,
-          matchBreakdown: {
-            containmentVerified: 0,
-            containmentSuspect: 0,
-            pointOnSurface: 0,
-            parcelVerified: 0,
-            proximityVerified: 0,
-            proximityFallback: 0,
-          },
-          processing_metadata: {
-            execution_time_ms: 0,
-            avg_precision_meters: 0,
-            street_mismatch_count: 0,
-            conflict_count: 0,
-            density_warning_count: 0,
-          },
-        };
+        const summary = this.generateSummary(preservedMatches, rawAddresses.length);
+        return { ...summary, added: 0, preserved: preservedMatches.length,
+          ...(options.dryRun ? { preview: { proposedLinks: [], unresolvedAddressIds: [] } } : {}) };
       }
 
       console.log(`[StableLinker] Addresses to match: ${addresses.length}`);
@@ -386,40 +375,16 @@ export class StableLinkerService {
       console.log(`[StableLinker] Valid buildings after filtering: ${validBuildings.length}`);
 
       if (validBuildings.length === 0) {
-        console.error('[StableLinker] No valid buildings after filtering!');
-        return {
-          matched: 0,
-          orphans: addresses.length,
-          suspect: 0,
-          avgConfidence: 0,
-          coveragePercent: 0,
-          matchBreakdown: {
-            containmentVerified: 0,
-            containmentSuspect: 0,
-            pointOnSurface: 0,
-            parcelVerified: 0,
-            proximityVerified: 0,
-            proximityFallback: 0,
-          },
-          processing_metadata: {
-            execution_time_ms: Date.now() - joinStartMs,
-            avg_precision_meters: 0,
-            street_mismatch_count: 0,
-            conflict_count: 0,
-            density_warning_count: 0,
-          },
-        };
-      }
-
-      if (options.resetExisting) {
-        await this.resetCampaignArtifacts(campaignId, options.persistenceMode === 'gold');
+        const summary = this.generateSummary(preservedMatches, rawAddresses.length);
+        return { ...summary, added: 0, preserved: preservedMatches.length,
+          ...(options.dryRun ? { preview: { proposedLinks: [], unresolvedAddressIds: addresses.map(a => a.id) } } : {}) };
       }
 
       // 3. Run the canonical iOS-equivalent matcher: containment, parcel bridge,
       // then semantic proximity. This is the only automatic production linker.
       const matches: MatchResult[] = [];
       const orphans: OrphanRecord[] = [];
-      const conflictCount = 0;
+      let conflictCount = 0;
       const densityWarningCount = 0;
       const preparedParcels = this.prepareParcels(options.parcelsGeoJSON?.features ?? []);
       const buildingTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; building: BuildingFeature; order: number }>();
@@ -429,74 +394,90 @@ export class StableLinkerService {
       }));
       this.buildingSpatialIndex = { buildings: validBuildings, tree: buildingTree };
       const parcelTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; parcel: PreparedParcel; order: number }>();
-      const byAddress = new Map<string, { parcel: PreparedParcel; order: number }>();
+      const byAddress = new Map<string, PreparedParcel[]>();
       parcelTree.load(preparedParcels.map((parcel, order) => {
         const [minX, minY, maxX, maxY] = parcel.bbox;
-        if (parcel.normalizedAddressText && !byAddress.has(parcel.normalizedAddressText)) byAddress.set(parcel.normalizedAddressText, { parcel, order });
+        if (parcel.normalizedAddressText) byAddress.set(parcel.normalizedAddressText, [...(byAddress.get(parcel.normalizedAddressText) ?? []), parcel]);
         return { minX, minY, maxX, maxY, parcel, order };
       }));
       this.parcelSpatialIndex = { parcels: preparedParcels, tree: parcelTree, byAddress };
-      const inferredMultiAddressBuildingIds = this.inferMultiAddressBuildingIds(
-        allAddresses,
-        validBuildings,
-        preparedParcels
-      );
-      if (inferredMultiAddressBuildingIds.size > 0) {
-        console.log(`[StableLinker] Inferred ${inferredMultiAddressBuildingIds.size} multi-address building(s) from footprint/parcel evidence`);
-      }
-      const claimedSingleUnitBuildingIds = new Set(existingLinks.map(link => link.building_id.toLowerCase()));
-      console.log(`[StableLinker] Starting matching for ${addresses.length} addresses...`);
-
-      for (const address of addresses) {
-        const result = this.matchAddressToBuilding(
-          address,
-          validBuildings,
-          preparedParcels,
-          claimedSingleUnitBuildingIds,
-          inferredMultiAddressBuildingIds
-        );
-
-        if (result.matchType === 'orphan') {
-          orphans.push(this.createOrphanRecord(address, validBuildings));
-        } else {
-          matches.push(result);
-          const building = validBuildings.find(
-            (candidate) => this.buildingPublicId(candidate) === result.buildingId
-          );
-          if (building && !this.canAcceptMultipleAddresses(building, inferredMultiAddressBuildingIds)) {
-            claimedSingleUnitBuildingIds.add(result.buildingId.toLowerCase());
-          }
+      // Count every address and footprint, including occupied/protected ones. Removing
+      // occupied candidates first can make an ambiguous parcel look falsely unique.
+      for (const parcel of preparedParcels) {
+        parcel.addressIds = new Set();
+        parcel.buildingIds = new Set();
+        const [minX, minY, maxX, maxY] = parcel.bbox;
+        for (const { building } of buildingTree.search({ minX, minY, maxX, maxY })) {
+          if (this.buildingIntersectsParcel(building, parcel)) parcel.buildingIds.add(this.buildingPublicId(building).toLowerCase());
         }
       }
-
-      console.log(`[StableLinker] Matching complete: ${matches.length} matches, ${orphans.length} orphans, ${conflictCount} conflicts`);
+      for (const address of allAddresses) {
+        for (const parcel of this.owningParcels(address, preparedParcels)) parcel.addressIds!.add(address.id.toLowerCase());
+      }
+      const occupied = new Set([
+        ...existingLinks.map(link => link.building_id.toLowerCase()),
+        ...rawAddresses.flatMap(address => [address.building_id, address.building_gers_id].filter((id): id is string => !!id).map(id => id.toLowerCase())),
+      ]);
+      for (const building of validBuildings) {
+        const p = building.properties;
+        const aliases = [this.buildingPublicId(building), p.id, p.building_id, p.canonical_building_id, p.public_building_id,
+          (building as unknown as {id?: string}).id].filter((id): id is string => !!id).map(id => id.toLowerCase());
+        if (aliases.some(id => occupied.has(id))) occupied.add(this.buildingPublicId(building).toLowerCase());
+      }
+      // Make proposals without hiding occupied buildings, then resolve claims as a
+      // batch. A rejected proposal is never redirected to a neighboring footprint.
+      const proposals = addresses.map(address => ({ address, result: this.matchAddressToBuilding(address, validBuildings, preparedParcels) }));
+      const byBuilding = new Map<string, typeof proposals>();
+      for (const proposal of proposals) {
+        if (proposal.result.matchType === 'orphan') continue;
+        const id = proposal.result.buildingId.toLowerCase();
+        const group = byBuilding.get(id) ?? [];
+        group.push(proposal);
+        byBuilding.set(id, group);
+      }
+      const accepted = new Set<string>();
+      const tier = (match: MatchResult) => ['containment_verified', 'containment_suspect'].includes(match.matchType) ? 0 : match.matchType === 'parcel_verified' ? 1 : 2;
+      for (const [id, group] of byBuilding) {
+        if (occupied.has(id)) { conflictCount += group.length; continue; }
+        const bestTier = Math.min(...group.map(p => tier(p.result)));
+        const strongest = group.filter(p => tier(p.result) === bestTier);
+        if (strongest.length === 1) accepted.add(strongest[0].address.id);
+        conflictCount += group.length - (strongest.length === 1 ? 1 : 0);
+      }
+      for (const { address, result } of proposals) {
+        if (accepted.has(address.id)) matches.push(result);
+        else {
+          const orphan = this.createOrphanRecord(address, validBuildings);
+          if (result.matchType !== 'orphan') orphan.status = 'ambiguous_match';
+          orphans.push(orphan);
+        }
+      }
 
       // 4. Detect multi-unit buildings
       this.detectMultiUnitBuildings(matches);
 
-      // 5. Save results to database
-      await this.saveMatches(
-        campaignId,
-        matches,
-        overtureRelease,
-        options.persistenceMode ?? 'silver',
-        options.preserveExisting === true
-      );
-      await this.saveOrphans(campaignId, orphans);
+      // Persist only after planning the entire campaign. Preview is strictly read-only.
+      if (!options.dryRun) {
+        await this.saveMatches(campaignId, matches, overtureRelease, options.persistenceMode ?? 'silver');
+        await this.saveOrphans(campaignId, orphans);
+      }
 
       // 6. Generate summary with telemetry
       const executionTimeMs = Date.now() - joinStartMs;
-      const summary = this.generateSummary(matches, addresses.length, {
+      const summary = this.generateSummary([...preservedMatches, ...matches], rawAddresses.length, {
         conflictCount,
         densityWarningCount,
         executionTimeMs,
       });
 
+      summary.added = matches.length;
+      summary.preserved = preservedMatches.length;
+      if (options.dryRun) summary.preview = { proposedLinks: matches, unresolvedAddressIds: orphans.map(o => o.addressId) };
       if (summary.coveragePercent < 95) {
         console.warn(`[StableLinker] building_coverage_ratio below 95%: ${summary.coveragePercent}%`);
       }
 
-      console.log(`[StableLinker] Complete:`, summary);
+      console.log(`[StableLinker] Complete:`, { matched: summary.matched, added: summary.added, preserved: summary.preserved, orphans: summary.orphans, coveragePercent: summary.coveragePercent });
 
       return summary;
     } catch (error) {
@@ -532,15 +513,10 @@ export class StableLinkerService {
     address: CampaignAddressWithPoint,
     buildings: BuildingFeature[],
     parcels: PreparedParcel[] = [],
-    claimedSingleUnitBuildingIds: Set<string> = new Set(),
-    inferredMultiAddressBuildingIds: Set<string> = new Set()
+    claimedSingleUnitBuildingIds: Set<string> = new Set()
   ): MatchResult {
     const addressCoords = address.geom.coordinates;
     const nearby = this.findNearestBuildings(addressCoords, buildings, NEAREST_BUILDING_CANDIDATE_LIMIT)
-      .filter((candidate) => (
-        this.canAcceptMultipleAddresses(candidate.building, inferredMultiAddressBuildingIds) ||
-        !claimedSingleUnitBuildingIds.has(this.buildingPublicId(candidate.building).toLowerCase())
-      ))
       .map((candidate): MatchCandidate => ({
         building: candidate.building,
         matchType: 'proximity_fallback',
@@ -554,6 +530,8 @@ export class StableLinkerService {
       return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
     }
 
+    const accept = (candidate: MatchCandidate): MatchResult => claimedSingleUnitBuildingIds.has(this.buildingPublicId(candidate.building).toLowerCase())
+      ? this.createMatchResult(address, null, 'orphan', 0, 0, 0) : this.matchFromCandidate(address, candidate);
     const contained = nearby
       .filter((candidate) => this.isPointInBuilding(addressCoords, candidate.building))
       .map((candidate) => ({
@@ -561,14 +539,19 @@ export class StableLinkerService {
         matchType: candidate.streetScore >= 0.40 ? 'containment_verified' : 'containment_suspect',
         confidence: candidate.streetScore >= 0.40 ? 1.0 : 0.70,
       } satisfies MatchCandidate))
-      .sort((a, b) => this.rankMatches(a, b))[0];
-    if (contained) return this.matchFromCandidate(address, contained);
+      .sort((a, b) => this.rankMatches(a, b));
+    if (contained.length > 0) return contained.length === 1 ? accept(contained[0]) : this.createMatchResult(address, null, 'orphan', 0, 0, 0);
 
     const parcelMatch = this.parcelBridgeMatch(address, nearby, parcels);
-    if (parcelMatch) return this.matchFromCandidate(address, parcelMatch);
+    if (parcelMatch) return accept(parcelMatch);
+    // Parcel ambiguity is not permission to retry by proximity.
+    const owners = this.owningParcels(address, parcels);
+    if (owners.length > 1 || owners.some(p =>
+      ((p.addressIds?.size ?? 1) !== 1 || (p.buildingIds?.size ?? 1) !== 1))) return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
 
     const semantic = nearby
       .filter((candidate) => (
+        !this.hasStreetConflict(address, candidate.building) &&
         candidate.distance <= PROXIMITY_RADIUS_METERS &&
         candidate.streetScore >= MINIMUM_SEMANTIC_PROXIMITY_SCORE
       ))
@@ -577,11 +560,12 @@ export class StableLinkerService {
         matchType: 'proximity_verified',
         confidence: PROXIMITY_CONFIDENCE,
       } satisfies MatchCandidate))
-      .sort((a, b) => this.rankMatches(a, b))[0];
-    if (semantic) return this.matchFromCandidate(address, semantic);
+      .sort((a, b) => this.rankMatches(a, b));
+    if (semantic.length > 0) return semantic.length === 1 ? accept(semantic[0]) : this.createMatchResult(address, null, 'orphan', 0, 0, 0);
 
     const footprintEdgeMatch = nearby
       .filter((candidate) => (
+        !this.hasStreetConflict(address, candidate.building) &&
         candidate.distance <= FOOTPRINT_EDGE_GRACE_METERS &&
         this.hasFootprintEdgeGrace(address, candidate)
       ))
@@ -590,21 +574,8 @@ export class StableLinkerService {
         matchType: 'point_on_surface',
         confidence: FOOTPRINT_EDGE_GRACE_CONFIDENCE,
       } satisfies MatchCandidate))
-      .sort((a, b) => this.rankMatches(a, b))[0];
-    if (footprintEdgeMatch) return this.matchFromCandidate(address, footprintEdgeMatch);
-
-    const inferredMultiNearby = nearby
-      .filter((candidate) => (
-        candidate.distance <= MULTI_ADDRESS_NEARBY_RADIUS_METERS &&
-        this.canAcceptMultipleAddresses(candidate.building, inferredMultiAddressBuildingIds)
-      ))
-      .map((candidate) => ({
-        ...candidate,
-        matchType: 'proximity_verified',
-        confidence: PROXIMITY_CONFIDENCE,
-      } satisfies MatchCandidate))
-      .sort((a, b) => this.rankMatches(a, b))[0];
-    if (inferredMultiNearby) return this.matchFromCandidate(address, inferredMultiNearby);
+      .sort((a, b) => this.rankMatches(a, b));
+    if (footprintEdgeMatch.length > 0) return footprintEdgeMatch.length === 1 ? accept(footprintEdgeMatch[0]) : this.createMatchResult(address, null, 'orphan', 0, 0, 0);
 
     return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
   }
@@ -644,42 +615,38 @@ export class StableLinkerService {
     nearby: MatchCandidate[],
     parcels: PreparedParcel[]
   ): MatchCandidate | null {
-    const addressCoords = address.geom.coordinates;
-    const index = this.parcelSpatialIndex?.parcels === parcels ? this.parcelSpatialIndex : undefined;
-    let exactParcel: PreparedParcel | undefined;
-    let pointParcel: PreparedParcel | undefined;
-    if (index) {
-      const civic = this.normalizedCivicText(`${address.house_number ?? ''} ${address.street_name ?? ''}`);
-      const locality = this.normalizedCivicText(address.locality);
-      const region = this.normalizedCivicText(address.region);
-      const postal = this.normalizedCivicText(address.postal_code);
-      const suffixes = ['', locality, region, [locality, region].filter(Boolean).join(' '), [locality, region, postal].filter(Boolean).join(' ')];
-      const exact = civic ? suffixes.map(suffix => index.byAddress.get([civic, suffix].filter(Boolean).join(' '))).filter((v): v is { parcel: PreparedParcel; order: number } => !!v).sort((a, b) => a.order - b.order)[0] : undefined;
-      exactParcel = exact?.parcel;
-      if (!exactParcel) pointParcel = index.tree.search({ minX: addressCoords[0], maxX: addressCoords[0], minY: addressCoords[1], maxY: addressCoords[1] })
-        .sort((a, b) => a.order - b.order).find(entry => this.pointInPreparedParcel(addressCoords, entry.parcel))?.parcel;
-    } else {
-      exactParcel = parcels.find(candidate => this.parcelAddressMatches(address, candidate.normalizedAddressText));
-      if (!exactParcel) pointParcel = parcels.find(candidate => this.pointInPreparedParcel(addressCoords, candidate));
-    }
-    const parcel = exactParcel ?? pointParcel;
-    if (!parcel) return null;
+    const owners = this.owningParcels(address, parcels);
+    if (owners.length !== 1) return null;
+    const parcel = owners[0];
+    if (parcel.addressIds && (parcel.addressIds.size !== 1 || !parcel.addressIds.has(address.id.toLowerCase()))) return null;
+    if (parcel.buildingIds && parcel.buildingIds.size !== 1) return null;
+    const candidates = nearby.filter(candidate => this.buildingIntersectsParcel(candidate.building, parcel));
+    if (candidates.length !== 1 || this.hasStreetConflict(address, candidates[0].building)) return null;
+    return { ...candidates[0], matchType: 'parcel_verified', confidence: PARCEL_BRIDGE_CONFIDENCE };
+  }
 
-    return nearby
-      .filter((candidate) => {
-        if (!this.bboxesIntersect(this.buildingBbox(candidate.building), parcel.bbox)) return false;
-        // Bounds discover candidates; only the actual footprint can verify a parcel bridge.
-        // This preserves shared roofs crossing townhouse parcel boundaries and respects holes.
-        return booleanIntersects(candidate.building.geometry as Polygon | MultiPolygon, {
-          type: 'MultiPolygon', coordinates: parcel.polygons,
-        });
-      })
-      .map((candidate) => ({
-        ...candidate,
-        matchType: 'parcel_verified',
-        confidence: PARCEL_BRIDGE_CONFIDENCE,
-      } satisfies MatchCandidate))
-      .sort((a, b) => this.rankMatches(a, b))[0] ?? null;
+  private owningParcels(address: CampaignAddressWithPoint, parcels: PreparedParcel[]): PreparedParcel[] {
+    const index = this.parcelSpatialIndex?.parcels === parcels ? this.parcelSpatialIndex : undefined;
+    if (!index) return parcels.filter(p => this.parcelAddressMatches(address, p.normalizedAddressText) || this.pointInPreparedParcel(address.geom.coordinates, p));
+    const [x, y] = address.geom.coordinates;
+    const civic = this.normalizedCivicText(`${address.house_number ?? ''} ${address.street_name ?? ''}`);
+    const locality = this.normalizedCivicText(address.locality), region = this.normalizedCivicText(address.region), postal = this.normalizedCivicText(address.postal_code);
+    const suffixes = ['', locality, region, [locality, region].filter(Boolean).join(' '), [locality, region, postal].filter(Boolean).join(' ')];
+    return [...new Set([
+      ...index.tree.search({ minX: x, maxX: x, minY: y, maxY: y }).map(e => e.parcel).filter(p => this.pointInPreparedParcel(address.geom.coordinates, p)),
+      ...suffixes.flatMap(suffix => index.byAddress.get([civic, suffix].filter(Boolean).join(' ')) ?? []),
+    ])];
+  }
+
+  private buildingIntersectsParcel(building: BuildingFeature, parcel: PreparedParcel): boolean {
+    if (!this.bboxesIntersect(this.buildingBbox(building), parcel.bbox)) return false;
+    return booleanIntersects(building.geometry as Polygon | MultiPolygon, { type: 'MultiPolygon', coordinates: parcel.polygons });
+  }
+
+  private hasStreetConflict(address: CampaignAddressWithPoint, building: BuildingFeature): boolean {
+    const a = this.normalizeStreet(address.street_name);
+    const b = this.normalizeStreet(building.properties.street_name ?? building.properties.primary_street);
+    return !!a && !!b && a !== b;
   }
 
   private rankMatches(lhs: MatchCandidate, rhs: MatchCandidate): number {
@@ -769,149 +736,6 @@ export class StableLinkerService {
       this.normalizedText(properties.feature_status) === 'missing_footprint_proxy' ||
       this.normalizedText(properties.building_identifier_source) === 'address_proxy' ||
       identifiers.some((id) => id.startsWith('address-proxy-'));
-  }
-
-  private inferMultiAddressBuildingIds(
-    addresses: CampaignAddressWithPoint[],
-    buildings: BuildingFeature[],
-    parcels: PreparedParcel[]
-  ): Set<string> {
-    const addressIdsByBuilding = new Map<string, Set<string>>();
-    const nearbyAddressIdsByBuildingStreet = new Map<string, Map<string, Set<string>>>();
-
-    const addAddressEvidence = (building: BuildingFeature | null, address: CampaignAddressWithPoint) => {
-      if (!building) return;
-      const buildingId = this.buildingPublicId(building).toLowerCase();
-      if (!buildingId) return;
-      const group = addressIdsByBuilding.get(buildingId) ?? new Set<string>();
-      group.add(address.id.toLowerCase());
-      addressIdsByBuilding.set(buildingId, group);
-    };
-
-    const addNearbyEvidence = (building: BuildingFeature | null, address: CampaignAddressWithPoint) => {
-      if (!building) return;
-      const buildingId = this.buildingPublicId(building).toLowerCase();
-      const street = this.normalizeStreet(address.street_name ?? address.formatted);
-      if (!buildingId || !street) return;
-      const streetGroups = nearbyAddressIdsByBuildingStreet.get(buildingId) ?? new Map<string, Set<string>>();
-      const group = streetGroups.get(street) ?? new Set<string>();
-      group.add(address.id.toLowerCase());
-      streetGroups.set(street, group);
-      nearbyAddressIdsByBuildingStreet.set(buildingId, streetGroups);
-    };
-
-    for (const address of addresses) {
-      const addressCoords = address.geom.coordinates;
-      const nearby = this.findNearestBuildings(addressCoords, buildings, NEAREST_BUILDING_CANDIDATE_LIMIT)
-        .map((candidate): MatchCandidate => ({
-          building: candidate.building,
-          matchType: 'proximity_fallback',
-          confidence: 0.5,
-          distance: candidate.distance,
-          streetScore: this.streetScore(address, candidate.building),
-        }))
-        .filter((candidate) => candidate.distance <= FALLBACK_RADIUS_METERS);
-
-      const contained = nearby
-        .filter((candidate) => this.isPointInBuilding(addressCoords, candidate.building))
-        .map((candidate) => ({
-          ...candidate,
-          matchType: candidate.streetScore >= 0.40 ? 'containment_verified' : 'containment_suspect',
-          confidence: candidate.streetScore >= 0.40 ? 1.0 : 0.70,
-        } satisfies MatchCandidate))
-        .sort((a, b) => this.rankMatches(a, b))[0];
-      if (contained) {
-        addAddressEvidence(contained.building, address);
-        continue;
-      }
-
-      const parcelMatch = this.parcelBridgeMatch(address, nearby, parcels);
-      if (parcelMatch) {
-        addAddressEvidence(parcelMatch.building, address);
-        continue;
-      }
-
-      const nearbyMatch = nearby
-        .filter((candidate) => candidate.distance <= MULTI_ADDRESS_NEARBY_RADIUS_METERS)
-        .sort((a, b) => this.rankMatches(a, b))[0];
-      if (nearbyMatch) {
-        addNearbyEvidence(nearbyMatch.building, address);
-      }
-    }
-
-    const inferred = new Set(
-      Array.from(addressIdsByBuilding.entries())
-        .filter(([, addressIds]) => addressIds.size > 1)
-        .map(([buildingId]) => buildingId)
-    );
-    for (const [buildingId, streetGroups] of nearbyAddressIdsByBuildingStreet) {
-      if (Array.from(streetGroups.values()).some((addressIds) => addressIds.size > 1)) {
-        inferred.add(buildingId);
-      }
-    }
-    return inferred;
-  }
-
-  private canAcceptMultipleAddresses(
-    building: BuildingFeature,
-    inferredMultiAddressBuildingIds: Set<string> = new Set()
-  ): boolean {
-    const props = building.properties as BuildingFeature['properties'];
-    const publicId = this.buildingPublicId(building).toLowerCase();
-    return props.is_townhome === true ||
-      inferredMultiAddressBuildingIds.has(publicId) ||
-      Number(props.units_count ?? 0) > 1 ||
-      Number(props.address_count ?? 0) > 1;
-  }
-
-  private async resetCampaignArtifacts(campaignId: string, clearCampaignAddressLinks: boolean): Promise<void> {
-    const operations: Array<PromiseLike<{ error: { message: string } | null }>> = [
-      this.supabase
-        .from('building_address_links')
-        .delete()
-        .eq('campaign_id', campaignId),
-      this.supabase
-        .from('building_slices')
-        .delete()
-        .eq('campaign_id', campaignId),
-      this.supabase
-        .from('address_orphans')
-        .delete()
-        .eq('campaign_id', campaignId),
-    ];
-
-    if (clearCampaignAddressLinks) {
-      operations.push(
-        this.supabase
-          .from('campaign_addresses')
-          .update({
-            building_id: null,
-            building_gers_id: null,
-            match_source: null,
-            confidence: null,
-          })
-          .eq('campaign_id', campaignId)
-      );
-    }
-
-    const results = await Promise.all(operations);
-    const deleteLinksError = results[0].error;
-    const deleteSlicesError = results[1].error;
-    const deleteOrphansError = results[2].error;
-    const resetAddressesError = clearCampaignAddressLinks ? results[3]?.error ?? null : null;
-
-    if (deleteLinksError) {
-      throw new Error(`Failed to clear building links: ${deleteLinksError.message}`);
-    }
-    if (deleteSlicesError) {
-      throw new Error(`Failed to clear building slices: ${deleteSlicesError.message}`);
-    }
-    if (deleteOrphansError) {
-      throw new Error(`Failed to clear address orphans: ${deleteOrphansError.message}`);
-    }
-    if (resetAddressesError) {
-      throw new Error(`Failed to clear campaign address links: ${resetAddressesError.message}`);
-    }
   }
 
   /**
@@ -1411,8 +1235,7 @@ export class StableLinkerService {
     campaignId: string,
     matches: MatchResult[],
     overtureRelease: string,
-    persistenceMode: 'silver' | 'gold',
-    preserveExisting = false
+    persistenceMode: 'silver' | 'gold'
   ): Promise<void> {
     const validMatches = matches.filter(m => m.matchType !== 'orphan');
     
@@ -1436,62 +1259,14 @@ export class StableLinkerService {
       unit_count: match.unitCount,
       unit_arrangement: match.unitArrangement,
       overture_release: overtureRelease,
-      linker_version: 2,
+      linker_version: 3,
     }));
 
-    // Batch insert
-    const batchSize = 500;
-    for (let i = 0; i < records.length; i += batchSize) {
-      const batch = records.slice(i, i + batchSize);
-      const { error } = await this.supabase
-        .from('building_address_links')
-        .upsert(batch, { onConflict: 'campaign_id,address_id', ignoreDuplicates: preserveExisting });
-      
-      if (error) {
-        console.error(`[StableLinker] Error saving batch ${i / batchSize + 1}:`, error.message);
-        throw new Error(`Failed to save building address links: ${error.message}`);
-      }
-    }
-
-    if (persistenceMode === 'gold') {
-      for (let i = 0; i < validMatches.length; i += GOLD_ADDRESS_UPDATE_BATCH_SIZE) {
-        const batch = validMatches.slice(i, i + GOLD_ADDRESS_UPDATE_BATCH_SIZE);
-        try {
-          await Promise.all(
-            batch.map((match) =>
-              retryWithBackoff(
-                async () => {
-                  const { error } = await this.supabase
-                    .from('campaign_addresses')
-                    .update({
-                      building_id: UUID_PATTERN.test(match.buildingId) ? match.buildingId : null,
-                      building_gers_id: match.buildingId,
-                      match_source: this.toGoldMatchSource(match.matchType),
-                      confidence: match.confidence,
-                    })
-                    .eq('id', match.addressId)
-                    .eq('campaign_id', campaignId);
-
-                  if (error) {
-                    throw new Error(error.message || 'Unknown Supabase update error');
-                  }
-                },
-                { maxAttempts: 4, baseDelayMs: 500 }
-              )
-            )
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(
-            `[StableLinker] Error saving Gold address assignments batch ${i / GOLD_ADDRESS_UPDATE_BATCH_SIZE + 1}:`,
-            message
-          );
-          throw new Error(`Failed to save Gold address assignments: ${message}`);
-        }
-      }
-    }
-
-    console.log(`[StableLinker] Saved ${validMatches.length} matches`);
+    if (typeof this.supabase.rpc !== 'function') throw new Error('Strict automatic linking requires transactional RPC persistence.');
+    const { error } = await this.supabase.rpc('save_strict_automatic_links', {
+      p_campaign_id: campaignId, p_records: records, p_write_gold: persistenceMode === 'gold',
+    });
+    if (error) throw new Error(`Failed to save strict automatic links: ${error.message}`);
   }
 
   /**
@@ -2114,7 +1889,7 @@ export class StableLinkerService {
       orphans,
       suspect,
       avgConfidence: Math.round(avgConfidence * 100) / 100,
-      coveragePercent: Math.round((validMatches.length / totalAddresses) * 100),
+      coveragePercent: totalAddresses > 0 ? Math.round((validMatches.length / totalAddresses) * 100) : 0,
       matchBreakdown: {
         containmentVerified,
         containmentSuspect,

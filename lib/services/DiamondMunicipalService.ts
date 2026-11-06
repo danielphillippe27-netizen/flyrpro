@@ -6,6 +6,7 @@ import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
 import type { LambdaSnapshotResponse } from '@/lib/services/TileLambdaService';
 import { getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
 import { resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
+import { mapInBatches } from './ProvisionConcurrency';
 
 type Bounds = [number, number, number, number];
 type SnapshotTileMetrics = NonNullable<NonNullable<LambdaSnapshotResponse['metadata']>['tile_metrics']>;
@@ -301,10 +302,10 @@ async function listMunicipalCandidates(country: DiamondCountry, region: string) 
           })
         );
 
-        for (const object of response.Contents ?? []) {
+        const page = await mapInBatches(response.Contents ?? [], 6, async (object) => {
           const key = object.Key ?? '';
           const match = key.match(/^diamond\/addresses\/([^/]+)\/([^/]+)\/([^/]+)\/diamond-manifest\.json$/);
-          if (!match) continue;
+          if (!match) return null;
 
           const [, manifestCountry, manifestRegion, municipality] = match;
           const buildingManifestKey = `diamond/buildings/${manifestCountry}/${manifestRegion}/${municipality}/diamond-manifest.json`;
@@ -312,19 +313,15 @@ async function listMunicipalCandidates(country: DiamondCountry, region: string) 
             readJson<DiamondLayerManifest>(key),
             tryReadJson<DiamondLayerManifest>(buildingManifestKey),
           ]);
-          if (!buildingManifest || !addressManifest.bounds || !buildingManifest.bounds) continue;
+          if (!buildingManifest || !addressManifest.bounds || !buildingManifest.bounds) return null;
 
-          candidates.push({
-            country,
-            region: manifestRegion,
-            municipality,
-            addressManifestKey: key,
-            buildingManifestKey,
-            addressManifest,
-            buildingManifest,
+          return {
+            country, region: manifestRegion, municipality,
+            addressManifestKey: key, buildingManifestKey, addressManifest, buildingManifest,
             area: Math.min(boundsArea(addressManifest.bounds), boundsArea(buildingManifest.bounds)),
-          });
-        }
+          };
+        });
+        for (const candidate of page) if (candidate) candidates.push(candidate);
 
         continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
       } while (continuationToken);
@@ -332,6 +329,9 @@ async function listMunicipalCandidates(country: DiamondCountry, region: string) 
       return candidates.sort((a, b) => a.area - b.area);
     })();
     candidateCache.set(cacheKey, cached);
+    void cached.catch(() => {
+      if (candidateCache.get(cacheKey) === cached) candidateCache.delete(cacheKey);
+    });
   }
   return cached;
 }
@@ -354,24 +354,19 @@ async function listParcelCandidates(country: DiamondCountry, region: string) {
           })
         );
 
-        for (const object of response.Contents ?? []) {
+        const page = await mapInBatches(response.Contents ?? [], 6, async (object) => {
           const key = object.Key ?? '';
           const match = key.match(/^diamond\/parcels\/([^/]+)\/([^/]+)\/([^/]+)\/diamond-manifest\.json$/);
-          if (!match) continue;
-
+          if (!match) return null;
           const [, , manifestRegion, municipality] = match;
           const parcelManifest = await tryReadJson<DiamondLayerManifest>(key);
-          if (!parcelManifest?.bounds) continue;
-
-          candidates.push({
-            country,
-            region: manifestRegion,
-            municipality,
-            parcelManifestKey: key,
-            parcelManifest,
-            area: boundsArea(parcelManifest.bounds),
-          });
-        }
+          if (!parcelManifest?.bounds) return null;
+          return {
+            country, region: manifestRegion, municipality,
+            parcelManifestKey: key, parcelManifest, area: boundsArea(parcelManifest.bounds),
+          };
+        });
+        for (const candidate of page) if (candidate) candidates.push(candidate);
 
         continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
       } while (continuationToken);
@@ -379,6 +374,9 @@ async function listParcelCandidates(country: DiamondCountry, region: string) {
       return candidates.sort((a, b) => a.area - b.area);
     })();
     parcelCandidateCache.set(cacheKey, cached);
+    void cached.catch(() => {
+      if (parcelCandidateCache.get(cacheKey) === cached) parcelCandidateCache.delete(cacheKey);
+    });
   }
   return cached;
 }
@@ -549,9 +547,18 @@ async function loadScopedAddressesFromPmtiles(options: {
   let touchedTiles = 0;
   const sourceLayer = options.addressManifest.source_layer ?? 'addresses';
 
-  for (let x = range.minX; x <= range.maxX; x += 1) {
-    for (let y = range.minY; y <= range.maxY; y += 1) {
-      const tile = await archive.getZxy(range.z, x, y);
+  const rowsPerColumn = range.maxY - range.minY + 1;
+  for (let offset = 0; offset < range.tileCount; offset += 6) {
+    const batch = await mapInBatches(
+      Array.from({ length: Math.min(6, range.tileCount - offset) }, (_, index) => offset + index),
+      6,
+      async (index) => {
+        const x = range.minX + Math.floor(index / rowsPerColumn);
+        const y = range.minY + index % rowsPerColumn;
+        return { x, y, tile: await archive.getZxy(range.z, x, y) };
+      }
+    );
+    for (const { x, y, tile } of batch) {
       if (!tile) continue;
       touchedTiles += 1;
 
@@ -755,21 +762,22 @@ export class DiamondMunicipalService {
       );
     });
     if (!candidate) return null;
-    const parcelCandidates = (await Promise.all(
-      regions.map((region) => listParcelCandidates(country, region))
-    )).flat().sort((a, b) => a.area - b.area);
+    // Parcel catalog reads and the address scan use independent artifacts.
+    const [parcelPages, scoped] = await Promise.all([
+      Promise.all(regions.map((region) => listParcelCandidates(country, region))),
+      loadScopedAddressesFromPmtiles({
+        campaignId: options.campaignId,
+        polygon: options.polygon,
+        addressManifest: candidate.addressManifest,
+        regionCode: candidate.region.toUpperCase(),
+        addressLimit: options.addressLimit,
+      }),
+    ]);
+    const parcelCandidates = parcelPages.flat().sort((a, b) => a.area - b.area);
     const parcelCandidate = parcelCandidates.find((entry) => {
       const parcelBounds = entry.parcelManifest.bounds;
       return Boolean(parcelBounds && boundsIntersect(parcelBounds, bbox));
     }) ?? null;
-
-    const scoped = await loadScopedAddressesFromPmtiles({
-      campaignId: options.campaignId,
-      polygon: options.polygon,
-      addressManifest: candidate.addressManifest,
-      regionCode: candidate.region.toUpperCase(),
-      addressLimit: options.addressLimit,
-    });
 
     if (scoped.addresses.length === 0) return null;
 

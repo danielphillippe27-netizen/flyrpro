@@ -12,7 +12,9 @@ import {
   Mail,
   MessageCircle,
   Phone,
-  PanelLeft,
+  ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
   Video,
   Plus,
   Search,
@@ -43,12 +45,13 @@ import {
   type Conversation,
   type ContactLabel,
 } from "@/lib/coco/types";
+import { OutreachTools, RelationshipPanel } from "./RelationshipTools";
 import { ContactDetailsEditor } from "./ContactDetailsEditor";
 import { EmailComposer } from "./EmailComposer";
 import { GmailClientImport } from "./GmailClientImport";
 import { AppleContactsReview } from "./AppleContactsReview";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import "./coco.css";
 const replyTemplates = [
   { title: "Quick follow-up", body: "Hi {first_name}, just following up on our conversation. What would be a good next step for you?" },
@@ -246,9 +249,7 @@ function CocoWorkspace({
   const [contactFilter, setContactFilter] = useState<
       ContactLabel | "All" | "Unlabeled"
     >("All"),
-    [contactOptions, setContactOptions] = useState<"filter" | "stage" | null>(
-      null,
-    ),
+    [contactsCollapsed, setContactsCollapsed] = useState(false),
     [bulkStage, setBulkStage] = useState("Lead"),
     [bulkLabel, setBulkLabel] = useState<ContactLabel>("Client");
   const [editingContact, setEditingContact] = useState<string | null>(null);
@@ -1005,69 +1006,61 @@ function CocoWorkspace({
           </div>
         </div>}
         {area === "Clients" && (
-          <div className={`contacts-workspace ${contactOptions === "filter" ? "with-contact-lists" : ""}`}>
-            <nav className="contacts-lists" aria-label="Contact lists" hidden={contactOptions !== "filter"}>
-              <div className="contacts-lists-heading"><strong>Lists</strong><button aria-label="Hide contact filters" onClick={() => setContactOptions(null)}><PanelLeft size={18} /></button></div>
-              <button className="all-contacts-list" aria-pressed={contactFilter === "All"} onClick={() => setContactFilter("All")}>All Contacts</button>
-              <div id="contact-list-options" className="contact-filters" role="group" aria-label="Filter contacts by list">
-                {[...availableLists, "Unlabeled"].map(list => (
-                  <button key={list} aria-pressed={contactFilter === list} onClick={() => setContactFilter(list)}>{list}</button>
-                ))}
-              </div>
-            </nav>
-            <aside className="contacts-browser" aria-label="Clients">
-              <>
-                <header className="page-header">
-                  <div>
-                    <span className="eyebrow">RELATIONSHIPS FIRST</span>
-                    <h1>
-                      Clients<span className="rose-dot">.</span>
-                    </h1>
-                    <p>Everyone you care for, in one calm place.</p>
-                  </div>
-                  <div className="client-header-actions">
-                    <button
-                      aria-label="Filter"
-                      title="Show contact lists and filters"
-                      aria-expanded={contactOptions === "filter"}
-                      aria-controls="contact-list-options"
-                      onClick={() =>
-                        setContactOptions((value) =>
-                          value === "filter" ? null : "filter",
-                        )
-                      }
-                    >
-                      <PanelLeft size={19} />
-                      {contactFilter !== "All" && <span className="filter-active-dot" />}
-                    </button>
+          <div className={`contacts-workspace ${contactsCollapsed ? "contacts-collapsed" : ""}`}>
+            <aside className="contacts-browser" aria-label="Leads">
+              <button
+                className="contacts-collapse-button"
+                aria-label={contactsCollapsed ? "Show contact list" : "Hide contact list"}
+                title={contactsCollapsed ? "Show contact list" : "Hide contact list"}
+                onClick={() => setContactsCollapsed(value => !value)}
+              >
+                {contactsCollapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+              </button>
+              <div className="contacts-browser-content" hidden={contactsCollapsed}>
+                <header className="contacts-search-header">
+                  <label className="contacts-search-input">
+                    <Search size={14} aria-hidden="true" />
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      aria-label="Search contacts"
+                      placeholder="Search contacts..."
+                    />
+                  </label>
+                  <button className="contacts-create-button" aria-label="Add contact" title="Add contact" onClick={() => setShowAddClient(true)}>
+                    <Plus size={16} />
+                  </button>
+                </header>
+                <div className="contacts-filter-tabs" role="group" aria-label="Contact filters">
+                  <button aria-pressed={contactFilter === "All"} onClick={() => setContactFilter("All")}>
+                    All ({data.clients.length})
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className={contactFilter !== "All" ? "is-active" : ""} aria-label={contactFilter === "All" ? "Filter contacts" : `Filter contacts: ${contactFilter}`}>
+                        <span>{contactFilter === "All" ? "Filter" : contactFilter}</span><ChevronDown size={14} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuRadioGroup value={contactFilter} onValueChange={setContactFilter}>
+                        <DropdownMenuRadioItem value="All">All</DropdownMenuRadioItem>
+                        {[...availableLists, "Unlabeled"].map(list => (
+                          <DropdownMenuRadioItem key={list} value={list}>{list}</DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="page-body contacts-list-body">
+                  <div className="contacts-list-summary">
+                    <span className="count-label" aria-live="polite">{filteredContacts.length} contacts</span>
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="contact-add-button" aria-label="Contact" title="Add a contact">
-                          <Plus size={21} />
-                        </button>
-                      </DropdownMenuTrigger>
+                      <DropdownMenuTrigger asChild><button className="contacts-import-button">Import <ChevronDown size={12} /></button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => setShowAddClient(true)}>Add Contact</DropdownMenuItem>
                         <DropdownMenuItem disabled={integrationBusy} onSelect={() => setShowGmailImport(true)}>Google (Gmail)</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void importAppleContacts()}>Apple</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
-                  </div>
-                </header>
-                <div className="page-body contacts-list-body">
-                  <div className="toolbar">
-                    <label className="search-field">
-                      <Search size={18} />
-                      <input
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search contacts"
-                      />
-                    </label>
-                    <span className="count-label">
-                      {filteredContacts.length} of {data.clients.length}{" "}
-                      contacts
-                    </span>
                   </div>
                   <div className="bulk-contact-actions">
                     <button
@@ -1102,6 +1095,7 @@ function CocoWorkspace({
                         </button>
                         {selectedContacts.length > 0 && (
                           <>
+                            <OutreachTools clients={data.clients.filter(client => selectedContacts.includes(client.id))} userId={userId} workspaceId={workspaceId} onSaved={loadData} />
                             <label className="bulk-label-picker">
                               Stage
                               <select
@@ -1234,7 +1228,7 @@ function CocoWorkspace({
                     )}
                   </div>
                 </div>
-              </>
+              </div>
             </aside>
             <section
               className="contact-detail-pane"
@@ -1387,6 +1381,7 @@ function CocoWorkspace({
                             ) && <p>No past deals added yet.</p>}
                           </div>}
                         </section>
+                        <RelationshipPanel key={`${userId}:${workspaceId}:${client.id}`} client={client} userId={userId} tasks={clientTasks} messages={detailMessages.filter(message => message.client_id === client.id)} onSaved={loadData} />
                         <details className="contact-crm-extras"><summary>Conversations & tasks</summary>
                         <div className="detail-right">
                           <ContactContext client={client} />

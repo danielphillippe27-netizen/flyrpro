@@ -141,6 +141,7 @@ async function fetchSyntheticSessionEventsFromSessions(
 ): Promise<SessionEventRow[]> {
   let includeLeadsCreated = true;
   let includePathGeojson = true;
+  let includeSessionMode = true;
   let data: Array<Record<string, unknown>> | null = null;
   const allowedUserIds = new Set(scopedUserIds);
 
@@ -164,6 +165,9 @@ async function fetchSyntheticSessionEventsFromSessions(
     }
     if (includePathGeojson) {
       selectColumns.push('path_geojson');
+    }
+    if (includeSessionMode) {
+      selectColumns.push('session_mode');
     }
 
     let query = admin
@@ -197,6 +201,10 @@ async function fetchSyntheticSessionEventsFromSessions(
       includePathGeojson = false;
       continue;
     }
+    if (includeSessionMode && isMissingColumn(result.error, 'sessions', 'session_mode')) {
+      includeSessionMode = false;
+      continue;
+    }
     throw new Error(result.error.message);
   }
 
@@ -212,6 +220,7 @@ async function fetchSyntheticSessionEventsFromSessions(
       created_at: firstNonEmptyString(row.created_at, row.end_time, row.start_time) ?? new Date().toISOString(),
       payload: {
         campaign_id: firstNonEmptyString(row.campaign_id),
+        ...(typeof row.session_mode === 'string' ? { session_mode: row.session_mode } : {}),
         doors_hit: Number(row.doors_hit ?? 0) || 0,
         conversations: Number(row.conversations ?? 0) || 0,
         leads_created: Number(row.leads_created ?? 0) || 0,

@@ -1,0 +1,97 @@
+{
+  "date": "2026-11-03",
+  "campaignId": "50f752dc-57c9-4d7c-a289-f897433fc9f2",
+  "campaignName": "Lake",
+  "mode": "fresh_link_simulation_in_memory",
+  "productionWrites": false,
+  "metrics": {
+    "matched": 180,
+    "orphans": 367,
+    "suspect": 44,
+    "avgConfidence": 0.92,
+    "coveragePercent": 33,
+    "matchBreakdown": {
+      "containmentVerified": 113,
+      "containmentSuspect": 44,
+      "pointOnSurface": 1,
+      "parcelVerified": 22,
+      "proximityVerified": 0,
+      "proximityFallback": 0
+    },
+    "processing_metadata": {
+      "execution_time_ms": 123,
+      "avg_precision_meters": 3.81,
+      "street_mismatch_count": 0,
+      "conflict_count": 126,
+      "density_warning_count": 0
+    },
+    "added": 180,
+    "preserved": 0
+  },
+  "crossStreetGroupsRequiringReview": 59,
+  "screenshotBuilding": {
+    "buildingId": "overture:building:44f4ccf4-a340-4c02-bba6-5a335a33b9aa",
+    "streets": [
+      "s tennessee ave",
+      "e parks st"
+    ],
+    "links": [
+      {
+        "addressId": "22ac458a-c451-4c8e-8fe2-3fff024506dd",
+        "formatted": "1111 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "31d17891-8e85-40f1-ab54-939f54910f68",
+        "formatted": "210 E PARKS ST LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "56318f81-1462-4483-b6c9-a4658cec401c",
+        "formatted": "1109 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "8a035284-aa15-4dd6-8d56-93ee01d88257",
+        "formatted": "211 E PARKS ST LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "92ea95ca-7a43-40b0-a12f-856fd93d1445",
+        "formatted": "214 E PARKS ST LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "ac2fd9dd-1ca8-450f-95c6-9ea1b79a27b4",
+        "formatted": "212 E PARKS ST LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "bb082db1-4d02-410d-83fe-ff67bb3241cd",
+        "formatted": "1116 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "c0e5877c-f395-4db5-8e38-f0364f50b95b",
+        "formatted": "1119 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "c8373e8f-ad6d-4be9-9b11-8a15c5f882b0",
+        "formatted": "1115 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "c8e0f974-df87-4522-83e7-867bb42f40ae",
+        "formatted": "1114 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      },
+      {
+        "addressId": "d8561e8a-77a7-4281-a7ee-83248a846a6e",
+        "formatted": "1112 S TENNESSEE AVE LAKELAND FL 33803",
+        "matchType": "point_on_surface"
+      }
+    ],
+    "proposedAddresses": []
+  }
+}

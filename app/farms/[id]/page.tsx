@@ -20,6 +20,7 @@ import {
   Users,
 } from 'lucide-react';
 import { FarmService, FarmTouchService, FarmLeadService, FarmTouchOutcomeService } from '@/lib/services/FarmService';
+import type { FarmActivitySession } from '@/lib/farms/session-totals';
 import { CampaignsService } from '@/lib/services/CampaignsService';
 import { ContactsService } from '@/lib/services/ContactsService';
 import { FinanceService } from '@/lib/services/FinanceService';
@@ -202,6 +203,7 @@ export default function FarmPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [touchOutcomes, setTouchOutcomes] = useState<FarmTouchAddress[]>([]);
+  const [activitySessions, setActivitySessions] = useState<FarmActivitySession[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -306,6 +308,7 @@ export default function FarmPage() {
       setContacts(contactData);
       setFinanceEntries(financeData);
       setTouchOutcomes(outcomeData);
+      setActivitySessions(await FarmTouchOutcomeService.fetchActivitySessions(farmId, resolvedLinkedCampaignId));
 
       if (resolvedLinkedCampaignId) {
         try {
@@ -1262,6 +1265,7 @@ export default function FarmPage() {
             addresses={addresses}
             touches={resolvedTouches}
             outcomes={touchOutcomes}
+            activitySessions={activitySessions}
             leads={leads}
             currentCycle={analytics.currentCycleNumber}
             scope={overviewScope}

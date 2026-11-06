@@ -485,10 +485,12 @@ export function ActivityPageView({
                         {formatMetric(firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads))}
                       </div>
                     </div>
-                    <div className="rounded border p-2">
-                      <div className="text-muted-foreground text-xs">Flyers Delivered</div>
-                      <div className="font-medium">{formatMetric(selectedEvent.payload.flyers_delivered)}</div>
-                    </div>
+                    {(selectedEvent.payload.session_mode ?? selectedEvent.payload.mode) === 'flyer' && (
+                      <div className="rounded border p-2">
+                        <div className="text-muted-foreground text-xs">Flyers Delivered</div>
+                        <div className="font-medium">{formatMetric(selectedEvent.payload.flyers_delivered)}</div>
+                      </div>
+                    )}
                     <div className="rounded border p-2">
                       <div className="text-muted-foreground text-xs">Active Time</div>
                       <div className="font-medium">{formatDuration(selectedEvent.payload.active_seconds)}</div>

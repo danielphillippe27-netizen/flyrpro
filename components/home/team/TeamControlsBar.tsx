@@ -9,7 +9,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ChevronDown } from 'lucide-react';
 
-export type RangePreset = 'today' | '7d' | '30d' | 'year' | 'custom';
+import { getRangeForPreset, type RangePreset } from '@/lib/team/date-range';
+
+export type { RangePreset } from '@/lib/team/date-range';
 
 export type TeamControlsRange = {
   preset: RangePreset;
@@ -26,25 +28,6 @@ export type TeamControlsBarProps = {
   showRangeControls?: boolean;
 };
 
-function getRangeForPreset(preset: RangePreset): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  if (preset === 'today') {
-    start.setUTCHours(0, 0, 0, 0);
-  } else if (preset === '7d') {
-    start.setDate(start.getDate() - 6);
-    start.setUTCHours(0, 0, 0, 0);
-  } else if (preset === '30d') {
-    start.setDate(start.getDate() - 29);
-    start.setUTCHours(0, 0, 0, 0);
-  } else if (preset === 'year') {
-    start.setMonth(0, 1);
-    start.setUTCHours(0, 0, 0, 0);
-  } else {
-    return { start: start.toISOString(), end: end.toISOString() };
-  }
-  return { start: start.toISOString(), end: end.toISOString() };
-}
 
 export function TeamControlsBar({
   range,

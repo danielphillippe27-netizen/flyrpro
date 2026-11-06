@@ -44,7 +44,6 @@ import { createClient } from '@/lib/supabase/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import { ActivityPageView } from '@/components/activity/ActivityPageView';
 import { CampaignAssignmentView } from '@/components/campaigns/CampaignAssignmentView';
-import { MapOptimizationStatus } from '@/components/campaigns/MapOptimizationStatus';
 import { DismissibleCampaignBanner } from '@/components/campaigns/DismissibleCampaignBanner';
 import { TerritoryIQPanel } from '@/components/campaigns/TerritoryIQPanel';
 import { FinancePanel } from '@/components/finance/FinancePanel';
@@ -1583,7 +1582,6 @@ export default function CampaignDetailPage() {
           </TabsList>
 
           <TabsContent value="map" className="mt-4 space-y-4" data-self-serve-demo-allow="true">
-            <MapOptimizationStatus campaignId={campaignId} />
             {roadMetadataLoading ? (
               <p className="text-xs text-muted-foreground">Loading road metadata…</p>
             ) : roadMetadataError ? (

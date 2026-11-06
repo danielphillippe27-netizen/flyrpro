@@ -1,3 +1,4 @@
+import { prepareProvisionInputs, ProvisionStageTimings } from '@/lib/services/ProvisionConcurrency';
 import { dispatchCanonicalTileBuild } from '@/lib/services/CanonicalTileDispatch';
 import { after, NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -391,10 +392,10 @@ async function bulkInsertAddresses(
     .slice(0, Math.max(0, MAX_CAMPAIGN_HOMES - existingCount));
 
   if (addressesToWrite.length === 0) {
-    return countCampaignAddresses(supabase, campaignId);
+    return existingCount;
   }
 
-  const countBeforeRpc = await countCampaignAddresses(supabase, campaignId);
+  const countBeforeRpc = existingCount;
   const { error: rpcError } = await supabase.rpc(BULK_ADDRESS_RPC, {
     p_campaign_id: campaignId,
     p_addresses: addressesToWrite,
@@ -1112,7 +1113,7 @@ async function runCampaignPostProcessing(params: {
         normalizedBuildingsGeoJSON as unknown as { features: StableBuildingFeature[] },
         overtureRelease,
         {
-          resetExisting: true,
+          preserveExisting: true,
           persistenceMode: source === 'diamond' ? 'gold' : 'silver',
           parcelsGeoJSON: scopedGeometry?.parcels?.features.length
             ? scopedGeometry.parcels as never
@@ -1429,6 +1430,7 @@ export async function POST(request: NextRequest) {
 
     const runProvisionWorker = async () => {
       const result = await retryWithBackoff(async () => {
+          const stageTimings = new ProvisionStageTimings();
           const sourceTimeoutMs = sourceResolutionTimeoutMs();
           console.log('[Provision] Map-ready provision worker started.', {
             campaignId,
@@ -1439,8 +1441,7 @@ export async function POST(request: NextRequest) {
             provision_phase: 'source_probed',
           });
 
-          const existingAddressCount = await countCampaignAddresses(supabase, campaignId!);
-          const resolvedProvision = await withTimeout(
+          const resolvedProvision = await stageTimings.measure('source_resolution_ms', () => withTimeout(
             resolveDiamondThenBedrock({
               campaignId: campaignId!,
               polygon: polygon as GeoJSON.Polygon,
@@ -1448,7 +1449,7 @@ export async function POST(request: NextRequest) {
             }),
             sourceTimeoutMs,
             `Provision source resolution exceeded ${Math.round(sourceTimeoutMs / 1000)}s before Diamond/Bedrock returned. Check S3/DuckDB/httpfs runtime logs.`
-          );
+          ));
           const {
             addressSource,
             snapshot: rawSnapshot,
@@ -1464,58 +1465,54 @@ export async function POST(request: NextRequest) {
 
           await updateCampaignProvision(supabase, campaignId!, {
             provision_source: dbProvisionSource(addressSource),
-            provision_phase: 'source_probed',
+            provision_phase: 'addresses_loading',
             data_quality_reason: homeCapNotice,
             home_limit_applied: resolvedHomeCount > MAX_CAMPAIGN_HOMES,
             discovered_home_count: resolvedHomeCount,
           });
 
-          let finalAddressCount = existingAddressCount;
-          await updateCampaignProvision(supabase, campaignId!, {
-            provision_phase: 'addresses_loading',
-          });
-
           addressesToInsert = deduplicateAddresses(addressesToInsert).slice(0, MAX_CAMPAIGN_HOMES);
-          const hasResolvedAddresses = addressesToInsert.length > 0;
-          if (hasResolvedAddresses) {
-            finalAddressCount = await bulkInsertAddresses(supabase, campaignId!, addressesToInsert);
-          }
-
-          if (finalAddressCount > 0) {
-            await updateCampaignProvision(supabase, campaignId!, {
-              provision_phase: 'addresses_ready',
-              addresses_ready_at: readyAt,
-            });
-          }
-
           const campaignPolygon = polygon as GeoJSON.Polygon;
-          const scopedGeometry = await resolveScopedCampaignMapGeometry({
-            campaignId: campaignId!,
-            snapshot: lambdaSnapshotToCampaignSnapshotRow(snapshot),
-            campaignRow: {
-              bbox: campaign.bbox ?? bboxFromPolygon(campaignPolygon),
-              territory_boundary: campaignPolygon,
-            },
-            recordTiming: (name, durationMs) => {
-              console.log('[Provision] Scoped PMTiles geometry timing', {
-                campaignId,
-                phase: name,
-                ms: Math.round(durationMs),
-              });
-            },
-          });
+          const [, scopedGeometry] = await prepareProvisionInputs(
+            () => stageTimings.measure('address_ingest_ms', async () => {
+              const count = addressesToInsert.length > 0
+                ? await bulkInsertAddresses(supabase, campaignId!, addressesToInsert)
+                : await countCampaignAddresses(supabase, campaignId!);
+              if (count > 0) {
+                await updateCampaignProvision(supabase, campaignId!, {
+                  provision_phase: 'addresses_ready',
+                  addresses_ready_at: new Date().toISOString(),
+                });
+              }
+              return count;
+            }),
+            () => stageTimings.measure('geometry_load_ms', () => resolveScopedCampaignMapGeometry({
+              campaignId: campaignId!,
+              snapshot: lambdaSnapshotToCampaignSnapshotRow(snapshot),
+              campaignRow: {
+                bbox: campaign.bbox ?? bboxFromPolygon(campaignPolygon),
+                territory_boundary: campaignPolygon,
+              },
+              recordTiming: (name, durationMs) => {
+                stageTimings.record(`geometry_${name}`, durationMs);
+                console.log('[Provision] Scoped PMTiles geometry timing', {
+                  campaignId, phase: name, ms: Math.round(durationMs),
+                });
+              },
+            }))
+          );
           const scopedBuildingCount = scopedGeometry.buildings?.features.length ?? null;
           const scopedParcelCount = scopedGeometry.parcels?.features.length ?? 0;
           const hasResidentialParcels = scopedParcelCount > 0;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
 
-          const targets = await new CampaignAddressEnrichmentService(supabase).ensureTargets({
+          const targets = await stageTimings.measure('geometry_targets_ms', () => new CampaignAddressEnrichmentService(supabase).ensureTargets({
             campaignId: campaignId!, region: regionCode, source: addressSource,
             boundary: campaignPolygon,
             buildings: scopedGeometry.buildings?.features ?? [],
             parcels: scopedGeometry.parcels?.features ?? [],
-          });
-          finalAddressCount = await countCampaignAddresses(supabase, campaignId!);
+          }));
+          const finalAddressCount = await countCampaignAddresses(supabase, campaignId!);
           if (finalAddressCount === 0) {
             throw new ProvisionError(
               'No usable addresses, residential buildings, or eligible parcels were found in this territory. Try another area.',
@@ -1534,7 +1531,7 @@ export async function POST(request: NextRequest) {
             discovered_home_count: discoveredHomeCount, data_quality_reason: homeCapNotice,
           });
 
-          await upsertSnapshotMetadata(supabase, campaignId!, snapshot);
+          await stageTimings.measure('snapshot_persist_ms', () => upsertSnapshotMetadata(supabase, campaignId!, snapshot));
 
 	          let linkedAddressCount = 0;
 	          let buildingLinkConfidence = 0;
@@ -1559,16 +1556,17 @@ export async function POST(request: NextRequest) {
             data_quality_reason: homeCapNotice,
           });
 
-          const initialMapReadyAt = new Date().toISOString();
-          await prewarmCanonicalMapBundle(supabase, campaignId!, scopedGeometry, {
+          await stageTimings.measure('bundle_publish_ms', () => prewarmCanonicalMapBundle(supabase, campaignId!, scopedGeometry, {
             linksStatusOverride: 'pending_provision',
             parcelDisplayMode: 'filtered',
-          });
+          }));
+          const initialMapReadyAt = new Date().toISOString();
           await updateCampaignProvision(supabase, campaignId!, {
             provision_status: 'ready',
             provision_phase: 'map_ready',
             provisioned_at: initialMapReadyAt,
             map_ready_at: initialMapReadyAt,
+            provision_timings: stageTimings.snapshot(),
             has_parcels: hasResidentialParcels,
             building_link_confidence: 0,
             map_mode: hasResidentialParcels ? 'hybrid' : mapMode,

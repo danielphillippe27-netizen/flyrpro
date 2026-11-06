@@ -36,6 +36,27 @@ export function canonicalTileStates(bundle: CanonicalClientTileBundle, addresses
     if (!byBuilding.has(id)) byBuilding.set(id, new Set());
     byBuilding.get(id)!.add(String(link.address_id));
   }
+  // Field-created homes can arrive after the immutable geometry snapshot.
+  // Only explicit building identities are safe here; gers_id may identify an
+  // address source and must never be used as a proximity/building guess.
+  const buildingAliases = new Map<string, string | null>();
+  for (const record of bundle.records.buildings) {
+    for (const value of [record.id, record.properties.row_id, record.properties.gers_id,
+      record.properties.building_id, record.properties.building_gers_id]) {
+      if (typeof value !== 'string' || !value.trim()) continue;
+      const key = value.trim().toLowerCase();
+      buildingAliases.set(key, buildingAliases.has(key) && buildingAliases.get(key) !== record.id ? null : record.id);
+    }
+  }
+  const liveBuildingByAddress = new Map<string, string>();
+  for (const address of addresses) {
+    const buildingId = [address.building_gers_id, address.building_id]
+      .flatMap((value) => typeof value === 'string' ? buildingAliases.get(value.trim().toLowerCase()) ?? [] : [])[0];
+    if (!buildingId) continue;
+    liveBuildingByAddress.set(address.id.toLowerCase(), buildingId);
+    if (!byBuilding.has(buildingId)) byBuilding.set(buildingId, new Set());
+    byBuilding.get(buildingId)!.add(address.id);
+  }
   const selected = new Set(options.selectedIds ?? []);
   const deleted = new Set((options.deletedAddressIds ?? []).map((id) => id.toLowerCase()));
   const hiddenBuildings = new Set(options.hiddenBuildingIds ?? []);
@@ -46,7 +67,9 @@ export function canonicalTileStates(bundle: CanonicalClientTileBundle, addresses
       ...strings(record.properties.linked_address_ids), ...strings(record.properties.address_ids), ...strings(record.properties.address_id),
       ...(kind === 'building' ? [...(byBuilding.get(record.id) ?? [])] : []),
     ])];
-    const active = linked.filter((id) => !deleted.has(id.toLowerCase()));
+    const active = linked.filter((id) => !deleted.has(id.toLowerCase()) &&
+      (kind !== 'building' || !liveBuildingByAddress.has(id.toLowerCase()) ||
+        liveBuildingByAddress.get(id.toLowerCase()) === record.id));
     const live = active.flatMap((id) => byAddress.get(id.toLowerCase()) ?? []);
     const keys = live.map((address) => statusKey(getCampaignAddressMapStatus(address), Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at)));
     const key = MAP_STATUS_PRIORITY.find((candidate) => keys.includes(candidate) && filters[candidate]) ?? 'UNTOUCHED';

@@ -1182,7 +1182,9 @@ export function MapBuildingsLayer({
     ]) {
       try {
         if (map?.getLayer(id)) {
-          map.setLayoutProperty(id, 'visibility', 'visible');
+          // Flat address dots stay hidden; retain the 3D model hit area.
+          const flatPin = [circleLeadGlowLayerId, circleLayerId, selectedCircleLayerId].includes(id);
+          map.setLayoutProperty(id, 'visibility', flatPin ? 'none' : 'visible');
         }
       } catch {
         // Mapbox can transiently reject layer reads during style swaps.
@@ -2267,6 +2269,7 @@ export function MapBuildingsLayer({
             map.addLayer({
               id: circleLeadGlowLayerId,
               type: 'circle' as const,
+              layout: { visibility: 'none' },
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr),
@@ -2283,6 +2286,7 @@ export function MapBuildingsLayer({
             const circleLayerConfig: CircleLayerSpecification = {
               id: circleLayerId,
               type: 'circle',
+              layout: { visibility: 'none' },
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(NON_MANUAL_POINT_FILTER, filterExpr),
@@ -2301,6 +2305,7 @@ export function MapBuildingsLayer({
             const selectedCircleLayerConfig: CircleLayerSpecification = {
               id: selectedCircleLayerId,
               type: 'circle',
+              layout: { visibility: 'none' },
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: getScopedGeometryFilter(
@@ -2790,6 +2795,7 @@ export function MapBuildingsLayer({
             map.addLayer({
               id: selectedCircleLayerId,
               type: 'circle',
+              layout: { visibility: 'none' },
               source: sourceId,
               minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
               filter: selectedPointFilter,

@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { X } from 'lucide-react';
 import type { DurhamPlaceMatch } from '@/lib/farms/durhamPlaces';
 
 type Result = { farmAddressCount: number; addressesInDurham: number; matchedAddressCount: number; matches: DurhamPlaceMatch[]; excluded: { address_id: string; address_data: { formatted: string }; places: { name: string }[] }[] };
 
 export function DurhamCommercialReview({ farmId }: { farmId: string }) {
+  const [hidden, setHidden] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,8 +31,21 @@ export function DurhamCommercialReview({ farmId }: { farmId: string }) {
       window.location.reload();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not restore address'); setRestoring(null); }
   }
+  if (hidden) return null;
+
   return <section className="rounded-2xl border border-neutral-700 p-5 space-y-3" aria-label="Durham business review">
-    <h2 className="text-lg font-semibold">Review possible businesses</h2>
+    <div className="flex items-start justify-between gap-3">
+      <h2 className="text-lg font-semibold">Review possible businesses</h2>
+      <button
+        type="button"
+        onClick={() => setHidden(true)}
+        aria-label="Hide business review"
+        title="Hide business review"
+        className="-mr-2 -mt-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
+      >
+        <X className="h-5 w-5" aria-hidden="true" />
+      </button>
+    </div>
     <p className="text-sm text-neutral-400">Review addresses excluded by the Durham business filter and restore homes or mixed-use addresses.</p>
     <button type="button" onClick={review} disabled={loading} className="rounded-lg bg-neutral-200 px-4 py-2 text-sm font-medium text-black disabled:opacity-50">{loading ? 'Checking…' : 'Review business matches'}</button>
     {error && <p role="alert" className="text-sm text-red-400">{error}</p>}

@@ -612,11 +612,11 @@ export function CampaignAddressPmtilesLayer({
         },
       } as mapboxgl.AnyLayer);
 
-      // Keep homes visible across a storm-sized area. Meter-sized cylinders
-      // disappear at overview zooms, so use screen-sized dots until street level.
+      // Retain the layer for existing hit-query plumbing, but render only 3D pins.
       map.addLayer({
         id: GLOW_LAYER_ID,
         type: 'circle',
+        layout: { visibility: 'none' },
         source: SOURCE_ID,
         maxzoom: ADDRESS_LABEL_MIN_ZOOM,
         filter: getLayerFilter('Point'),
@@ -769,6 +769,7 @@ export function CampaignAddressPmtilesLayer({
       map.addLayer({
         id: GLOW_LAYER_ID,
         type: 'circle',
+        layout: { visibility: 'none' },
         source: SOURCE_ID,
         'source-layer': source.sourceLayer,
         minzoom: source.minzoom,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { sessionRouteGeoJson as lineStringGeoJson } from '@/lib/session-route-geometry';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceIdForUser } from '@/app/api/_utils/workspace';
 import type { MinimalSupabaseClient } from '@/app/api/_utils/workspace';
@@ -20,7 +21,7 @@ type SessionUpdateBody = {
   goalAmount?: number | null;
   notes?: string | null;
   endedReason?: string | null;
-  path?: Array<{ latitude: number; longitude: number; timestampEpochMs?: number | null; accuracyMeters?: number | null }>;
+  path?: Array<{ latitude: number; longitude: number; timestampEpochMs?: number | null; accuracyMeters?: number | null; startsNewSegment?: boolean }>;
   distanceMeters?: number;
   elapsedSeconds?: number;
   doorsHit?: number;
@@ -36,14 +37,6 @@ function isMissingColumn(error: unknown, table: string, column: string) {
   if (!error || typeof error !== 'object') return false;
   const text = `${(error as { message?: string }).message ?? ''} ${(error as { details?: string | null }).details ?? ''}`.toLowerCase();
   return text.includes(table) && text.includes(column) && text.includes('does not exist');
-}
-
-function lineStringGeoJson(path: Array<{ latitude: number; longitude: number }> | undefined) {
-  const coordinates = (path ?? [])
-    .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude))
-    .map((point) => [point.longitude, point.latitude]);
-  if (coordinates.length < 2) return null;
-  return JSON.stringify({ type: 'LineString', coordinates });
 }
 
 function emptyLineStringGeoJson() {

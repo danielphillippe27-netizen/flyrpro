@@ -37,3 +37,18 @@ assert.equal(deleted.find((w) => w.id === 'building:house-1')?.state.hidden, fal
 for (const [status, key] of [['none','UNTOUCHED'], ['attempted','NO_ONE_HOME'], ['talked','CONVERSATIONS'], ['lead','LEADS'],
   ['appointment','HOT_LEADS'], ['do_not_knock','DO_NOT_KNOCK'], ['follow-up','HOT_LEADS']] as const) assert.equal(statusKey(status), key);
 console.log('PASS: individual home/pin colours, shared units, QR precedence, deletion, status aliases, diff and style replay');
+
+// A reverse-geocoded home created after the tile snapshot still colours its building.
+const reverseHome = { ...home('new-reverse-home', 'talked'), building_gers_id: 'house-2' };
+const liveWrites = canonicalTileStates(bundle, [...untouched, reverseHome], { selectedIds: [reverseHome.id] });
+assert.equal(liveWrites.find(w => w.id === 'building:house-2')?.state.status, 'CONVERSATIONS');
+assert.equal(liveWrites.find(w => w.id === 'building:house-2')?.state.selected, true);
+assert.equal(liveWrites.find(w => w.id === 'building:house-1')?.state.status, 'UNTOUCHED');
+const removed = canonicalTileStates(bundle, [reverseHome], { deletedAddressIds: [reverseHome.id] });
+assert.equal(removed.find(w => w.id === 'building:house-2')?.state.status, 'UNTOUCHED');
+const reassigned = canonicalTileStates(bundle, [{ ...home('home-1', 'lead'), building_id: 'house-2' }]);
+assert.equal(reassigned.find(w => w.id === 'building:house-1')?.state.status, 'UNTOUCHED');
+assert.equal(reassigned.find(w => w.id === 'building:house-2')?.state.status, 'LEADS');
+const addressSourceOnly = canonicalTileStates(bundle, [{ ...home('source-home', 'lead'), gers_id: 'house-2' }]);
+assert.equal(addressSourceOnly.find(w => w.id === 'building:house-2')?.state.status, 'UNTOUCHED');
+console.log('PASS: post-snapshot reverse-geocoded home, selection, deletion, reassignment, address-source isolation');
