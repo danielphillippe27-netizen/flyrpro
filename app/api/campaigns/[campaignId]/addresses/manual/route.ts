@@ -165,7 +165,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       ? await resolveBuilding(supabase, requestedBuildingId)
       : null;
 
-    if (requestedBuildingId && !resolvedBuilding && automaticLocation) {
+    if (requestedBuildingId && !resolvedBuilding) {
       // Municipal/PMTiles footprints need not have a row in the legacy table.
       // Verify membership in this campaign before accepting their public ID.
       const bundle = await readCanonicalTileBundle(supabase, campaignId, "ios", new URL(request.url).origin);
@@ -180,8 +180,10 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       );
     }
 
-    if (addressProvenance === "field_manual_pin" || automaticLocation) {
-      const suppliedPinId = String(payload.id ?? payload.address_id ?? "").trim();
+    // Offline hits reference this exact UUID. Older iOS builds use "manual"
+    // or "mapbox_reverse_geocode" provenance too; never create a different ID.
+    const suppliedPinId = String(payload.id ?? payload.address_id ?? "").trim();
+    if (suppliedPinId || addressProvenance === "field_manual_pin" || automaticLocation) {
       if ((automaticLocation && !suppliedPinId) || (suppliedPinId && !UUID_PATTERN.test(suppliedPinId))) {
         return NextResponse.json({ error: "id must be a UUID" }, { status: 400 });
       }
@@ -265,7 +267,8 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       }
 
       // Field homes are live overlays; keep the immutable geometry available.
-      if (!automaticLocation) await invalidateCampaignMapBundle(supabase, campaignId);
+      // Keep canonical membership available for the next queued home upload.
+      // Live manual pins and statuses are applied over immutable map geometry.
       return NextResponse.json({
         address: addressRow,
         linked_building_id: resolvedBuilding?.publicId ?? null,
