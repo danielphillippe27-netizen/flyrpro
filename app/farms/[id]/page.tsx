@@ -1,5 +1,7 @@
 'use client';
 
+import { FarmActivityPace } from '@/components/farms/FarmActivityPace';
+
 import { buildFarmCampaignDescription, farmNotesForDisplay } from '@/lib/farms/backingCampaign';
 
 import { ContactOutreach } from '@/components/outreach/ContactOutreach';
@@ -1270,6 +1272,7 @@ export default function FarmPage() {
             scope={overviewScope}
             onScopeChange={setOverviewScope}
           />
+          <FarmActivityPace sessions={activitySessions} touches={resolvedTouches} totalHomes={addresses.length} startDate={farm.start_date} endDate={farm.end_date} />
           <DurhamCommercialReview farmId={farm.id} />
           <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan

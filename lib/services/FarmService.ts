@@ -539,7 +539,7 @@ export class FarmTouchOutcomeService {
 
   static async fetchActivitySessions(farmId: string, campaignId: string | null): Promise<FarmActivitySession[]> {
     const read = (column: 'farm_id' | 'campaign_id', id: string) => fetchAllInPages(async (from, to) => await this.client
-      .from('sessions').select('id, farm_touch_id, session_mode, doors_hit, conversations')
+      .from('sessions').select('id, start_time, farm_touch_id, session_mode, doors_hit, conversations')
       .eq(column, id).order('id').range(from, to));
     const rows = await Promise.all([
       read('farm_id', farmId),

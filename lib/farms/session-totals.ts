@@ -2,6 +2,7 @@ import type { EnrichedFarmTouch } from './analytics';
 
 export type FarmActivitySession = {
   id: string;
+  start_time?: string | null;
   farm_touch_id: string | null;
   session_mode: string | null;
   doors_hit: number | null;
