@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import { iosParcelPaint, parcelInsertionLayer } from '@/lib/map/iosMapPresentation';
 import {
   appendTileAccessToken,
   fetchCampaignMapManifest,
@@ -54,7 +55,6 @@ type CampaignParcelPmtilesLayerProps = {
 const SOURCE_ID = 'campaign-parcels-pmtiles-source';
 const FILL_LAYER_ID = 'campaign-parcels-pmtiles-fill';
 const LINE_LAYER_ID = 'campaign-parcels-pmtiles-line';
-const SELECTED_PARCEL_COLOR = '#60a5fa';
 const PARCEL_ID_PROPERTY_NAMES = [
   'parcel_id',
   'external_id',
@@ -342,6 +342,7 @@ export function CampaignParcelPmtilesLayer({
     const scopeFilter = buildParcelScopeFilter(parcelScope.externalIds, campaignBoundary, campaignBbox);
     const parcelColorExpression = buildParcelColorExpression(parcelStatusByExternalId, statusFilters);
     const selectedParcelExpression = buildSelectedParcelExpression(selectedParcelIds);
+    const parcelPaint = iosParcelPaint(selectedParcelExpression, ['!=', parcelColorExpression, PARCEL_DEFAULT_COLOR]);
     if (!scopeFilter) {
       cleanupParcelLayers(map);
       return;
@@ -367,6 +368,7 @@ export function CampaignParcelPmtilesLayer({
       if (manifestSource.bounds) vectorSource.bounds = manifestSource.bounds;
 
       map.addSource(SOURCE_ID, vectorSource);
+      const beforeId = parcelInsertionLayer(map.getStyle()?.layers ?? []);
       map.addLayer({
         id: FILL_LAYER_ID,
         type: 'fill',
@@ -376,14 +378,10 @@ export function CampaignParcelPmtilesLayer({
         filter: scopeFilter,
         paint: {
           'fill-color': parcelColorExpression,
-          'fill-opacity': [
-            'case',
-            selectedParcelExpression,
-            ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.3, 18, 0.42],
-            ['interpolate', ['linear'], ['zoom'], 10, 0.22, 14, 0.25, 18, 0.3],
-          ],
+          'fill-antialias': false,
+          'fill-opacity': parcelPaint.fillOpacity,
         },
-      });
+      }, beforeId);
 
       map.addLayer({
         id: LINE_LAYER_ID,
@@ -393,26 +391,11 @@ export function CampaignParcelPmtilesLayer({
         minzoom: manifestSource.minzoom,
         filter: scopeFilter,
         paint: {
-          'line-color': [
-            'case',
-            selectedParcelExpression,
-            SELECTED_PARCEL_COLOR,
-            '#e5e7eb',
-          ],
-          'line-width': [
-            'case',
-            selectedParcelExpression,
-            ['interpolate', ['linear'], ['zoom'], 10, 0.9, 14, 1.5, 18, 2.6],
-            ['interpolate', ['linear'], ['zoom'], 10, 0.7, 14, 0.8, 18, 0.75],
-          ],
-          'line-opacity': [
-            'case',
-            selectedParcelExpression,
-            1,
-            ['interpolate', ['linear'], ['zoom'], 10, 0.8, 14, 0.85, 18, 0.95],
-          ],
+          'line-color': parcelColorExpression,
+          'line-width': parcelPaint.lineWidth,
+          'line-opacity': parcelPaint.lineOpacity,
         },
-      });
+      }, beforeId);
 
       const clickHandler = (event: mapboxgl.MapLayerMouseEvent) => {
         const feature = event.features?.[0];

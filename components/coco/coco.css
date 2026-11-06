@@ -5067,36 +5067,31 @@
  .coco-crm .inbox-shell,.coco-crm .inbox-shell.show-thread { grid-template-columns:clamp(250px,26vw,340px) minmax(0,1fr); }
 }
 
-/* Apple Contacts structure, with a WolfGrid red glass profile. */
+/* Compact contact profile with solid, theme-aware surfaces. */
 .coco-crm .contact-detail-pane {
- --contact-glass:rgba(255,255,255,.64);
- --contact-glass-border:rgba(255,255,255,.8);
- background:radial-gradient(ellipse at 50% 5%,#ff394033,transparent 62%),linear-gradient(150deg,#f2f3f5 0%,#f8dce0 48%,#e7e8ec 100%);
+ --contact-glass:var(--card);
+ --contact-glass-border:var(--border);
+ background:var(--background);
  overflow-y:auto; overscroll-behavior:contain;
 }
-.dark .coco-crm .contact-detail-pane {
- --contact-glass:rgba(255,255,255,.055);
- --contact-glass-border:rgba(255,255,255,.09);
- background:radial-gradient(ellipse at 50% 6%,#ff173b44,transparent 60%),linear-gradient(155deg,#111114 0%,#4c1020 44%,#10090d 100%);
-}
-.coco-crm .contact-detail-pane .detail-header { position:relative; background:transparent; border:0; padding:64px 24px 24px; gap:20px; }
+.coco-crm .contact-detail-pane .detail-header { position:relative; background:transparent; border:0; padding:64px 24px 28px; gap:16px; }
 .coco-crm .contact-profile-toolbar { position:absolute; top:14px; left:20px; right:20px; display:flex; justify-content:space-between; align-items:center; gap:12px; }
 .coco-crm .contact-profile-toolbar .back-button { margin:0; color:var(--foreground); font-size:12px; }
 .coco-crm .contact-edit-button { border:1px solid var(--contact-glass-border); border-radius:18px; padding:6px 15px; background:var(--contact-glass); color:var(--foreground); backdrop-filter:blur(16px); }
-.coco-crm .contact-detail-pane .detail-title .avatar-large { width:clamp(150px,18vw,240px); height:auto; flex-basis:auto; aspect-ratio:1; font-size:clamp(64px,9vw,120px); font-weight:300; background:linear-gradient(150deg,#ffffff3d,#ff183725); color:var(--foreground); border:1px solid var(--contact-glass-border); box-shadow:inset 0 2px 2px #ffffff70,0 18px 70px #a9001612; }
-.coco-crm .contact-detail-pane .detail-title { gap:24px; }
+.coco-crm .contact-detail-pane .detail-title .avatar-large { width:80px; height:80px; flex:0 0 80px; aspect-ratio:1; font-size:30px; font-weight:500; background:var(--secondary); color:var(--foreground); border:1px solid var(--border); box-shadow:none; }
+.coco-crm .contact-detail-pane .detail-title { gap:14px; }
 .coco-crm .contact-detail-pane .detail-title h1 { font-size:24px; margin:0; }
 .coco-crm .contact-detail-pane .detail-title p { display:none; }
 .coco-crm .contact-detail-pane .contact-quick-actions { gap:10px; }
 .coco-crm .contact-detail-pane .contact-quick-actions > button,.coco-crm .contact-detail-pane .contact-quick-actions > a { width:42px; height:42px; background:var(--contact-glass); color:var(--foreground); border-color:var(--contact-glass-border); backdrop-filter:blur(16px); }
-.coco-crm .contact-detail-pane .detail-grid { display:block; width:100%; max-width:680px; margin:0 auto; padding:0 24px 48px; }
+.coco-crm .contact-detail-pane .detail-grid { display:block; width:100%; max-width:800px; margin:0 auto; padding:0 32px 48px; }
 .coco-crm .contact-detail-pane .details-surface { background:transparent; border:0; padding:0; box-shadow:none; }
 .coco-crm .contact-read-fields { display:flex; flex-direction:column; gap:8px; }
 .coco-crm .contact-info-row { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:12px 16px; border:1px solid var(--contact-glass-border); border-radius:12px; text-align:left; background:var(--contact-glass); color:var(--foreground); backdrop-filter:blur(16px); }
 .coco-crm .contact-info-row > span { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .coco-crm .contact-info-row small { color:color-mix(in srgb,var(--foreground) 65%,transparent); font-size:11px; }
 .coco-crm .contact-info-row strong { font-size:14px; font-weight:500; overflow-wrap:anywhere; }
-.coco-crm .contact-note-row { align-items:flex-start; min-height:96px; }
+.coco-crm .contact-note-row { align-items:flex-start; min-height:76px; }
 .coco-crm .contact-note-text { white-space:pre-wrap; line-height:1.5; }
 .coco-crm .contact-note-placeholder { color:color-mix(in srgb,var(--foreground) 55%,transparent); }
 .coco-crm .contact-crm-extras { margin-top:16px; padding:14px 16px; border:1px solid var(--contact-glass-border); border-radius:12px; background:var(--contact-glass); }
@@ -5114,7 +5109,7 @@
  .coco-crm .contacts-lists { max-height:var(--coco-height); }
 }
 @media(max-width:760px) {
- .coco-crm .contact-detail-pane .detail-title .avatar-large { width:150px; font-size:64px; }
+ .coco-crm .contact-detail-pane .detail-title .avatar-large { width:64px; height:64px; flex-basis:64px; font-size:24px; }
  .coco-crm .contact-detail-pane .detail-grid { padding:0 16px 32px !important; }
 }
 
@@ -5166,3 +5161,48 @@
 .coco-crm .relationship-panel button.primary,.coco-crm .relationship-tools button.primary { background:var(--primary); color:var(--primary-foreground, #fff); }
 .coco-crm .relationship-panel button:disabled,.coco-crm .relationship-tools button:disabled { opacity:.45; cursor:not-allowed; }
 .coco-crm .relationship-panel button:focus-visible,.coco-crm .relationship-tools button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+
+/* Keep relationship editing visually grouped with the rest of the profile. */
+.coco-crm .contact-detail-pane .relationship-panel {
+ margin-top:20px; padding:24px; border:1px solid var(--border);
+ border-radius:12px; background:var(--card); line-height:1.5;
+}
+.coco-crm .relationship-panel h2 { margin:0 0 6px; font-size:17px; font-weight:600; letter-spacing:-.3px; }
+.coco-crm .relationship-panel > p { margin:0; color:var(--coco-muted); font-size:13px; }
+.coco-crm .relationship-panel fieldset { margin:24px 0 0; min-width:0; }
+.coco-crm .relationship-panel legend { margin-bottom:4px; font-size:12px; font-weight:600; color:var(--coco-muted); }
+.coco-crm .relationship-panel .relationship-field { gap:12px; margin:0; padding:12px 0; }
+.coco-crm .relationship-panel .relationship-field label { font-size:12px; font-weight:500; color:var(--coco-muted); min-width:0; }
+.coco-crm .relationship-panel input,
+.coco-crm .relationship-panel select,
+.coco-crm .relationship-panel textarea { min-height:40px; background:var(--background); color:var(--foreground); font-size:14px; color-scheme:light; }
+.coco-crm .relationship-panel input:focus-visible,
+.coco-crm .relationship-panel select:focus-visible,
+.coco-crm .relationship-panel textarea:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+.coco-crm .relationship-panel button { min-height:40px; font-size:13px; }
+.coco-crm .relationship-panel fieldset > .primary { margin-top:8px; }
+.coco-crm .relationship-panel > [role=status]:not(:empty) { margin-top:12px; }
+.coco-crm .relationship-panel > .relationship-tools { margin-top:24px; padding-top:20px; border-top:1px solid var(--border); }
+.coco-crm .relationship-panel h3 { margin:24px 0 6px; font-size:14px; font-weight:600; }
+.coco-crm .relationship-panel .relationship-hint { font-size:12px; line-height:1.6; opacity:1; }
+.coco-crm .relationship-panel .relationship-hint + p { margin-top:14px; padding:16px; border:1px dashed var(--border); border-radius:8px; }
+.coco-crm .relationship-timeline { margin:0; }
+.coco-crm .relationship-timeline li:last-child { border-bottom:0; }
+.coco-crm .contact-info-row:hover,
+.coco-crm .contact-edit-button:hover,
+.coco-crm .contact-quick-actions > :not(:disabled):not([aria-disabled=true]):hover { border-color:var(--muted-foreground); }
+.coco-crm .contact-quick-actions > [aria-disabled=true] { opacity:.4; pointer-events:none; }
+@media(max-width:760px) {
+ .coco-crm .contact-detail-pane .relationship-panel { padding:18px; }
+ .coco-crm .relationship-panel .relationship-field { flex-wrap:wrap; }
+ .coco-crm .relationship-panel .relationship-field label { flex:1 1 160px; }
+}
+
+.dark .coco-crm .relationship-panel input,
+.dark .coco-crm .relationship-panel select,
+.dark .coco-crm .relationship-panel textarea { color-scheme:dark; }
+
+/* Contact creation sources share the manual-entry dialog. */
+.coco-crm .contact-import-options { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 20px; }
+.coco-crm .contact-import-options button { flex:1 1 180px; padding:10px 14px; border:1px solid var(--border); border-radius:10px; }
+.coco-crm .contact-import-options p { flex-basis:100%; margin:0; font-size:13px; }

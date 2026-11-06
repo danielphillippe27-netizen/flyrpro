@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import React,{act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {JSDOM} from 'jsdom';
+import {createRequire} from 'node:module';
+import {TownhomeUnitsLayer,TOWNHOME_SOURCE,type TownhomeCoverage} from '../../../components/map/TownhomeUnitsLayer';
+import type {CampaignAddress} from '@/types/database';
+const {validate}=createRequire(import.meta.url)('mapbox-gl/dist/style-spec/index.cjs');
+async function main(){
+ const dom=new JSDOM('<div id="root"></div>');Object.assign(globalThis,{React,window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
+ const layers=new Map<string,Record<string,any>>(),sources=new Map<string,Record<string,any>>(),events=new Map<string,Set<Function>>(),states=new Map<string,Record<string,unknown>>();
+ let writes=0,removed=false,clicked:any;
+ const map={getStyle:()=>removed?undefined:{layers:[...layers.values()]},isStyleLoaded:()=>!removed,getLayer:(id:string)=>layers.get(id),getSource:(id:string)=>sources.get(id),addSource:(id:string,spec:any)=>sources.set(id,{...spec,setData(data:any){writes++;this.data=data;}}),addLayer:(layer:any)=>layers.set(layer.id,layer),setFeatureState:({id}:any,state:any)=>states.set(id,state),setPaintProperty:(id:string,key:string,value:any)=>{layers.get(id)!.paint[key]=value;},setLayoutProperty:(id:string,key:string,value:any)=>{layers.get(id)!.layout={...layers.get(id)!.layout,[key]:value};},setFilter:(id:string,filter:any)=>{layers.get(id)!.filter=filter;},moveLayer:()=>{},removeLayer:(id:string)=>layers.delete(id),removeSource:(id:string)=>sources.delete(id),on:(name:string,fn:Function)=>{if(!events.has(name))events.set(name,new Set());events.get(name)!.add(fn);},off:(name:string,fn:Function)=>events.get(name)?.delete(fn),queryRenderedFeatures:()=>[{properties:{building_id:'row',address_id:'b'}}]};
+ const buildings:GeoJSON.FeatureCollection={type:'FeatureCollection',features:[{type:'Feature',id:'row',properties:{building_id:'row'},geometry:{type:'Polygon',coordinates:[[[-78,44],[-77.9996,44],[-77.9996,44.0001],[-78,44.0001],[-78,44]]]}}]};
+ const addresses=[{id:'a',house_number:'10',building_gers_id:'row',coordinate:{lon:-77.9999,lat:44.00005}},{id:'b',house_number:'12',building_gers_id:'row',coordinate:{lon:-77.9997,lat:44.00005}}] as CampaignAddress[];
+ let coverage:TownhomeCoverage={buildingIds:[],addressIds:[]};
+ const root=createRoot(document.getElementById('root')!);
+ const render=async(homes=addresses,selected='b',visible=true,selectedIds:string[]=[])=>act(async()=>{root.render(<TownhomeUnitsLayer map={map as never} mapLoaded styleKey="test" buildings={buildings} addresses={homes} selectedAddressId={selected} selectedAddressIds={selectedIds} visible={visible} dark={false} onCoverageChange={value=>coverage=value} onClick={target=>clicked=target}/>);});
+ await render();
+ assert.deepEqual(coverage.buildingIds,['row']);assert.deepEqual(coverage.addressIds,['a','b']);
+ assert.equal(sources.get(TOWNHOME_SOURCE)!.data.features.length,2);
+ assert.equal(states.get('b')?.selected,true);assert.equal(states.get('a')?.selected,false);
+ const style={version:8,glyphs:'https://example.test/fonts/{fontstack}/{range}.pbf',sources:Object.fromEntries([...sources].map(([id,s])=>[id,{type:'geojson',data:s.data}])),layers:[...layers.values()]};
+ assert.deepEqual(validate(style).map((e:any)=>e.message),[],'Actual component layers validate with Mapbox');
+ const before=writes;
+ await render([{...addresses[0],address_status:'talked'},addresses[1]],'a');
+ assert.equal(writes,before,'Status and selection do not rebuild unit geometry');
+ assert.equal(states.get('a')?.color,'#22c55e');assert.equal(states.get('b')?.selected,false);
+ for(const fn of events.get('click')??[])fn({point:{x:1,y:1},originalEvent:{metaKey:false,ctrlKey:false}});
+ assert.deepEqual(clicked,{buildingId:'row',addressId:'b',parcelId:null});
+ await render(addresses,'b',true,['a']);
+ assert.equal(states.get('a')?.selected,true);assert.equal(states.get('b')?.selected,true,'Additive selection keeps individual unit highlights');
+ await render(addresses,'b',false);assert.equal(layers.get('townhome-live-fill')?.layout.visibility,'none');
+ // Simulate a style replacement: exact slices and selection must replay.
+ layers.clear();sources.clear();states.clear();
+ for(const fn of events.get('style.load')??[])fn();
+ assert.equal(sources.get(TOWNHOME_SOURCE)!.data.features.length,2);assert.equal(states.get('b')?.selected,true);
+ await act(async()=>root.unmount());assert.equal(layers.size,0);assert.equal(sources.size,0);assert([...events.values()].every(set=>set.size===0));
+ assert.deepEqual(coverage,{buildingIds:[],addressIds:[]});
+ dom.window.close();console.log('PASS: actual unit-layer styles, coverage, independent live status/selection, stable geometry, exact-unit taps, mode switch, style reload and cleanup');
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

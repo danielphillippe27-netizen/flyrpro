@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { PowerDialerSettingsCard } from '@/components/settings/PowerDialerSettingsCard';
 import { WorkspaceCoverageSettings } from '@/components/settings/WorkspaceCoverageSettings';
+import { InboxSettingsCard } from '@/components/settings/InboxSettingsCard';
 import { FarmSettingsCard } from '@/components/settings/FarmSettingsCard';
 import { StormMapsSettingsCard } from '@/components/settings/StormMapsSettingsCard';
 import {
@@ -579,24 +580,24 @@ function SettingsPageContent() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-background">
       <header className="bg-white dark:bg-card border-b border-border sticky top-0 z-10">
-        <div className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-4">
+        <div className="mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-8 py-4">
           <h1 className="text-2xl font-bold dark:text-white">Settings</h1>
         </div>
       </header>
       
-      <main className="mx-auto w-full max-w-4xl px-4 sm:px-6 lg:px-8 py-6">
-        <div className="space-y-6">
+      <main className="mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-8 py-6">
+        <div className="settings-card-grid grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3 [&>[data-slot=card]]:min-w-0 [&>[data-slot=card]]:shadow-none">
           {loadError && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive">
+            <div className="col-span-full rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive">
               Could not load account settings. Please refresh the page.
             </div>
           )}
 
           {!isSalespersonSettings ? (
-            <nav aria-label="Settings tools" className="grid gap-3 sm:grid-cols-2">
+            <nav aria-label="Settings tools" className="contents">
               <Link href="/settings/integrations" className="flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground hover:bg-muted/50">
                 <Plug className="h-5 w-5 shrink-0" />
-                <div className="flex-1"><h2 className="font-semibold">Integrations</h2><p className="mt-1 text-sm text-muted-foreground">Connect Apple, email, AI, and your CRM tools.</p></div>
+                <div className="flex-1"><h2 className="font-semibold">Integrations</h2><p className="mt-1 text-sm text-muted-foreground">Connect Apple, Gmail, and your CRM tools.</p></div>
                 <ArrowRight className="h-4 w-4 shrink-0" />
               </Link>
               {fieldSales?.enabled && accessLevel !== 'salesperson' ? (
@@ -608,6 +609,8 @@ function SettingsPageContent() {
               ) : null}
             </nav>
           ) : null}
+
+          {!isSalespersonSettings ? <InboxSettingsCard /> : null}
 
           {/* Account Section */}
           <Card>
@@ -626,7 +629,7 @@ function SettingsPageContent() {
                   <Mail className="w-4 h-4" />
                   <span>Email</span>
                 </div>
-                <p className="text-base font-medium dark:text-white">{user?.email || 'N/A'}</p>
+                <p className="break-all text-base font-medium dark:text-white">{user?.email || 'N/A'}</p>
               </div>
               
               <div className="border-t border-gray-200 dark:border-gray-700" />
@@ -999,7 +1002,7 @@ function SettingsPageContent() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-base font-medium dark:text-white mb-1">Challenge center</p>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -1032,7 +1035,7 @@ function SettingsPageContent() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-base font-medium dark:text-white mb-1">Theme</p>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -1076,7 +1079,7 @@ function SettingsPageContent() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-base font-medium dark:text-white mb-1">Data Privacy</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -1085,7 +1088,7 @@ function SettingsPageContent() {
                   </div>
                 </div>
                 <div className="border-t border-gray-200 dark:border-gray-700" />
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-base font-medium dark:text-white mb-1">Terms & Privacy</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -1108,9 +1111,9 @@ function SettingsPageContent() {
           {/* Danger Zone */}
           <Card className="border-red-200 dark:border-red-900">
             <CardHeader>
-              <CardTitle className="text-red-600 dark:text-red-400">Danger Zone</CardTitle>
+              <CardTitle className="text-red-600 dark:text-red-400">Sign out</CardTitle>
               <CardDescription>
-                Irreversible and destructive actions
+                Sign out of your WolfGrid account
               </CardDescription>
             </CardHeader>
             <CardContent>

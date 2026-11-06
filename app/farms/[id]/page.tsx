@@ -8,6 +8,7 @@ import { ContactOutreach } from '@/components/outreach/ContactOutreach';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { FarmCycleSettings } from '@/components/farms/FarmCycleSettings';
 import { FarmActivityCalendar } from '@/components/farms/FarmActivityCalendar';
 import { useParams } from 'next/navigation';
 import {
@@ -99,8 +100,6 @@ const MODE_LABELS: Record<FarmSessionMode, string> = {
   event: 'Event',
 };
 
-type DashboardScope = 'current_cycle' | 'all_time';
-type MapLayerScope = 'all_time' | 'cycle';
 type PlannerTouchSlot = PlannerTouchDraft;
 
 type CampaignWithLegacyDescription = CampaignV2 & {
@@ -219,10 +218,7 @@ export default function FarmPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('overview');
   }, []);
-  const [overviewScope, setOverviewScope] = useState<DashboardScope>('all_time');
   const [chartSessionIds, setChartSessionIds] = useState<string[] | null>(null);
-  const [mapLayerScope, setMapLayerScope] = useState<MapLayerScope>('all_time');
-  const [selectedMapCycleNumber, setSelectedMapCycleNumber] = useState<string>('latest');
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTouch, setSelectedTouch] = useState<FarmTouch | null>(null);
@@ -394,16 +390,6 @@ export default function FarmPage() {
   );
 
   const resolvedTouches = analytics.touches;
-  const cycleFilterOptions = useMemo(
-    () =>
-      Array.from(new Set(resolvedTouches.map((touch) => touch.resolvedCycleNumber)))
-        .sort((left, right) => right - left)
-        .map((cycleNumber) => ({
-          value: String(cycleNumber),
-          label: `Cycle ${cycleNumber}`,
-        })),
-    [resolvedTouches]
-  );
   useEffect(() => {
     if (!farm) return;
     setConfigName(farm.name ?? '');
@@ -474,22 +460,6 @@ export default function FarmPage() {
     [currentFlyerUrl, farmCampaignNotes, farmScripts, farmId]
   );
 
-  useEffect(() => {
-    if (resolvedTouches.length === 0) {
-      setSelectedMapCycleNumber('latest');
-      return;
-    }
-
-    const latestCycleNumber = String(Math.max(...resolvedTouches.map((touch) => touch.resolvedCycleNumber), 1));
-
-    if (
-      selectedMapCycleNumber === 'latest' ||
-      !resolvedTouches.some((touch) => String(touch.resolvedCycleNumber) === selectedMapCycleNumber)
-    ) {
-      setSelectedMapCycleNumber(latestCycleNumber);
-    }
-  }, [resolvedTouches, selectedMapCycleNumber]);
-
   const kpis = useMemo(() => {
     return {
       ...analytics,
@@ -505,47 +475,7 @@ export default function FarmPage() {
     };
   }, [analytics]);
 
-  const selectedMapCycleTouches = useMemo(
-    () =>
-      resolvedTouches.filter((touch) => String(touch.resolvedCycleNumber) === selectedMapCycleNumber),
-    [resolvedTouches, selectedMapCycleNumber]
-  );
-  const selectedMapCycleTouchIds = useMemo(
-    () => selectedMapCycleTouches.map((touch) => touch.id),
-    [selectedMapCycleTouches]
-  );
-  const selectedMapCycleLabel = useMemo(() => {
-    if (selectedMapCycleTouches[0]) {
-      return `Cycle ${selectedMapCycleTouches[0].resolvedCycleNumber}`;
-    }
-    if (selectedMapCycleNumber !== 'latest') {
-      return `Cycle ${selectedMapCycleNumber}`;
-    }
-    return kpis.currentCycleLabel;
-  }, [kpis.currentCycleLabel, selectedMapCycleNumber, selectedMapCycleTouches]);
-  const selectedMapCycleSelectValue = useMemo(() => {
-    if (cycleFilterOptions.some((cycle) => cycle.value === selectedMapCycleNumber)) {
-      return selectedMapCycleNumber;
-    }
-    return cycleFilterOptions[0]?.value ?? '';
-  }, [cycleFilterOptions, selectedMapCycleNumber]);
-
   const overviewSnapshot = useMemo(() => {
-    if (overviewScope === 'all_time') {
-      return {
-        label: 'All Time',
-        supportingLabel: analytics.currentCycleLabel,
-        coverageRate: kpis.allTimeCoverageRate,
-        coverageCount: kpis.allTimeUniqueVisitedHomes,
-        visits: kpis.totalVisits,
-        contacts: kpis.totalContacts,
-        contactRate: kpis.totalContactRate,
-        sessions: kpis.allSessionCount,
-        avgHomesPerSession: kpis.avgHomesPerSession,
-        spendCents: kpis.totalSpendCents,
-        costPerContactCents: kpis.costPerContactCents,
-      };
-    }
 
     return {
       label: analytics.currentCycleLabel,
@@ -560,7 +490,7 @@ export default function FarmPage() {
       spendCents: kpis.cycleSpendCents,
       costPerContactCents: kpis.cycleCostPerContactCents,
     };
-  }, [analytics.currentCycleLabel, kpis, overviewScope]);
+  }, [analytics.currentCycleLabel, kpis]);
 
   const defaultPlannedHomesTarget = useMemo(() => {
     if (!farm || getFarmGoalType(farm) !== 'homes_per_cycle') return '';
@@ -1027,9 +957,7 @@ export default function FarmPage() {
       await FarmTouchService.createSession({
         farmId: farm.id,
         workspaceId: farm.workspace_id ?? currentWorkspaceId,
-        cycleNumber: kpis.currentCycleTouches.length === 0 && kpis.currentCycleNumber === 1
-          ? 1
-          : kpis.currentCycleNumber + 1,
+        cycleNumber: kpis.currentCycleNumber,
         mode: sessionMode,
         title: sessionTitle || undefined,
         scheduledDate: new Date(`${sessionDate}T12:00:00`).toISOString(),
@@ -1269,8 +1197,7 @@ export default function FarmPage() {
             activitySessions={activitySessions}
             leads={leads}
             currentCycle={analytics.currentCycleNumber}
-            scope={overviewScope}
-            onScopeChange={setOverviewScope}
+            scope="current_cycle"
           />
           <FarmActivityPace sessions={activitySessions} touches={resolvedTouches} totalHomes={addresses.length} startDate={farm.start_date} endDate={farm.end_date} />
           <DurhamCommercialReview farmId={farm.id} />
@@ -1288,7 +1215,7 @@ export default function FarmPage() {
               setPlanMessage('');
               setPlanError('');
               setPlanDrafts(current => {
-                const cycle = Math.max(0, ...resolvedTouches.map(touch => touch.resolvedCycleNumber), ...current.map(draft => draft.cycleNumber)) + 1;
+                const cycle = analytics.currentCycleNumber;
                 const date = localPlanDate();
                 return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
                   suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
@@ -1313,9 +1240,7 @@ export default function FarmPage() {
               </p>
               <div className="mt-4 text-2xl font-semibold text-foreground">{overviewSnapshot.sessions.toLocaleString()}</div>
               <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${kpis.cycleTouches.length.toLocaleString()} in ${kpis.currentCycleLabel}`
-                  : `${kpis.allSessionCount.toLocaleString()} all time`}
+                {`${kpis.allSessionCount.toLocaleString()} all time`}
               </p>
             </div>
             <div className="bg-card p-4 rounded-xl border border-border">
@@ -1325,9 +1250,7 @@ export default function FarmPage() {
               </p>
               <div className="mt-4 text-2xl font-semibold text-foreground">{formatMetricValue(overviewSnapshot.avgHomesPerSession)}</div>
               <p className="mt-2 text-sm text-muted-foreground">
-                {overviewScope === 'all_time'
-                  ? `${formatMetricValue(kpis.cycleAvgHomesPerSession)} this cycle`
-                  : `${formatMetricValue(kpis.avgHomesPerSession)} all time`}
+                {`${formatMetricValue(kpis.avgHomesPerSession)} all time`}
               </p>
             </div>
             <div className="bg-card p-4 rounded-xl border border-border">
@@ -1422,61 +1345,18 @@ export default function FarmPage() {
 
         <TabsContent value="map" className="mt-1 min-h-0 overflow-hidden rounded-xl border border-border bg-card">
             <FarmMapView
-              key={`${farm.id}:${mapTabVersion}:${mapLayerScope}:${selectedMapCycleNumber}`}
+              key={`${farm.id}:${mapTabVersion}:${analytics.currentCycleNumber}`}
               farm={farm}
               addresses={addresses}
               linkedCampaignId={linkedCampaignId}
               linkedCampaign={linkedCampaign}
-              layerScope={mapLayerScope}
-              cycleTouchIds={selectedMapCycleTouchIds}
+              layerScope="cycle"
+              cycleTouchIds={analytics.currentCycleTouchIds}
               touchOutcomes={touchOutcomes}
               contacts={contacts}
               onDataChanged={() => loadData(userId)}
               className="h-full rounded-none border-0"
-              toolbarContent={
-                <div className="flex flex-wrap items-center gap-2" aria-label="Farm map layers">
-                <div className="inline-flex rounded-lg border border-border bg-background/95 p-1">
-                  <button
-                    type="button"
-                    aria-pressed={mapLayerScope === 'all_time'}
-                    onClick={() => setMapLayerScope('all_time')}
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'all_time'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Master
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={mapLayerScope === 'cycle'}
-                    onClick={() => setMapLayerScope('cycle')}
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                      mapLayerScope === 'cycle'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Cycle
-                  </button>
-                </div>
-                {mapLayerScope === 'cycle' ? (
-                  <Select value={selectedMapCycleSelectValue} onValueChange={setSelectedMapCycleNumber}>
-                    <SelectTrigger aria-label={`Map cycle: ${selectedMapCycleLabel}`} className="w-[180px] bg-background/95">
-                      <SelectValue placeholder="Select cycle" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {cycleFilterOptions.map((cycle) => (
-                        <SelectItem key={cycle.value} value={cycle.value}>
-                          {cycle.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : null}
-                </div>
-              }
+              toolbarContent={<Badge variant="secondary">{analytics.currentCycleLabel}</Badge>}
               showOutcomeControls={false}
             />
         </TabsContent>
@@ -1909,6 +1789,7 @@ export default function FarmPage() {
                   </div>
 
                   </section>
+                  <FarmCycleSettings farm={farm} touches={resolvedTouches} outcomes={touchOutcomes} onChanged={() => loadData(userId)} />
                   <section className={settingsStyles.section} aria-labelledby="farm-schedule-heading">
                     <h3 id="farm-schedule-heading">Schedule &amp; coverage</h3>
                     <p className={settingsStyles.description}>Choose when to start and how many homes to reach each cycle.</p>
@@ -2135,7 +2016,7 @@ export default function FarmPage() {
       <Dialog open={sessionDialogOpen} onOpenChange={setSessionDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create farm cycle</DialogTitle>
+            <DialogTitle>Add session to {analytics.currentCycleLabel}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">

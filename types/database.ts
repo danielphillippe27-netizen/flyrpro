@@ -528,6 +528,7 @@ export interface Farm {
   touches_interval?: FarmTouchInterval | null;
   goal_type?: FarmGoalType | null;
   goal_target?: number | null;
+  active_cycle_number?: number;
   cycle_completion_window_days?: number | null;
   touch_types?: FarmTouchType[] | null;
   annual_budget_cents?: number | null;

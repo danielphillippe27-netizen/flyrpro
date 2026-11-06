@@ -103,7 +103,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .select('cycle_number, order_index')
     .eq('farm_id', farmId);
   const nextOrder = Math.max(-1, ...((siblingTouches ?? []).map((touch) => Number(touch.order_index ?? -1)))) + 1;
-  const nextCycle = Math.max(0, ...((siblingTouches ?? []).map((touch) => Number(touch.cycle_number ?? 0)))) + 1;
+  const { data: cycleFarm, error: cycleError } = await admin.from('farms')
+    .select('active_cycle_number').eq('id', farmId).single();
+  if (cycleError || !cycleFarm?.active_cycle_number) {
+    return NextResponse.json({ error: 'Cycle settings are unavailable. Refresh and try again.' }, { status: 503 });
+  }
 
   const insertPayload = {
     farm_id: farmId,
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     title,
     notes: typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null,
     campaign_id: typeof body.campaignId === 'string' && body.campaignId.trim() ? body.campaignId.trim() : null,
-    cycle_number: nextCycle,
+    cycle_number: cycleFarm.active_cycle_number,
     order_index: nextOrder,
     completed: false,
   };

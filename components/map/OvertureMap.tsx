@@ -1,5 +1,7 @@
 'use client';
 
+import { getBuildingExtrusionHeightExpression, getBuildingExtrusionBaseExpression } from '@/lib/map/buildingHeight';
+import { IOS_BUILDING_DEPTH } from '@/lib/map/iosMapPresentation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -242,16 +244,16 @@ export function OvertureMap() {
               minzoom: 13,
               filter: ['==', '$type', 'Polygon'],
               layout: {
-                'fill-extrusion-edge-radius': 0,
+                'fill-extrusion-edge-radius': 0.6,
               },
               paint: {
                 'fill-extrusion-color': '#6b7280', // Gray
                 'fill-extrusion-opacity': 0.9,
-                'fill-extrusion-height': ['get', 'height'],
-                'fill-extrusion-base': ['get', 'min_height'],
+                'fill-extrusion-height': getBuildingExtrusionHeightExpression(),
+                'fill-extrusion-base': getBuildingExtrusionBaseExpression(),
                 'fill-extrusion-vertical-gradient': true,
                 'fill-extrusion-rounded-roof': false,
-                'fill-extrusion-cast-shadows': false,
+                ...IOS_BUILDING_DEPTH,
               },
             });
           }

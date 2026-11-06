@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { cycleMapStatus } from '@/lib/farms/cycles';
 import { FarmTouchOutcomeService } from '@/lib/services/FarmService';
 import type {
   CampaignAddress,
@@ -111,10 +112,9 @@ export function FarmMapView({
                 ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
                 : visitedAllTime)
             : Boolean(scopedOutcome && VISITED_OUTCOME_STATUSES.has(scopedOutcome.status));
-        const scopedStatus =
-          scopedOutcome?.status ??
-          (layerScope === 'all_time' ? address.last_outcome_status : null) ??
-          (isVisited ? 'delivered' : 'none');
+        const scopedStatus = layerScope === 'cycle'
+          ? cycleMapStatus(scopedOutcome, latestOutcomeByAddress.get(address.id), address.last_outcome_status)
+          : scopedOutcome?.status ?? address.last_outcome_status ?? (isVisited ? 'delivered' : 'none');
 
         return {
           id: address.campaign_address_id ?? address.id,
@@ -230,6 +230,8 @@ export function FarmMapView({
     <div className={`relative w-full overflow-hidden rounded-xl border border-border ${className ?? 'h-[520px]'}`}>
       <CampaignDetailMapView
         toolbarContent={toolbarContent}
+        initialMapViewMode="parcels"
+        preserveProvidedStatuses={layerScope === 'cycle'}
         campaignId={linkedCampaignId}
         addresses={campaignAddresses}
         campaign={linkedCampaign}

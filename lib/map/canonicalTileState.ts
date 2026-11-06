@@ -11,9 +11,9 @@ export function statusKey(status: string, scanned = false): MapStatusKey {
   switch (normalizeAddressStatus(status)) {
     case 'appointment': case 'follow_up': case 'appointment_set': case 'callback_requested': case 'future_seller': return 'HOT_LEADS';
     case 'lead': case 'interested': case 'hot_lead': return 'LEADS';
-    case 'talked': case 'conversation': case 'spoke': return 'CONVERSATIONS';
+    case 'talked': case 'hot': case 'conversation': case 'spoke': return 'CONVERSATIONS';
     case 'do_not_knock': case 'dnc': return 'DO_NOT_KNOCK';
-    case 'no_answer': case 'not_home': case 'attempted': return 'NO_ONE_HOME';
+    case 'no_answer': case 'not_interested': case 'not_home': case 'attempted': return 'NO_ONE_HOME';
     case 'delivered': case 'visited': return 'TOUCHED';
     default: return 'UNTOUCHED';
   }
@@ -64,14 +64,14 @@ export function canonicalTileStates(bundle: CanonicalClientTileBundle, addresses
   const filters = options.filters ?? DEFAULT_STATUS_FILTERS;
   const stateFor = (record: CanonicalMapRecord, kind: 'address' | 'building' | 'parcel'): CanonicalRenderState => {
     const linked = kind === 'address' ? [record.id] : [...new Set([
-      ...strings(record.properties.linked_address_ids), ...strings(record.properties.address_ids), ...strings(record.properties.address_id),
+      ...strings(record.properties.linked_address_ids), ...strings(record.properties.address_ids), ...strings(record.properties.address_id), ...strings(record.properties.primary_address_id),
       ...(kind === 'building' ? [...(byBuilding.get(record.id) ?? [])] : []),
     ])];
     const active = linked.filter((id) => !deleted.has(id.toLowerCase()) &&
       (kind !== 'building' || !liveBuildingByAddress.has(id.toLowerCase()) ||
         liveBuildingByAddress.get(id.toLowerCase()) === record.id));
     const live = active.flatMap((id) => byAddress.get(id.toLowerCase()) ?? []);
-    const keys = live.map((address) => statusKey(getCampaignAddressMapStatus(address), Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at)));
+    const keys = live.map((address) => statusKey(getCampaignAddressMapStatus(address), filters.QR_SCANNED && (Number(address.scans ?? 0) > 0 || Boolean(address.last_scanned_at))));
     const key = MAP_STATUS_PRIORITY.find((candidate) => keys.includes(candidate) && filters[candidate]) ?? 'UNTOUCHED';
     const teammate = live.some((address) => address.is_teammate_owned);
     const override = active.map((id) => options.colorOverrides?.[id]).find(Boolean);

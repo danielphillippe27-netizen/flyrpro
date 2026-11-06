@@ -1,12 +1,13 @@
 'use client';
 
+import { getBuildingExtrusionHeightExpression, getBuildingExtrusionBaseExpression } from '@/lib/map/buildingHeight';
+import { IOS_BUILDING_DEPTH } from '@/lib/map/iosMapPresentation';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Map } from 'mapbox-gl';
 import mapboxgl from 'mapbox-gl';
 import { createClient } from '@/lib/supabase/client';
 import { isPmtilesGeometryProvider } from '@/lib/map/campaignMapManifest';
 
-const MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
 
 export type RenderingMode = '3d' | '2d';
 
@@ -244,7 +245,7 @@ export function BuildingLayers({
               minzoom: manifest.minzoom ?? 13,
               filter: ['==', '$type', 'Polygon'],
               layout: {
-                'fill-extrusion-edge-radius': 0,
+                'fill-extrusion-edge-radius': 0.6,
               },
               paint: {
                 'fill-extrusion-color': [
@@ -254,25 +255,11 @@ export function BuildingLayers({
                   '#9ca3af',
                 ],
                 'fill-extrusion-opacity': 0.85,
-                'fill-extrusion-height': [
-                  'max',
-                  [
-                    'coalesce',
-                    ['get', 'height'],
-                    ['get', 'render_height'],
-                    MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
-                  ],
-                  MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS,
-                ],
-                'fill-extrusion-base': [
-                  'case',
-                  ['has', 'min_height'],
-                  ['get', 'min_height'],
-                  0,
-                ],
+                'fill-extrusion-height': getBuildingExtrusionHeightExpression(),
+                'fill-extrusion-base': getBuildingExtrusionBaseExpression(),
                 'fill-extrusion-vertical-gradient': true,
                 'fill-extrusion-rounded-roof': false,
-                'fill-extrusion-cast-shadows': false,
+                ...IOS_BUILDING_DEPTH,
               },
             });
           }

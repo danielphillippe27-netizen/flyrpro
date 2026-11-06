@@ -1,6 +1,6 @@
 import type { ExpressionSpecification } from 'mapbox-gl';
 
-export const DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS = 5.5;
+export const DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
 export const MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 5.2;
 export const MAXIMUM_BUILDING_EXTRUSION_HEIGHT_METERS = 350;
 
@@ -51,8 +51,8 @@ export function sanitizeBuildingExtrusionHeightMeters(
 export function getBuildingExtrusionHeightExpression(): ExpressionSpecification {
   const rawHeight = [
     'to-number',
-    ['coalesce', ['get', 'height_m'], ['get', 'height']],
-    DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS,
+    ['coalesce', ['get', 'render_height'], ['get', 'height_m'], ['get', 'height'], ['get', 'min_height']],
+    5.2,
   ];
   const source = [
     'downcase',
@@ -66,7 +66,7 @@ export function getBuildingExtrusionHeightExpression(): ExpressionSpecification 
     ],
   ];
 
-  return [
+  const sanitized = [
     'case',
     [
       'any',
@@ -75,7 +75,14 @@ export function getBuildingExtrusionHeightExpression(): ExpressionSpecification 
       ['<=', rawHeight, 0],
       ['>', rawHeight, MAXIMUM_BUILDING_EXTRUSION_HEIGHT_METERS],
     ],
-    DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS,
-    ['max', rawHeight, MINIMUM_BUILDING_EXTRUSION_HEIGHT_METERS],
-  ] as ExpressionSpecification;
+    5.2,
+    rawHeight,
+  ];
+  return ['*', ['min', ['max', sanitized, 5.2], 14], 0.5] as ExpressionSpecification;
+}
+
+/** iOS scales the base with the roof and rejects bases above the rendered roof. */
+export function getBuildingExtrusionBaseExpression(): ExpressionSpecification {
+  const base: ExpressionSpecification = ['*', ['max', ['to-number', ['get', 'min_height'], 0], 0], 0.5];
+  return ['case', ['<', base, getBuildingExtrusionHeightExpression()], base, 0];
 }

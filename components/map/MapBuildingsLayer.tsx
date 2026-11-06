@@ -1,4 +1,5 @@
 'use client';
+import { hasTownhomeHit } from '@/lib/map/townhomeInteraction';
 import { useCardEngagement } from '@/lib/cards/useCardEngagement';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -33,6 +34,7 @@ import {
   DEFAULT_BUILDING_EXTRUSION_HEIGHT_METERS,
   getBuildingExtrusionHeightExpression,
   sanitizeBuildingExtrusionHeightMeters,
+  getBuildingExtrusionBaseExpression,
 } from '@/lib/map/buildingHeight';
 
 interface MapBuildingsLayerProps {
@@ -53,6 +55,7 @@ interface MapBuildingsLayerProps {
   visibleAddressIds?: string[];
   showOrphans?: boolean; // Toggle to show/hide orphan buildings (buildings without address links)
   showAddressLabels?: boolean;
+  townhomeAddressIds?: string[];
   /** When false, footprints use a neutral gray (not status colors); roads unchanged. Default true. */
   footprintStatusColors?: boolean;
   isDarkMap?: boolean;
@@ -85,7 +88,7 @@ const defaultStatusFilters: StatusFilters = DEFAULT_STATUS_FILTERS;
 const FOOTPRINT_SCALE = 1;
 const EMPTY_BUILDINGS_MAX_RETRIES = 5;
 const EMPTY_BUILDINGS_RETRY_BASE_DELAY_MS = 3000;
-const ADDRESS_LABEL_MIN_ZOOM = 16;
+const ADDRESS_LABEL_MIN_ZOOM = 17;
 const CAMPAIGN_BUILDING_MIN_ZOOM = 0;
 const GENERATED_HOME_WIDTH_METERS = 9;
 const GENERATED_HOME_DEPTH_METERS = 7;
@@ -817,6 +820,7 @@ export function MapBuildingsLayer({
   visibleAddressIds,
   showOrphans = true,
   showAddressLabels = true,
+  townhomeAddressIds = EMPTY_SELECTED_ADDRESS_IDS,
   footprintStatusColors = true,
   isDarkMap = false,
   selectionOnly = false,
@@ -1165,7 +1169,7 @@ export function MapBuildingsLayer({
     footprintStatusColors ? 0.9 : NEUTRAL_CIRCLE_OPACITY;
   const getFootprintVerticalGradient = (): boolean => true;
   const getFootprintEmissiveStrength = (): number =>
-    footprintStatusColors ? 0.14 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
+    footprintStatusColors ? 0.12 : NEUTRAL_EXTRUSION_EMISSIVE_STRENGTH;
   const forceBuildingLayerVisibility = () => {
     for (const id of [
       surfaceLayerId,
@@ -1893,7 +1897,7 @@ export function MapBuildingsLayer({
         return false;
       }
 
-      const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides);
+      const addressLabelFeatures = buildAddressLabelFeatureCollection(addressStateOverrides?.filter(a=>!townhomeAddressIds.includes(a.id)));
 
       // Use precomputed geometry — no clone/rescale on this path.
       const normalizedFeatures = normalizedFeaturesRef.current;
@@ -2124,22 +2128,19 @@ export function MapBuildingsLayer({
             minzoom: CAMPAIGN_BUILDING_MIN_ZOOM,
             filter: getScopedGeometryFilter(polygonFilter, filterExpr),
             layout: {
-              // Mapbox GL JS can generate long triangulation spikes when an
-              // edge radius is applied to complex/concave GeoJSON footprints.
-              'fill-extrusion-edge-radius': 0,
+              // Match iOS side rounding; keep roofs flat for concave footprints.
+              'fill-extrusion-edge-radius': 0.6,
             },
             paint: {
               'fill-extrusion-color': getFootprintFillColor(),
               'fill-extrusion-vertical-gradient': getFootprintVerticalGradient(),
               'fill-extrusion-height': buildingHeightExpression,
-              'fill-extrusion-base': 0,
+              'fill-extrusion-base': getBuildingExtrusionBaseExpression(),
               'fill-extrusion-opacity': getFootprintFillOpacity(),
               'fill-extrusion-emissive-strength': getFootprintEmissiveStrength(),
-              // Legacy light/dark basemaps can project kilometer-long shadow
-              // rays when the camera zooms out. AO and the vertical gradient
-              // retain depth without those false wall-like lines.
-              'fill-extrusion-cast-shadows': false,
-              'fill-extrusion-ambient-occlusion-intensity': 0.35,
+              // Match iOS depth and shadows.
+              'fill-extrusion-cast-shadows': true,
+              'fill-extrusion-ambient-occlusion-intensity': 0.32,
               'fill-extrusion-ambient-occlusion-wall-radius': 3,
               'fill-extrusion-ambient-occlusion-ground-radius': 4,
               'fill-extrusion-ambient-occlusion-ground-attenuation': 0.65,
@@ -2345,14 +2346,16 @@ export function MapBuildingsLayer({
                   ['linear'],
                   ['zoom'],
                   ADDRESS_LABEL_MIN_ZOOM,
-                  10,
-                  22,
-                  13,
+                  11.5,
+                  20,
+                  15,
                 ],
                 'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
                 'text-anchor': 'center',
-                'text-allow-overlap': false,
-                'text-ignore-placement': false,
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+                'text-pitch-alignment': 'viewport',
+                'text-rotation-alignment': 'viewport',
               },
               paint: {
                 'text-color': '#f9fafb',
@@ -2632,6 +2635,7 @@ export function MapBuildingsLayer({
         // queryRenderedFeatures internally during style transitions.
         const mapClickHandler = (event: mapboxgl.MapMouseEvent) => {
           try {
+            if (hasTownhomeHit(map,event.point)) return;
             const layers = getInteractiveLayers();
             if (layers.length === 0) return;
             const features = map.queryRenderedFeatures(event.point, { layers });
@@ -2836,14 +2840,16 @@ export function MapBuildingsLayer({
                   ['linear'],
                   ['zoom'],
                   ADDRESS_LABEL_MIN_ZOOM,
-                  10,
-                  22,
-                  13,
+                  11.5,
+                  20,
+                  15,
                 ],
                 'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
                 'text-anchor': 'center',
-                'text-allow-overlap': false,
-                'text-ignore-placement': false,
+                'text-allow-overlap': true,
+                'text-ignore-placement': true,
+                'text-pitch-alignment': 'viewport',
+                'text-rotation-alignment': 'viewport',
               },
               paint: {
                 'text-color': '#f9fafb',
@@ -2890,6 +2896,7 @@ export function MapBuildingsLayer({
 
           const handleExistingLayerClick = (event: mapboxgl.MapMouseEvent) => {
             try {
+              if (hasTownhomeHit(map,event.point)) return;
               const layers = getInteractiveLayers();
               if (layers.length === 0) return;
               const features = map.queryRenderedFeatures(event.point, { layers });
@@ -2966,7 +2973,7 @@ export function MapBuildingsLayer({
       }
       cleanupLayerInteractionHandlers?.();
     };
-  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId, selectedAddressIds, selectedCircleLayerId, selectedOutlineLayerId, selectionOnly]);
+  }, [map, features, zoomLevel, onBuildingClick, statusFilters, campaignId, getSupabase, onAddToCRM, showOrphans, showAddressLabels, townhomeAddressIds, footprintStatusColors, addressStateOverrides, isDarkMap, assignmentColorByAddressId, selectedAddressIds, selectedCircleLayerId, selectedOutlineLayerId, selectionOnly]);
 
   // Update color and filter when statusFilters or campaignId changes
   useEffect(() => {

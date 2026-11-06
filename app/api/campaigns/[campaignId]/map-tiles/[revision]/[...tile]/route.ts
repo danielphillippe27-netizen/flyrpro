@@ -3,6 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveCachedTileUser, ensureCachedCampaignAccess, getCachedPmtilesArchive } from '@/app/api/campaigns/_utils/tile-cache';
+import { readTownhomeFootprints } from '@/lib/services/TownhomeFootprints';
 import { readCanonicalTileArtifact } from '@/lib/services/CanonicalTileArtifacts';
 
 export const runtime = 'nodejs';
@@ -18,6 +19,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ cam
   try {
     const artifact = await readCanonicalTileArtifact(db, campaignId, revision);
     if (!artifact) return NextResponse.json({ error: 'Geometry revision not found' }, { status: 404 });
+    if (tile.length === 1 && tile[0] === 'townhome-footprints') {
+      const ids = request.nextUrl.searchParams.getAll('id');
+      if (!ids.length || ids.length > 200 || ids.some(id => !id.trim() || id.length > 256)) {
+        return NextResponse.json({ error: 'Request 1–200 building identities' }, { status: 400 });
+      }
+      if (!artifact.geometry_key) return NextResponse.json({ error: 'Exact building geometry unavailable' }, { status: 404 });
+      return NextResponse.json(await readTownhomeFootprints(artifact.bucket, artifact.geometry_key, ids), { headers: privateHeaders });
+    }
     if (tile.length === 1 && (tile[0] === 'archive' || tile[0] === 'geometry')) {
       const key = tile[0] === 'geometry' ? artifact.geometry_key : artifact.archive_key;
       if (!key) return NextResponse.json({ error: 'Geometry package unavailable' }, { status: 404 });

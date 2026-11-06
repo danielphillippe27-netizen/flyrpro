@@ -23,7 +23,7 @@ export interface MapStatusConfig {
   color: string;
 }
 
-export const LIGHT_MAP_UNTOUCHED_COLOR = '#cfd8e3';
+export const LIGHT_MAP_UNTOUCHED_COLOR = '#b6d1e6';
 export const DARK_MAP_UNTOUCHED_COLOR = '#475569';
 
 export const HOT_LEAD_ADDRESS_STATUSES = [
@@ -74,7 +74,7 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   LEADS: {
     key: 'LEADS',
     label: 'Lead',
-    color: '#3b82f6',
+    color: '#2563eb',
   },
   HOT_LEADS: {
     key: 'HOT_LEADS',
@@ -83,8 +83,8 @@ export const MAP_STATUS_CONFIG: Record<MapStatusKey, MapStatusConfig> = {
   },
   TOUCHED: {
     key: 'TOUCHED',
-    label: 'Attempted',
-    color: '#f87171',
+    label: 'Visited / delivered',
+    color: '#22c55e',
   },
   NO_ONE_HOME: {
     key: 'NO_ONE_HOME',
@@ -126,7 +126,7 @@ export type AddressStatusValue =
 export const ADDRESS_STATUS_LABELS: Record<AddressStatusValue, string> = {
   none: 'None',
   no_answer: 'Attempted',
-  delivered: 'Attempted',
+  delivered: 'Delivered',
   talked: 'Talked to person',
   lead: 'Lead',
   interested: 'Lead',

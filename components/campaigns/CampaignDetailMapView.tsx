@@ -1,5 +1,7 @@
 'use client';
 
+import { TownhomeUnitsLayer, type TownhomeCoverage } from '@/components/map/TownhomeUnitsLayer';
+import { hasTownhomeHit, keepParcelsBelowHomes } from '@/lib/map/townhomeInteraction';
 import { StormTerritoryOverlay, useSavedStormTerritory } from '@/components/storm-maps/StormTerritoryOverlay';
 
 import { WorkspaceCoverageSummary, type WorkspaceCoverageSnapshot } from '@/components/campaigns/WorkspaceCoverageSummary';
@@ -29,6 +31,7 @@ import Lottie from 'lottie-react';
 import type { CampaignAddress, CampaignV2, CampaignParcel } from '@/types/database';
 import { MapBuildingsLayer, type MapBuildingsRenderState } from '@/components/map/MapBuildingsLayer';
 import { CampaignAddressPmtilesLayer } from '@/components/map/CampaignAddressPmtilesLayer';
+import { applyProvidedMapStatus } from '@/lib/map/providedMapStatus';
 import { CanonicalCampaignTilesLayer } from '@/components/map/CanonicalCampaignTilesLayer';
 import { isCanonicalTileBundle, type CanonicalClientTileBundle } from '@/lib/map/canonicalTileBundle';
 import type { BuildingFeatureCollection } from '@/types/map-buildings';
@@ -433,15 +436,11 @@ function safeGetSource(m: mapboxgl.Map, sourceId: string): boolean {
   }
 }
 
-function bringParcelLayersToFront(mapInstance: mapboxgl.Map) {
-  for (const layerId of [PARCEL_FILL_LAYER, PARCEL_LINE_LAYER, PARCEL_LABEL_LAYER]) {
-    try {
-      if (safeGetLayer(mapInstance, layerId)) {
-        mapInstance.moveLayer(layerId);
-      }
-    } catch {
-      // Layer order changes can race style swaps; the next idle pass retries.
-    }
+function keepParcelLayersBelowHomes(mapInstance: mapboxgl.Map) {
+  try {
+    keepParcelsBelowHomes(mapInstance, [PARCEL_FILL_LAYER, PARCEL_LINE_LAYER, PARCEL_LABEL_LAYER]);
+  } catch {
+    // A style reload can remove the layers; the next idle pass retries.
   }
 }
 
@@ -721,6 +720,7 @@ function linkedAddressIdsForParcelProperties(properties: Record<string, unknown>
   if (!properties) return [];
   return uniqueParcelStrings([
     parcelStringValue(properties.address_id),
+    parcelStringValue(properties.primary_address_id),
     parcelStringValue(properties.campaign_address_id),
     parcelStringValue(properties.campaignAddressId),
     ...stringListFromParcelProperty(properties.linked_address_ids),
@@ -822,6 +822,7 @@ export function CampaignDetailMapView({
   pointOverlays = [],
   initialMapViewMode = 'buildings',
   preferMapbox3D = false,
+  preserveProvidedStatuses = false,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -839,6 +840,7 @@ export function CampaignDetailMapView({
   pointOverlays?: MapPointOverlay[];
   initialMapViewMode?: InitialMapViewMode;
   preferMapbox3D?: boolean;
+  preserveProvidedStatuses?: boolean;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
@@ -921,6 +923,7 @@ export function CampaignDetailMapView({
   // Boundary: Snap to Roads and Raw vs Snapped toggle
   const [snapping, setSnapping] = useState(false);
   const [parcels, setParcels] = useState<CampaignParcel[]>([]);
+  const [townhomeCoverage, setTownhomeCoverage] = useState<TownhomeCoverage>({buildingIds:[],addressIds:[]});
   const [mapBundle, setMapBundle] = useState<CampaignMapBundle | null>(null);
   const parcelEnrichmentStatus = campaign?.parcel_enrichment_status ?? 'not_started';
   const campaignBbox =
@@ -995,8 +998,15 @@ export function CampaignDetailMapView({
     if (!visibleAddressIdSet) return mappedAddresses;
     return mappedAddresses.filter((address) => visibleAddressIdSet.has(address.id));
   }, [campaignId, mapBundle?.addresses, visibleAddressIdSet]);
+  const providedStatusById = useMemo(
+    () => new Map(addresses.map(address => [address.id, address])),
+    [addresses],
+  );
   const mapAddresses = useMemo(
     () => mergeBundleAddressesWithLiveState(bundleAddresses, visibleAddresses).map((address) => {
+      address = preserveProvidedStatuses
+        ? applyProvidedMapStatus(address, providedStatusById.get(address.id))
+        : address;
       const statusActor = Number(address.status_revision ?? 0) > 0
         ? address.last_action_by ?? null
         : null;
@@ -1010,7 +1020,7 @@ export function CampaignDetailMapView({
         is_teammate_owned: Boolean(userId && actor && actor !== userId),
       };
     }),
-    [bundleAddresses, editableAddressIds, userId, visibleAddresses],
+    [bundleAddresses, editableAddressIds, userId, visibleAddresses, preserveProvidedStatuses, providedStatusById],
   );
   // Only new/manual/moved pins remain as a small editable overlay. The immutable
   // campaign geometry stays in tiles while a new canonical revision is built.
@@ -1165,8 +1175,12 @@ export function CampaignDetailMapView({
   );
 
   const selectedParcelIds = useMemo(
-    () => uniqueParcelStrings([selectedParcelId, ...multiSelectedTargets.map((target) => target.parcelId)]),
-    [multiSelectedTargets, selectedParcelId],
+    () => {
+      const addresses = new Set([selectedAddressIdForCard, ...multiSelectedTargets.map(target => target.addressId)].filter(Boolean));
+      const linked = parcels.filter(parcel => linkedAddressIdsForParcelProperties(parcel.properties).some(id => addresses.has(id))).map(parcel => parcel.id);
+      return uniqueParcelStrings([selectedParcelId, ...multiSelectedTargets.map(target => target.parcelId), ...linked]);
+    },
+    [multiSelectedTargets, selectedParcelId, selectedAddressIdForCard, parcels],
   );
 
   useEffect(() => {
@@ -1629,11 +1643,8 @@ export function CampaignDetailMapView({
     };
   }, [campaignId]);
 
-  useEffect(() => {
-    if ((!SHOW_PARCEL_VIEW || !parcelsReady) && showParcelsOverlay) {
-      setShowParcelsOverlay(false);
-    }
-  }, [parcelsReady, showParcelsOverlay]);
+  // Keep the user's parcel preference while geometry is loading. An empty
+  // initial parcel array does not mean the overlay should be disabled.
 
   // Handle building click - opens LocationCard
   // For unit slices, addressId is passed to show specific unit
@@ -2892,13 +2903,14 @@ export function CampaignDetailMapView({
             'text-opacity': 0.9,
           },
         });
-        bringParcelLayersToFront(m);
+        keepParcelLayersBelowHomes(m);
       } catch (err) {
         console.error('Error adding parcels layer:', err);
       }
     };
 
     const onParcelClick = (event: mapboxgl.MapLayerMouseEvent) => {
+      if (hasTownhomeHit(m,event.point)) return;
       const feature = event.features?.[0];
       if (!feature?.properties) return;
       handleParcelClick(
@@ -3001,21 +3013,21 @@ export function CampaignDetailMapView({
     const m = map.current;
     if (!m || !mapLoaded || !showGeojsonParcels) return;
 
-    const promoteParcelLayers = () => {
-      bringParcelLayersToFront(m);
+    const positionParcelLayers = () => {
+      keepParcelLayersBelowHomes(m);
     };
 
-    promoteParcelLayers();
-    const frameId = window.requestAnimationFrame(promoteParcelLayers);
-    const timeoutId = window.setTimeout(promoteParcelLayers, 250);
-    m.on('idle', promoteParcelLayers);
-    m.on('styledata', promoteParcelLayers);
+    positionParcelLayers();
+    const frameId = window.requestAnimationFrame(positionParcelLayers);
+    const timeoutId = window.setTimeout(positionParcelLayers, 250);
+    m.on('idle', positionParcelLayers);
+    m.on('styledata', positionParcelLayers);
 
     return () => {
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
-      m.off('idle', promoteParcelLayers);
-      m.off('styledata', promoteParcelLayers);
+      m.off('idle', positionParcelLayers);
+      m.off('styledata', positionParcelLayers);
     };
   }, [mapLoaded, showGeojsonParcels, mapViewMode, resolvedMapStyle.key, mapBundleDataKey]);
 
@@ -3979,7 +3991,7 @@ export function CampaignDetailMapView({
             <CanonicalCampaignTilesLayer map={map.current} bundle={mapBundle.canonicalTiles}
               mapLoaded={mapLoaded} styleKey={resolvedMapStyle.key} mode={mapViewMode === 'addresses' ? 'addresses' : 'buildings'}
               addresses={mapAddresses} dark={theme === 'dark'} showParcels={showParcelsOverlay}
-              statusFilters={statusFilters} selectedIds={[selectedBuildingId, selectedAddressIdForCard, selectedParcelId].filter((id): id is string => Boolean(id))}
+              townhomeCoverage={townhomeCoverage} statusFilters={statusFilters} selectedIds={[selectedBuildingId, selectedAddressIdForCard, selectedParcelId].filter((id): id is string => Boolean(id))}
               hiddenBuildingIds={optimisticallyHiddenBuildingIds} deletedAddressIds={optimisticallyDeletedAddressIds}
               hiddenPinIds={tileDeltaAddresses.map((address) => address.id)}
               visibleAddressIds={visibleAddressIds} colorOverrides={demoAddressColorOverrides} onClick={handleMapTargetClick} />
@@ -4000,7 +4012,8 @@ export function CampaignDetailMapView({
               campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
               campaignBbox={campaignBbox}
               statusFilters={statusFilters}
-              showAddressLabels={false}
+              showAddressLabels
+              townhomeAddressIds={townhomeCoverage.addressIds}
               footprintStatusColors
               isDarkMap={theme === 'dark'}
               onBuildingClick={handleBuildingClick}
@@ -4015,6 +4028,8 @@ export function CampaignDetailMapView({
             addresses={mapBundle?.canonicalTiles ? tileDeltaAddresses : mapAddresses}
             campaignType={campaign?.type ?? null}
             statusFilters={statusFilters}
+            isDarkMap={theme === 'dark'}
+            selectedAddressIds={selectedAddressIdForCard ? [selectedAddressIdForCard] : []}
             deletedAddressIds={optimisticallyDeletedAddressIds}
             campaignBoundary={(campaign?.territory_boundary as GeoJSON.Polygon | null | undefined) ?? null}
             campaignBbox={campaignBbox}
@@ -4024,6 +4039,13 @@ export function CampaignDetailMapView({
               handleMapTargetClick({ buildingId, addressId, parcelId: null }, options);
             }}
           />}
+          <TownhomeUnitsLayer campaignId={campaignId} map={map.current} mapLoaded={mapLoaded} styleKey={resolvedMapStyle.key}
+            bundle={mapBundle?.canonicalTiles} buildings={bundleBuildings} addresses={mapAddresses}
+            visible={mapViewMode === 'buildings'} dark={theme === 'dark'} statusFilters={statusFilters}
+            selectedAddressId={selectedAddressIdForCard}
+            selectedAddressIds={multiSelectedTargets.flatMap(target => target.addressId ? [target.addressId] : [])} hiddenBuildingIds={optimisticallyHiddenBuildingIds}
+            deletedAddressIds={optimisticallyDeletedAddressIds} visibleAddressIds={visibleAddressIds}
+            onCoverageChange={setTownhomeCoverage} onClick={handleMapTargetClick} />
           {/* Location Card - floating card when building is clicked */}
           {locationCardOpen && selectedBuildingId && (
             <div className="absolute bottom-6 left-4 z-20">

@@ -1,5 +1,7 @@
 'use client';
 
+import { useInboxEnabled } from '@/lib/hooks/useInboxEnabled';
+
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
@@ -364,6 +366,7 @@ function MainLayoutContent({
   children: ReactNode;
   canUseInbox: boolean;
 }) {
+  const { enabled: inboxEnabled } = useInboxEnabled();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
@@ -376,8 +379,8 @@ function MainLayoutContent({
 
   const tabs: TabDef[] = (() => {
     const withAmbassadorPortal = (items: TabDef[]) => {
-      items = items.filter(tab => canUseInbox || tab.href !== '/inbox');
-      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,label:'Business inbox'}:tab);if (canUseInbox) items.splice(1,0,{href:'/messages',icon:Inbox,label:'Inbox'});}
+      items = items.filter(tab => (canUseInbox && inboxEnabled) || tab.href !== '/inbox');
+      if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,label:'Business inbox'}:tab);if (canUseInbox && inboxEnabled) items.splice(1,0,{href:'/messages',icon:Inbox,label:'Inbox'});}
       if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
         const index = items.findIndex(tab => tab.href === '/settings');
         items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];

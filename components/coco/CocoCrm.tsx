@@ -50,6 +50,7 @@ import { ContactDetailsEditor } from "./ContactDetailsEditor";
 import { EmailComposer } from "./EmailComposer";
 import { GmailClientImport } from "./GmailClientImport";
 import { AppleContactsReview } from "./AppleContactsReview";
+import { ContactListImport } from "./ContactListImport";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import "./coco.css";
@@ -265,7 +266,8 @@ function CocoWorkspace({
     [showAddTask, setShowAddTask] = useState(false),
     [savingNew, setSavingNew] = useState(false),
     [showGmailImport, setShowGmailImport] = useState(false),
-    [showAppleImport, setShowAppleImport] = useState(false);
+    [showAppleImport, setShowAppleImport] = useState(false),
+    [showListImport, setShowListImport] = useState(false);
   const [draftSources, setDraftSources] = useState<
     { id: string; label: string; href: string; excerpt: string }[]
   >([]);
@@ -1057,6 +1059,7 @@ function CocoWorkspace({
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><button className="contacts-import-button">Import <ChevronDown size={12} /></button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => setShowListImport(true)}>Import a list (CSV)</DropdownMenuItem>
                         <DropdownMenuItem disabled={integrationBusy} onSelect={() => setShowGmailImport(true)}>Google (Gmail)</DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => void importAppleContacts()}>Apple</DropdownMenuItem>
                       </DropdownMenuContent>
@@ -1869,6 +1872,14 @@ function CocoWorkspace({
                 {showAddClient ? "A NEW CONNECTION" : "ONE THING AT A TIME"}
               </span>
               <h2 id="contact-task-title">{showAddClient ? "Add Contact" : "Add a task"}</h2>
+              {showAddClient && (
+                <div className="contact-import-options">
+                  <button type="button" className="secondary" onClick={() => { setShowAddClient(false); setShowListImport(true); }}>Import a list (CSV)</button>
+                  <button type="button" className="secondary" onClick={() => { setShowAddClient(false); void importAppleContacts(); }}>Choose from Apple Contacts</button>
+                  <p className="muted">In WolfGrid for Mac, search and review Apple Contacts, skip or select people, add labels, then save your selection.</p>
+                  <p className="muted">Or enter a contact below.</p>
+                </div>
+              )}
               <form action={showAddClient ? addClient : addTask}>
                 {showAddClient ? (
                   <>
@@ -1944,6 +1955,14 @@ function CocoWorkspace({
               </form>
             </div>
           </div>
+        )}
+        {showListImport && (
+          <ContactListImport
+            userId={userId}
+            workspaceId={workspaceId}
+            onClose={() => setShowListImport(false)}
+            onImported={loadData}
+          />
         )}
         {showGmailImport && (
           <GmailClientImport

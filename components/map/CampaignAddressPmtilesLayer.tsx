@@ -3,6 +3,7 @@ import { useCardEngagement } from '@/lib/cards/useCardEngagement';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
+import { IOS_ADDRESS_HEIGHT, IOS_ADDRESS_BASE, IOS_ADDRESS_DEPTH } from '@/lib/map/iosMapPresentation';
 import type { CampaignAddress, CampaignType } from '@/types/database';
 import { getCampaignAddressMapStatus } from '@/lib/campaignStats';
 import {
@@ -43,6 +44,7 @@ type CampaignAddressPmtilesLayerProps = {
   campaignType?: CampaignType | null;
   statusFilters?: StatusFilters;
   deletedAddressIds?: string[];
+  selectedAddressIds?: string[];
   campaignBoundary?: GeoJSON.Polygon | null;
   campaignBbox?: [number, number, number, number] | null;
   styleKey?: string;
@@ -63,9 +65,8 @@ const SOURCE_ID = 'campaign-addresses-pmtiles-source';
 const GLOW_LAYER_ID = 'campaign-addresses-pmtiles-lead-glow';
 const CIRCLE_LAYER_ID = 'campaign-addresses-pmtiles-circle';
 const LABEL_LAYER_ID = 'campaign-addresses-pmtiles-label';
-const ADDRESS_LABEL_MIN_ZOOM = 16;
+const ADDRESS_LABEL_MIN_ZOOM = 17;
 const ADDRESS_CYLINDER_RADIUS_METERS = 2.6;
-const ADDRESS_CYLINDER_HEIGHT_METERS = 12;
 const ADDRESS_CYLINDER_COLOR = '#6b7280';
 const ADDRESS_LABEL_CAP_CLEARANCE_METERS = 0.08;
 const ADDRESS_LABEL_EXPRESSION: mapboxgl.Expression = [
@@ -122,6 +123,8 @@ function buildAddressStatusColorExpression(statusFilters: StatusFilters, isDarkM
     MAP_STATUS_CONFIG.NO_ONE_HOME.color,
     ['all', isTouched, statusFilters.TOUCHED],
     MAP_STATUS_CONFIG.TOUCHED.color,
+    ['all', isUntouched, ['boolean', ['feature-state', 'selected'], false]],
+    isDarkMap ? '#94a3b8' : '#475569',
     ['all', isUntouched, statusFilters.UNTOUCHED],
     untouchedAddressColor,
     ADDRESS_CYLINDER_COLOR,
@@ -426,6 +429,7 @@ export function CampaignAddressPmtilesLayer({
   addresses,
   statusFilters = DEFAULT_STATUS_FILTERS,
   deletedAddressIds = [],
+  selectedAddressIds = [],
   campaignBoundary,
   styleKey,
   isDarkMap = false,
@@ -597,18 +601,18 @@ export function CampaignAddressPmtilesLayer({
         minzoom: 10,
         filter: getLayerFilter('Polygon'),
         layout: {
-          // Rounded extrusion edges can create long spikes at low zoom.
-          'fill-extrusion-edge-radius': 0,
+          // iOS address cylinders use a small rounded cap.
+          'fill-extrusion-edge-radius': 0.2,
         },
         paint: {
           'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
-          'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
-          'fill-extrusion-base': 0,
+          'fill-extrusion-height': IOS_ADDRESS_HEIGHT,
+          'fill-extrusion-base': IOS_ADDRESS_BASE,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
           'fill-extrusion-rounded-roof': false,
-          'fill-extrusion-cast-shadows': false,
+          ...IOS_ADDRESS_DEPTH,
         },
       } as mapboxgl.AnyLayer);
 
@@ -638,13 +642,13 @@ export function CampaignAddressPmtilesLayer({
         filter: getLayerFilter('Point'),
         layout: {
           'text-field': ADDRESS_LABEL_EXPRESSION,
-          'text-size': ['interpolate', ['linear'], ['zoom'], ADDRESS_LABEL_MIN_ZOOM, 10, 22, 13],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 17, 11.5, 20, 15],
           'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
           'text-anchor': 'center',
-          'text-pitch-alignment': 'map',
-          'text-rotation-alignment': 'map',
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
+          'text-pitch-alignment': 'viewport',
+          'text-rotation-alignment': 'viewport',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
           'symbol-placement': 'point',
           'symbol-z-order': 'auto',
           'symbol-z-elevate': true,
@@ -751,18 +755,18 @@ export function CampaignAddressPmtilesLayer({
         minzoom: source.minzoom,
         filter: getLayerFilter('Polygon'),
         layout: {
-          // Rounded extrusion edges can create long spikes at low zoom.
-          'fill-extrusion-edge-radius': 0,
+          // iOS address cylinders use a small rounded cap.
+          'fill-extrusion-edge-radius': 0.2,
         },
         paint: {
           'fill-extrusion-color': addressColorExpression,
           'fill-extrusion-opacity': 0.96,
-          'fill-extrusion-height': ADDRESS_CYLINDER_HEIGHT_METERS,
-          'fill-extrusion-base': 0,
+          'fill-extrusion-height': IOS_ADDRESS_HEIGHT,
+          'fill-extrusion-base': IOS_ADDRESS_BASE,
           'fill-extrusion-vertical-gradient': true,
           'fill-extrusion-emissive-strength': 0.45,
           'fill-extrusion-rounded-roof': false,
-          'fill-extrusion-cast-shadows': false,
+          ...IOS_ADDRESS_DEPTH,
         },
       } as mapboxgl.AnyLayer);
 
@@ -792,13 +796,13 @@ export function CampaignAddressPmtilesLayer({
         filter: ['in', ['geometry-type'], ['literal', ['Point', 'Polygon']]] as mapboxgl.Expression,
         layout: {
           'text-field': ADDRESS_LABEL_EXPRESSION,
-          'text-size': ['interpolate', ['linear'], ['zoom'], ADDRESS_LABEL_MIN_ZOOM, 10, 22, 13],
+          'text-size': ['interpolate', ['linear'], ['zoom'], 17, 11.5, 20, 15],
           'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Regular'],
           'text-anchor': 'center',
-          'text-pitch-alignment': 'map',
-          'text-rotation-alignment': 'map',
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
+          'text-pitch-alignment': 'viewport',
+          'text-rotation-alignment': 'viewport',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
           'symbol-placement': 'point',
           'symbol-z-order': 'auto',
         },
@@ -982,7 +986,7 @@ export function CampaignAddressPmtilesLayer({
     if (!map || !visible || !map.getSource(SOURCE_ID)) return;
 
     for (const address of renderAddresses) {
-      const state = getStatusState(address);
+      const state = { ...getStatusState(address), selected: selectedAddressIds.includes(address.id) };
       const candidateIds = Array.from(new Set([
         address.id,
         address.source_id,
@@ -1005,7 +1009,7 @@ export function CampaignAddressPmtilesLayer({
         }
       }
     }
-  }, [map, manifestSource, renderAddresses, styleKey, visible]);
+  }, [map, manifestSource, renderAddresses, selectedAddressIds, styleKey, visible]);
 
   return null;
 }

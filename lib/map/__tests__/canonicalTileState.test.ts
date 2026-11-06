@@ -25,12 +25,12 @@ assert.deepEqual(changed.sort(), ['buildings/building:house-1', 'parcels/parcel:
   'addresses/address:home-1', 'address_circles/address:home-1', 'building_units/address:home-1'].sort());
 assert.equal(writes.find((w) => w.id === 'address:home-2')?.state.status, 'UNTOUCHED');
 assert.equal(writes.find((w) => w.id === 'address:unit-1')?.state.status, 'UNTOUCHED', 'Sibling units keep their own colour');
-assert.equal(writes.find((w) => w.id === 'building:house-1')?.state.color, '#3b82f6');
+assert.equal(writes.find((w) => w.id === 'building:house-1')?.state.color, '#2563eb');
 let repeats = 0; diff.apply(writes, () => repeats++); assert.equal(repeats, 0);
 diff.reset(); diff.apply(writes, () => repeats++); assert.equal(repeats, writes.length, 'Style reset replays every state');
 const scan = canonicalTileStates(bundle, [home('home-1', 'talked', 1), untouched[1], untouched[2]]);
 assert.equal(scan.find((w) => w.id === 'building:house-1')?.state.color, '#8b5cf6');
-assert.equal(scan.find((w) => w.id === 'address:unit-1')?.state.color, '#cfd8e3');
+assert.equal(scan.find((w) => w.id === 'address:unit-1')?.state.color, '#b6d1e6');
 const deleted = canonicalTileStates(bundle, untouched, { deletedAddressIds: ['home-1'] });
 assert.equal(deleted.find((w) => w.id === 'address:home-1')?.state.hidden, true);
 assert.equal(deleted.find((w) => w.id === 'building:house-1')?.state.hidden, false, 'Other address still occupies shared home');
@@ -52,3 +52,10 @@ assert.equal(reassigned.find(w => w.id === 'building:house-2')?.state.status, 'L
 const addressSourceOnly = canonicalTileStates(bundle, [{ ...home('source-home', 'lead'), gers_id: 'house-2' }]);
 assert.equal(addressSourceOnly.find(w => w.id === 'building:house-2')?.state.status, 'UNTOUCHED');
 console.log('PASS: post-snapshot reverse-geocoded home, selection, deletion, reassignment, address-source isolation');
+
+const qrOff = canonicalTileStates(bundle, [home('home-1', 'lead', 1)], { filters: { QR_SCANNED: false, LEADS: true } as never });
+assert.equal(qrOff.find(w => w.id === 'building:house-1')?.state.status, 'LEADS', 'Disabling QR reveals the underlying visit state');
+const primaryParcel = { ...bundle, records: { ...bundle.records, parcels: [record('parcel', 'primary-lot', { primary_address_id: 'home-1' })] } };
+const primaryWrites = canonicalTileStates(primaryParcel, [home('home-1', 'delivered')], { selectedIds: ['home-1'] });
+assert.equal(primaryWrites.find(w => w.id === 'parcel:primary-lot')?.state.color, '#22c55e');
+assert.equal(primaryWrites.find(w => w.id === 'parcel:primary-lot')?.state.selected, true);

@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/client';
-import { getNextFarmCycleNumber } from '@/lib/farms/analytics';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import type { FarmActivitySession } from '@/lib/farms/session-totals';
 import type {
@@ -337,13 +336,10 @@ export class FarmTouchService {
     notes?: string;
     homesTarget?: number | null;
   }): Promise<FarmTouch> {
-    const [existingTouches, farm] = await Promise.all([
-      this.fetchTouches(payload.farmId).catch(() => []),
-      FarmService.fetchFarm(payload.farmId).catch(() => null),
-    ]);
-    const resolvedCycleNumber =
-      payload.cycleNumber ??
-      getNextFarmCycleNumber(existingTouches, farm?.touches_per_interval ?? farm?.frequency ?? 1);
+    const farm = await FarmService.fetchFarm(payload.farmId);
+    if (!farm?.active_cycle_number) throw new Error('Cycle settings are unavailable. Refresh the farm before creating a session.');
+    // Explicit cycle assignments are retained for planned and offline sessions.
+    const resolvedCycleNumber = payload.cycleNumber ?? farm.active_cycle_number;
     const scheduledDate = payload.scheduledDate ?? new Date().toISOString();
     const legacyDate = formatLegacyTouchDate(scheduledDate);
     const resolvedTitle = payload.title?.trim() || getDefaultFarmTouchTitle(payload.mode);
@@ -366,7 +362,6 @@ export class FarmTouchService {
     const fallbackPayload: Record<string, unknown> = { ...basePayload };
     const removableColumns = [
       'workspace_id',
-      'cycle_number',
       'mode',
       'type',
       'title',

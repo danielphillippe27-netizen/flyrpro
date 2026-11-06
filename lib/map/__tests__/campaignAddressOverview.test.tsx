@@ -43,7 +43,7 @@ async function main() {
   assert(dots,'Local campaign addresses get overview dots as well as cylinders');
   assert.equal(dots.type,'circle');
   assert((dots.minzoom??0)<7.91,'Dots are visible at the reported regional zoom');
-  assert.equal(dots.maxzoom,16,'Overview dots give way to detailed cylinders at street level');
+  assert.equal(dots.maxzoom,17,'Overview dots give way to detailed cylinders at street level');
   assert.deepEqual(dots.filter[1],['==',['geometry-type'],'Point']);
   assert.equal(sources.get(dots.source)!.data.features.filter((f)=>f.geometry.type==='Point').length,2);
   await act(async()=>{for(const fn of events.get('click')??[])fn({point:{x:1,y:1},originalEvent:{}});});

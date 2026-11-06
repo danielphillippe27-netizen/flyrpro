@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { CanonicalGeometryPack, encodeCanonicalGeometryPack } from '../CanonicalGeometryPack';
+import { selectTownhomeFootprints } from '../TownhomeFootprints';
+const geometry:GeoJSON.Polygon={type:'Polygon',coordinates:[[[0,0],[1,0],[1,1],[0,0]]]};
+const pack=new CanonicalGeometryPack(encodeCanonicalGeometryPack([{id:'building:row',geometry},{id:'parcel:lot',geometry}]));
+const result=selectTownhomeFootprints(pack,['row','row','lot','missing']);
+assert.equal(result.features.length,1);
+assert.equal(result.features[0].properties?.building_id,'row');
+assert.deepEqual(result.features[0].geometry,geometry);
+console.log('PASS: exact footprint extraction, duplicate requests, missing identity and parcel/building namespace isolation');

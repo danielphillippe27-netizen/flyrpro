@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { hasTownhomeHit, keepParcelsBelowHomes } from '../townhomeInteraction';
+let layers=[{id:'homes',type:'fill-extrusion'},{id:'townhome-live-fill',type:'fill-extrusion'},{id:'parcel-fill',type:'fill'},{id:'parcel-line',type:'line'}];
+let moves=0;
+const map={getStyle:()=>({layers}),getLayer:(id:string)=>layers.find(l=>l.id===id),queryRenderedFeatures:()=>[{properties:{address_id:'unit-2'}}],moveLayer:(id:string,before:string)=>{moves++;const layer=layers.find(l=>l.id===id)!;layers=layers.filter(l=>l.id!==id);layers.splice(layers.findIndex(l=>l.id===before),0,layer);keepParcelsBelowHomes(map as never,['parcel-fill','parcel-line']);}};
+assert(hasTownhomeHit(map as never,{} as never),'Unit hit wins over its parcel and shared building');
+keepParcelsBelowHomes(map as never,['parcel-fill','parcel-line']);
+assert.deepEqual(layers.map(l=>l.id),['parcel-fill','parcel-line','homes','townhome-live-fill']);
+assert.equal(moves,2,'Reentrant style events do not loop');
+keepParcelsBelowHomes(map as never,['parcel-fill','parcel-line']);
+assert.equal(moves,2,'Idle events leave correct order alone');
+console.log('PASS: unit click priority and late parcel underlay alignment without style-event loops');

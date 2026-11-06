@@ -88,7 +88,7 @@ export type FarmDashboardAnalytics = {
 };
 
 type BuildFarmDashboardAnalyticsArgs = {
-  farm: Pick<Farm, 'touches_per_interval' | 'touches_interval' | 'frequency'> | null;
+  farm: Pick<Farm, 'touches_per_interval' | 'touches_interval' | 'frequency' | 'active_cycle_number'> | null;
   addresses: FarmAddress[];
   touches: FarmTouch[];
   leads: FarmLead[];
@@ -173,18 +173,6 @@ export function resolveFarmTouchesWithCycles(
   }));
 }
 
-export function getNextFarmCycleNumber(
-  touches: FarmTouch[],
-  touchesPerInterval: number
-): number {
-  void touchesPerInterval;
-  const resolvedTouches = resolveFarmTouchesWithCycles(touches, touchesPerInterval);
-  if (resolvedTouches.length === 0) return 1;
-
-  const currentCycleNumber = Math.max(...resolvedTouches.map((touch) => touch.resolvedCycleNumber), 1);
-  return currentCycleNumber + 1;
-}
-
 export function buildFarmDashboardAnalytics({
   farm,
   addresses,
@@ -200,7 +188,7 @@ export function buildFarmDashboardAnalytics({
   const resolvedTouches = resolveFarmTouchesWithCycles(touches, touchesPerInterval).sort(
     (left, right) => toTimestamp(right.effectiveDate) - toTimestamp(left.effectiveDate)
   );
-  const currentCycleNumber = Math.max(...resolvedTouches.map((touch) => touch.resolvedCycleNumber), 1);
+  const currentCycleNumber = farm?.active_cycle_number ?? 1;
   const currentCycleLabel = `Cycle ${currentCycleNumber}`;
   const currentCycleTouches = resolvedTouches.filter((touch) => touch.resolvedCycleNumber === currentCycleNumber);
   const currentCycleTouchIds = currentCycleTouches.map((touch) => touch.id);

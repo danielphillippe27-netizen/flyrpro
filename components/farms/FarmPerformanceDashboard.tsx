@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { MessageSquare, Target, Users } from "lucide-react";
+import { DoorOpen, MessageSquare, Target, Users } from "lucide-react";
 import type { FarmAddress, FarmLead, FarmTouchAddress } from "@/types/database";
 import type { EnrichedFarmTouch } from "@/lib/farms/analytics";
 import { buildFarmPerformance } from "@/lib/farms/performance";
@@ -21,7 +21,6 @@ export function FarmPerformanceDashboard({
   leads,
   currentCycle,
   scope,
-  onScopeChange,
 }: {
   name: string;
   addresses: FarmAddress[];
@@ -31,7 +30,6 @@ export function FarmPerformanceDashboard({
   leads: FarmLead[];
   currentCycle: number;
   scope: "current_cycle" | "all_time";
-  onScopeChange: (scope: "current_cycle" | "all_time") => void;
 }) {
   const data = useMemo(
     () =>
@@ -47,6 +45,12 @@ export function FarmPerformanceDashboard({
   const sessionTotals = farmSessionTotals(activitySessions, touches, scope === "current_cycle" ? currentCycle : undefined);
   const activity = sessionTotals ?? data.total;
   const metrics = [
+    {
+      label: "Doors Knocked",
+      value: number(activity.doors),
+      hint: "Recorded door activity, including repeat visits",
+      icon: DoorOpen,
+    },
     {
       label: "Conversations",
       value: number(activity.conversations),
@@ -82,42 +86,23 @@ export function FarmPerformanceDashboard({
               {name}
             </h2>
           </div>
-          <div
-            className="inline-flex w-fit rounded-lg bg-muted/50 p-1"
-            role="group"
-            aria-label="Dashboard scope"
-          >
-            {(["current_cycle", "all_time"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={scope === value}
-                onClick={() => onScopeChange(value)}
-                className={`rounded-md px-3 py-2 text-xs font-medium transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${scope === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                {value === "current_cycle"
-                  ? `Cycle ${currentCycle}`
-                  : "All Time"}
-              </button>
-            ))}
-          </div>
         </div>
         <div className="relative mt-5">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">
-              Doors knocked
+              Farm pass progress
             </p>
             <p className="mt-2 text-5xl font-semibold tracking-tighter tabular-nums sm:text-6xl">
-              {number(activity.doors)}
+              {percent(addresses.length ? activity.doors / addresses.length : 0)}
             </p>
           </div>
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
           {scope === "current_cycle" ? `Cycle ${currentCycle}` : "All time"} · {number(addresses.length)} homes in this farm
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">Recorded door activity, including repeat visits.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Door knocks as a percentage of one farm pass, including repeat visits.</p>
       </section>
-      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4">
         {metrics.map(({ label, value, hint, icon: Icon }) => (
           <section key={label} className={`${panel} p-5 sm:p-6`}>
             <div className="flex items-center justify-between gap-2 text-muted-foreground">
