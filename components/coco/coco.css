@@ -5161,3 +5161,8 @@
 .relationship-timeline time { display:block; font-size:12px; opacity:.7; margin-top:4px; }
 .relationship-timeline p { white-space:pre-wrap; overflow-wrap:anywhere; }
 .relationship-hint { font-size:12px; opacity:.75; }
+.coco-crm .relationship-tools { flex-basis:100%; min-width:0; }
+.coco-crm .relationship-panel button,.coco-crm .relationship-tools button { padding:9px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); font:inherit; cursor:pointer; }
+.coco-crm .relationship-panel button.primary,.coco-crm .relationship-tools button.primary { background:var(--primary); color:var(--primary-foreground, #fff); }
+.coco-crm .relationship-panel button:disabled,.coco-crm .relationship-tools button:disabled { opacity:.45; cursor:not-allowed; }
+.coco-crm .relationship-panel button:focus-visible,.coco-crm .relationship-tools button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }

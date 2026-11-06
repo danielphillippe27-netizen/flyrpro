@@ -54,7 +54,7 @@ begin
  elsif command='outreach' then
  select array_agg(distinct value::uuid) into ids from jsonb_array_elements_text(payload->'ids');
  if coalesce(cardinality(ids),0) not between 1 and 500 then raise exception 'Select 1 to 500 contacts';end if;
- perform 1 from public.contacts where id=any(ids) order by id for update;
+ perform 1 from public.contacts where id=any(ids) and user_id=auth.uid() and workspace_id=ws order by id for update;
  if exists(select 1 from unnest(ids) requested(id) where not exists(select 1 from public.contacts c where c.id=requested.id and c.user_id=auth.uid() and c.workspace_id=ws)) then raise exception 'Contact unavailable' using errcode='42501';end if;
  req:=(payload->>'requestId')::uuid;v_kind:=payload->>'kind';v_title:=trim(payload->>'title');v_body:=payload->>'body';at_time:=(payload->>'at')::timestamptz;
  if req is null or v_kind is null or v_kind not in('follow-up','letter-prepared','letter-mailed','call','email','text','visit','note') or coalesce(length(v_title),0) not between 1 and 200 or v_body is null or length(v_body)>10000 or at_time is null then raise exception 'Invalid outreach';end if;
