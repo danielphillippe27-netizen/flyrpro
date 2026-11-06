@@ -20,4 +20,3 @@ export function getRangeForPreset(preset: RangePreset, now: Date = new Date()): 
   }
   return { start: start.toISOString(), end: end.toISOString() };
 }
-
