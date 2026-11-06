@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { Home, MessageSquare, Target, Users } from "lucide-react";
-import type { FarmAddress, CampaignAddress, FarmLead, FarmTouchAddress } from "@/types/database";
+import { MessageSquare, Target, Users } from "lucide-react";
+import type { FarmAddress, FarmLead, FarmTouchAddress } from "@/types/database";
 import type { EnrichedFarmTouch } from "@/lib/farms/analytics";
 import { buildFarmPerformance } from "@/lib/farms/performance";
 import { farmSessionTotals, type FarmActivitySession } from "@/lib/farms/session-totals";
@@ -15,7 +15,6 @@ const panel = "rounded-2xl border border-border/60 bg-card shadow-sm";
 export function FarmPerformanceDashboard({
   name,
   addresses,
-  campaignAddresses,
   touches,
   outcomes,
   activitySessions,
@@ -26,7 +25,6 @@ export function FarmPerformanceDashboard({
 }: {
   name: string;
   addresses: FarmAddress[];
-  campaignAddresses: CampaignAddress[];
   touches: EnrichedFarmTouch[];
   outcomes: FarmTouchAddress[];
   activitySessions: FarmActivitySession[];
@@ -46,29 +44,9 @@ export function FarmPerformanceDashboard({
       }),
     [addresses, touches, outcomes, leads, currentCycle, scope],
   );
-  const campaignVisited = useMemo(() => new Set(campaignAddresses.filter((home) => home.visited).map((home) => home.id)), [campaignAddresses]);
-  const outcomeHomes = useMemo(() => {
-    const sessionIds = new Set(touches.map((touch) => touch.id));
-    return new Set(outcomes.filter((outcome) => sessionIds.has(outcome.farm_touch_id) && outcome.status !== "none" && outcome.status !== "do_not_knock" && Number.isFinite(Date.parse(outcome.occurred_at)) && Date.parse(outcome.occurred_at) <= Date.now()).map((outcome) => outcome.farm_address_id));
-  }, [outcomes, touches]);
-  const additionalHomes = scope === "all_time" ? addresses.filter((home) => home.campaign_address_id && campaignVisited.has(home.campaign_address_id) && !outcomeHomes.has(home.id)).length : 0;
-  const homesVisited = data.total.homes + additionalHomes;
-  const coverage = addresses.length ? homesVisited / addresses.length : 0;
   const sessionTotals = farmSessionTotals(activitySessions, touches, scope === "current_cycle" ? currentCycle : undefined);
   const activity = sessionTotals ?? data.total;
   const metrics = [
-    {
-      label: "Door Attempts",
-      value: number(activity.doors),
-      hint: sessionTotals ? "Recorded session activity · Includes repeat visits" : "Recorded address-level attempts",
-      icon: Home,
-    },
-    {
-      label: "Confirmed Unique Homes",
-      value: number(homesVisited),
-      hint: "Homes with saved visit records",
-      icon: Home,
-    },
     {
       label: "Conversations",
       value: number(activity.conversations),
@@ -127,37 +105,19 @@ export function FarmPerformanceDashboard({
         <div className="relative mt-5">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">
-              Farm coverage
+              Doors knocked
             </p>
             <p className="mt-2 text-5xl font-semibold tracking-tighter tabular-nums sm:text-6xl">
-              {percent(coverage)}
+              {number(activity.doors)}
             </p>
           </div>
         </div>
-        <div
-          className="relative mt-4 h-2 overflow-hidden rounded-full bg-muted"
-          role="progressbar"
-          aria-label="Farm coverage"
-          aria-valuenow={Math.round(coverage * 100)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div
-            className="h-full rounded-full bg-[#E33449] transition-[width] duration-500 motion-reduce:transition-none"
-            style={{ width: `${coverage * 100}%` }}
-          />
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {scope === "current_cycle"
-            ? `Coverage in cycle ${currentCycle}`
-            : "Coverage across all cycles"}{" "}
-          · Each home counted once
+        <p className="mt-3 text-sm text-muted-foreground">
+          {scope === "current_cycle" ? `Cycle ${currentCycle}` : "All time"} · {number(addresses.length)} homes in this farm
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Coverage uses saved home records. Session totals can include repeat visits and visits without a synced home record.
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">Recorded door activity, including repeat visits.</p>
       </section>
-      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-3">
         {metrics.map(({ label, value, hint, icon: Icon }) => (
           <section key={label} className={`${panel} p-5 sm:p-6`}>
             <div className="flex items-center justify-between gap-2 text-muted-foreground">

@@ -1261,7 +1261,6 @@ export default function FarmPage() {
         <TabsContent value="overview" className="mt-1 space-y-4">
           <FarmPerformanceDashboard
             name={farm.name}
-            campaignAddresses={linkedCampaignAddresses}
             addresses={addresses}
             touches={resolvedTouches}
             outcomes={touchOutcomes}
@@ -1274,11 +1273,7 @@ export default function FarmPage() {
           <DurhamCommercialReview farmId={farm.id} />
           <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
           <FarmTouchPlan
-            campaignAddresses={linkedCampaignAddresses}
-            addresses={addresses}
-            outcomes={touchOutcomes}
             drafts={planDrafts}
-            touches={resolvedTouches.map(touch => ({ ...touch, cycle_number: touch.resolvedCycleNumber }))}
             saving={savingPlan}
             message={planMessage}
             error={planError}

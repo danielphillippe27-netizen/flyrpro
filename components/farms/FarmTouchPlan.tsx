@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { FarmAddress, FarmTouchAddress, CampaignAddress, FarmSessionMode, FarmTouch } from "@/types/database";
+import type { FarmSessionMode } from "@/types/database";
 
 import {
   type PlannerTouchDraft,
@@ -23,10 +23,6 @@ const MODES: Record<FarmSessionMode, string> = {
 
 export function FarmTouchPlan({
   drafts,
-  touches,
-  addresses,
-  outcomes,
-  campaignAddresses,
   saving,
   message,
   error,
@@ -37,10 +33,6 @@ export function FarmTouchPlan({
   onSave,
 }: {
   drafts: PlannerTouchDraft[];
-  touches: FarmTouch[];
-  addresses: FarmAddress[];
-  campaignAddresses: CampaignAddress[];
-  outcomes: FarmTouchAddress[];
   saving: boolean;
   message: string;
   error?: string;
@@ -89,48 +81,8 @@ export function FarmTouchPlan({
     setPlanOpen(true);
     onAdd();
   }
-  const now = Date.now();
-  const homeIds = new Set(addresses.map((address) => address.id));
-  const sessionIds = new Set(touches.filter((touch) => ["doorknock", "flyer", "pop_by"].includes(touch.mode ?? "doorknock")).map((touch) => touch.id));
-  const firstVisits = new Map<string, number>();
-  const visitKeys = new Set<string>();
-  for (const outcome of outcomes) {
-    const time = Date.parse(outcome.occurred_at);
-    if (!homeIds.has(outcome.farm_address_id) || !sessionIds.has(outcome.farm_touch_id) ||
-        outcome.status === "none" || outcome.status === "do_not_knock" ||
-        !Number.isFinite(time) || time > now) continue;
-    firstVisits.set(outcome.farm_address_id, Math.min(firstVisits.get(outcome.farm_address_id) ?? Infinity, time));
-    visitKeys.add(`${outcome.farm_touch_id}:${outcome.farm_address_id}`);
-  }
-  const visitTimes = [...firstVisits.values()].sort((a, b) => a - b);
-  const campaignVisited = new Set(campaignAddresses.filter((address) => address.visited).map((address) => address.id));
-  const historicalHomes = addresses.filter((address) => address.campaign_address_id && campaignVisited.has(address.campaign_address_id) && !firstVisits.has(address.id)).length;
-  const totalHomes = homeIds.size;
-  const visitedHomes = visitTimes.length + historicalHomes;
-  const earliest = visitTimes[0] ?? now;
-  const min = Math.min(earliest, now - 86400000);
-  const x = (time: number) => 40 + ((time - min) / Math.max(now - min, 1)) * 920;
-  const y = (count: number) => 210 - (count / Math.max(totalHomes, 1)) * 180;
-  const points = `40,210 ${visitTimes.map((time, index) => `${x(time)},${y(index + 1)}`).join(" ")} 960,${y(visitTimes.length)}`;
   return (
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-2xl border border-border bg-card p-5">
-        <h2 className="text-xl font-semibold">Homes visited over time</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Each home counts once toward coverage. Repeat visits are included in the total.</p>
-        <div className="mt-4 flex items-baseline gap-2">
-          <span className="text-3xl font-semibold tabular-nums">{visitedHomes.toLocaleString()} / {totalHomes.toLocaleString()}</span>
-          <span className="text-sm text-muted-foreground">homes visited · {totalHomes ? Math.round(visitedHomes / totalHomes * 100) : 0}% · {historicalHomes ? "At least " : ""}{(visitKeys.size + historicalHomes).toLocaleString()} total visits</span>
-        </div>
-        {historicalHomes > 0 && <p className="mt-2 text-xs text-muted-foreground">{historicalHomes} linked campaign homes have no dated Farm visit history and are included in the total, but not the timeline.</p>}
-        <svg viewBox="0 0 1000 240" className="mt-4 w-full" role="img" aria-label={`${visitedHomes} of ${totalHomes} homes visited over time`}>
-          {[0, 0.25, 0.5, 0.75, 1].map((fraction) => <g key={fraction}>
-            <line x1="40" x2="960" y1={y(totalHomes * fraction)} y2={y(totalHomes * fraction)} stroke="currentColor" className="text-border" />
-            <text x="32" y={y(totalHomes * fraction) + 4} textAnchor="end" fill="currentColor" className="text-muted-foreground" fontSize="11">{Math.round(totalHomes * fraction)}</text>
-          </g>)}
-          <polyline points={points} fill="none" stroke="var(--primary)" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-          <text x="960" y="235" textAnchor="end" fill="currentColor" className="text-muted-foreground" fontSize="11">TODAY</text>
-        </svg>
-      </section>
       <section className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="flex items-center gap-3 p-5">
           <Button
