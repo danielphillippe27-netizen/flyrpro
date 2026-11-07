@@ -1356,7 +1356,7 @@ export default function FarmPage() {
               contacts={contacts}
               onDataChanged={() => loadData(userId)}
               className="h-full rounded-none border-0"
-              toolbarContent={<Badge variant="secondary">{analytics.currentCycleLabel}</Badge>}
+              toolbarContent={<Badge variant="secondary">Current progress</Badge>}
               showOutcomeControls={false}
             />
         </TabsContent>
@@ -1368,7 +1368,7 @@ export default function FarmPage() {
               <Button size="sm" variant="outline" onClick={() => setChartSessionIds(null)}>Show all activity</Button>
             </div>
             {resolvedTouches.filter(touch => chartSessionIds.includes(touch.id)).map(touch => <div key={touch.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
-              <div><p className="text-sm font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p><p className="mt-1 text-xs text-muted-foreground">Cycle {touch.resolvedCycleNumber} · {formatDateLabel(touch.started_at ?? touch.scheduled_date)}</p></div>
+              <div><p className="text-sm font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p><p className="mt-1 text-xs text-muted-foreground">{formatDateLabel(touch.started_at ?? touch.scheduled_date)}</p></div>
               <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{touch.status.replace('_', ' ')}</Badge>{touch.status === 'scheduled' && <Button size="sm" variant="outline" onClick={() => void handleStartSession(touch)}>Start session</Button>}{touch.status === 'in_progress' && <Button size="sm" variant="outline" onClick={() => handleOpenComplete(touch)}>Complete session</Button>}</div>
             </div>)}
           </section>}
@@ -1792,7 +1792,7 @@ export default function FarmPage() {
                   <FarmCycleSettings farm={farm} touches={resolvedTouches} outcomes={touchOutcomes} onChanged={() => loadData(userId)} />
                   <section className={settingsStyles.section} aria-labelledby="farm-schedule-heading">
                     <h3 id="farm-schedule-heading">Schedule &amp; coverage</h3>
-                    <p className={settingsStyles.description}>Choose when to start and how many homes to reach each cycle.</p>
+                    <p className={settingsStyles.description}>Choose your visit schedule and home target. Scheduling never starts a new round.</p>
                   <div className="space-y-2">
                     <Label htmlFor="configStartDate">Start date</Label>
                     <Input
@@ -1805,7 +1805,7 @@ export default function FarmPage() {
 
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
                     <div className="space-y-2">
-                      <Label htmlFor="configTouchesPerInterval">Target homes per cycle</Label>
+                      <Label htmlFor="configTouchesPerInterval">Target homes per round</Label>
                       <Input
                         id="configTouchesPerInterval"
                         type="number"
@@ -1827,7 +1827,7 @@ export default function FarmPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="configCadence">Repeat cycle</Label>
+                      <Label htmlFor="configCadence">Visit schedule</Label>
                       <Select
                         value={configTouchesInterval}
                         onValueChange={(value) =>
@@ -1853,7 +1853,7 @@ export default function FarmPage() {
                     <div className="space-y-1">
                       <h3 id="farm-goals-heading">Goal tracking</h3>
                       <p className="text-sm text-muted-foreground">
-                        One cycle equals one planned area hit. Track either homes reached or session volume against that cycle.
+                        Track homes reached or sessions. Progress stays in the current round until you explicitly start another.
                       </p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px]">
@@ -1968,7 +1968,7 @@ export default function FarmPage() {
                         : 'No start date selected'}
                     </p>
                     <p className="text-muted-foreground">
-                      {`1 cycle / ${configTouchesInterval}`}
+                      {`Visits planned per ${configTouchesInterval}`}
                     </p>
                     <p className="text-muted-foreground">
                       {formatFarmGoal({
@@ -1986,7 +1986,7 @@ export default function FarmPage() {
                     </p>
                     <p className="text-muted-foreground">
                       {configCycleCompletionWindowDays.trim()
-                        ? `Complete each cycle within ${configCycleCompletionWindowDays.trim()} day${configCycleCompletionWindowDays.trim() === '1' ? '' : 's'}`
+                        ? `Aim to finish within ${configCycleCompletionWindowDays.trim()} day${configCycleCompletionWindowDays.trim() === '1' ? '' : 's'}`
                         : 'No completion window set'}
                     </p>
                     <p className="text-muted-foreground">
@@ -2040,7 +2040,7 @@ export default function FarmPage() {
                 id="sessionTitle"
                 value={sessionTitle}
                 onChange={(e) => setSessionTitle(e.target.value)}
-                placeholder="Cycle 1 Canada Post"
+                placeholder="Canada Post delivery"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">

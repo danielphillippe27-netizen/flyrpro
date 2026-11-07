@@ -161,8 +161,8 @@ export function resolveFarmTouchesWithCycles(
   });
 
   const resolvedById = new Map<string, number>();
-  ordered.forEach((touch, index) => {
-    const fallbackCycleNumber = index + 1;
+  ordered.forEach((touch) => {
+    const fallbackCycleNumber = 1;
     resolvedById.set(touch.id, Math.max(1, touch.cycle_number ?? fallbackCycleNumber));
   });
 
@@ -189,7 +189,7 @@ export function buildFarmDashboardAnalytics({
     (left, right) => toTimestamp(right.effectiveDate) - toTimestamp(left.effectiveDate)
   );
   const currentCycleNumber = farm?.active_cycle_number ?? 1;
-  const currentCycleLabel = `Cycle ${currentCycleNumber}`;
+  const currentCycleLabel = `Round ${currentCycleNumber}`;
   const currentCycleTouches = resolvedTouches.filter((touch) => touch.resolvedCycleNumber === currentCycleNumber);
   const currentCycleTouchIds = currentCycleTouches.map((touch) => touch.id);
   const completedTouches = resolvedTouches.filter((touch) => touch.status === 'completed');

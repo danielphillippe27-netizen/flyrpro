@@ -72,7 +72,7 @@ export function buildTouchPlanProgress(
 type SessionPayload = {
   farmId: string;
   workspaceId?: string | null;
-  cycleNumber: number;
+  cycleNumber?: number;
   mode: FarmSessionMode;
   title?: string;
   scheduledDate: string;
@@ -128,7 +128,7 @@ export async function saveTouchPlan({
       const created = await writer.createSession({
         farmId,
         workspaceId,
-        cycleNumber: draft.cycleNumber,
+
         mode: draft.mode,
         title: draft.title.trim() || undefined,
         scheduledDate: date,

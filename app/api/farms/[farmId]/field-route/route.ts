@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { createAdminClient } from '@/lib/supabase/server';
 import {
-  formatApiError,
   resolveBackingCampaignId,
   selectFarmCampaignRow,
   userCanAccessFarm,
@@ -44,22 +43,40 @@ export async function GET(
     }
 
     const campaignId = await resolveBackingCampaignId(admin, farm, hasLinkedCampaignColumn);
-    const { data, error } = await admin
-      .from('farm_addresses')
-      .select('id, campaign_address_id, formatted, latitude, longitude, visited_count, last_outcome_status')
-      .eq('farm_id', farm.id)
-      .not('latitude', 'is', null)
-      .not('longitude', 'is', null)
-      .order('street_name', { ascending: true })
-      .order('house_number', { ascending: true })
-      .limit(1000);
-
-    if (error) {
-      return NextResponse.json({ error: formatApiError(error) }, { status: 500 });
+    const { data: round, error: roundError } = await admin.from('farms').select('active_cycle_number').eq('id', farm.id).single();
+    if (roundError || !round?.active_cycle_number || !campaignId) {
+      return NextResponse.json({ error: 'Could not load saved progress. Refresh and retry.' }, { status: 503 });
+    }
+    const statuses = new Map<string, string>();
+    for (let offset = 0; ; offset += 1000) {
+      const { data: rows, error } = await admin.rpc('rpc_get_campaign_address_status_rows_for_farm_cycle', {
+        p_campaign_id: campaignId, p_cycle_number: round.active_cycle_number,
+      }).range(offset, offset + 999);
+      if (error) throw error;
+      for (const row of rows ?? []) statuses.set(row.campaign_address_id, row.status);
+      if ((rows?.length ?? 0) < 1000) break;
+    }
+    for (let offset = 0; ; offset += 1000) {
+      const { data: rows, error } = await admin.from('address_statuses').select('campaign_address_id,status')
+        .eq('campaign_id', campaignId).eq('status', 'do_not_knock').order('id').range(offset, offset + 999);
+      if (error) throw error;
+      for (const row of rows ?? []) statuses.set(row.campaign_address_id, row.status);
+      if ((rows?.length ?? 0) < 1000) break;
+    }
+    const data: FarmAddressRow[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data: rows, error } = await admin.from('farm_addresses')
+        .select('id, campaign_address_id, formatted, latitude, longitude, visited_count, last_outcome_status')
+        .eq('farm_id', farm.id).not('latitude', 'is', null).not('longitude', 'is', null)
+        .order('id').range(offset, offset + 999);
+      if (error) throw error;
+      data.push(...(rows ?? []));
+      if ((rows?.length ?? 0) < 1000) break;
     }
 
     const stops = ((data ?? []) as FarmAddressRow[]).flatMap((row) => {
       if (typeof row.latitude !== 'number' || typeof row.longitude !== 'number') return [];
+      const status = row.last_outcome_status === 'do_not_knock' ? 'do_not_knock' : statuses.get(row.campaign_address_id ?? '') ?? 'none';
       return [{
         id: row.id,
         addressId: row.campaign_address_id ?? row.id,
@@ -68,12 +85,13 @@ export async function GET(
         label: row.formatted || 'Farm address',
         latitude: row.latitude,
         longitude: row.longitude,
-        visited: Number(row.visited_count ?? 0) > 0,
-        status: row.last_outcome_status ?? null,
+        visited: !['none', 'untouched', 'do_not_knock'].includes(status),
+        status,
       }];
     });
 
     return NextResponse.json({
+      activeCycleNumber: round.active_cycle_number,
       farmId: farm.id,
       campaignId,
       title: farm.name || 'Farm',

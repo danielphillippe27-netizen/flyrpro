@@ -1,34 +1,30 @@
-# Explicit farm cycles
+# Simple Farm rounds
 
-Implemented on November 5, 2026. Production migration `20261106012000` was applied during the web release and verified: all farms have an active cycle row, RLS is enabled, and both cycle RPCs are present. The migration number was moved from `20261106010000` to avoid the existing CRM migration. Native apps are unchanged.
+Updated November 7, 2026.
 
 ## Behaviour
 
-- Each farm persists one `active_cycle_number`. New farms start at 1.
-- Farm Settings shows the current cycle, start date, reached homes, editable optional end date, and a confirmed action to start the next cycle.
-- History retains earlier cycle dates and coverage/session counts. Earlier end dates can also be edited.
-- End dates use calendar dates, can be cleared, and cannot precede the cycle start. Saving a date never changes cycle membership or advances a round.
-- The working web map and dashboard follow the active cycle without a cycle selector or Master/All Time toggle. Existing lifetime supporting totals and activity history remain available.
-- New ordinary sessions and touchpoints use the active cycle. Explicit planned/offline assignments are preserved, including existing future plans. Plans never determine the active cycle.
-- A new round starts fresh coverage. No session, contact, note, lead, follow-up, or outcome is deleted. Do-not-knock markers remain visible across rounds.
+- One saved active round per Farm, shared by web, iOS, and Android. Dates, plans, map opening, and session start/end never advance it.
+- Everyday maps show current progress. Farm Settings provides a confirmed **Start a new round** action, starting today without a date form, and read-only history.
+- New rounds reset coverage only. Contacts, notes, leads, appointments, follow-ups, do-not-knock instructions, and past visits remain.
+- Undo is available only before the new round has any activity. The server rejects stale requests, concurrent changes, open sessions, and unauthorized access.
+- New ordinary planned visits use the active round. Missing legacy membership resolves to round 1, not a date-derived number. Explicit older offline sessions retain their original membership; future unstarted membership is rejected.
+- Native status caches are scoped to the saved round. Pending local edits survive refresh. Missing progress produces a retry message rather than an apparently empty Farm.
+- Round changes require connectivity and native pending edits to be synced. Users are reminded to finish sessions and sync other devices first; disconnected devices cannot be inspected remotely.
 
-## Persistence and rollout
+## Server and rollout
 
-Apply `supabase/migrations/20261106012000_explicit_farm_cycles.sql` before deploying this web change. The client deliberately fails session creation if cycle settings are unavailable, instead of silently assigning the wrong cycle.
+Apply `20261107010000_simplify_farm_rounds.sql` after `20261106012000_explicit_farm_cycles.sql` before releasing the clients. This migration updates transition guards and adds undo; it does not reset any farm or delete visit history. Session/touch creation and round transitions lock the same farm.
 
-The migration backfills the active cycle from recorded activity, excluding scheduled-only future plans. Existing explicit session numbers are retained; missing legacy numbers use chronological fallback. It creates `farm_cycles`, date/transition RPCs, RLS, initial-cycle creation, and a default-assignment trigger for unassigned sessions.
-
-Cycle transitions lock the farm and check the expected active number. End-date writes check the previous update timestamp. Direct active-number changes cannot bypass the transition records. Owner/workspace membership is checked before each write. Offline sessions with an explicit older cycle stay there when synchronized.
-
-Native iOS/Android screens and cycle-resolution code were not changed here. They must adopt `active_cycle_number` and the cycle RPCs before claiming cross-platform parity. Old clients that send explicit cycle numbers retain those assignments; the database intentionally does not rewrite them. A farm refresh reads the persisted active cycle; no new live subscription was added.
+The Bowmanville repair was separate: 137 existing outcomes were retained in round 1, as requested. The private backup is kept outside this web repository.
 
 ## Validation
 
-- Farm cycle unit checks: active cycle independent of future plans, multiple outings in one cycle, fresh-round coverage, history retention, end-date validation, do-not-knock persistence.
-- Existing performance, session-total, and touch-plan tests passed.
-- 23 isolated PostgreSQL assertions passed with PGlite: migration/backfill, end-date edits, clearing dates, stale-write rejection, date ordering, invalid direct updates, next-cycle transition, duplicate transition rejection, history edits, access isolation, workspace access, and offline/default assignments.
-- Mocked-persistence browser checks passed at 320, 390, and 1100 px: current/history date edits, invalid dates blocked before writes, dirty-date guard, next-cycle confirmation, updated active cycle and next end date. The narrow confirmation screenshot was visually inspected. These are component checks, not a live-account walkthrough.
-- Targeted lint: no errors, one existing farm-page image warning.
-- Full-project TypeScript check: blocked by unrelated errors in integrations, demo player, sessions, and existing test files. No diagnostics in the changed cycle files.
+- 35 isolated PostgreSQL assertions: membership, permission checks, stale transitions, open/completed sessions, future-round rejection, undo, and history preservation.
+- 20 Farm cycle assertions plus touch-plan tests.
+- Browser component checks at 320, 390, and 1100 px: confirmation/cancellation, start, undo, and history without a round selector or date inputs.
+- Focused iOS tests include persisted active round, no calendar advancement, isolated round caches, pending outcomes, and reopening cached farms.
+- Android Farm and round-status tests cover offline cache loading, missing-snapshot errors, current-round colours, and retained do-not-knock status. The network failure fixture resumes the suspended call, matching Retrofit behaviour.
+- Full web TypeScript checking has existing errors outside these changed files. Focused lint has no errors; existing image/hook warnings remain.
 
-Re-run unit tests using the existing `../system-tests/node_modules/.bin/tsx` runner. Run browser checks with `node scripts/test-farm-cycles-browser.cjs`. Run database checks with `PGLITE_MODULE=/absolute/path/to/@electric-sql/pglite/dist/index.js node scripts/test-farm-cycles-db.mjs`; the harness creates an in-memory fixture and never reads `.env` or connects to Supabase. The validation-only PGlite installation used `/tmp/wolfgrid-cycle-validation`, without changing project dependencies.
+Production and device rollout evidence is recorded separately after execution. Simulator/unit/component checks do not establish an outdoor or two-device walkthrough.

@@ -675,9 +675,9 @@ export function CreateFarmFlow({ onBack, initialBoundary, initialName = '', onCr
             ...schedule.doorRoundDates.map((date, index) => ({ date, mode: 'doorknock' as const, title: `Door-knocking round ${index + 1}` })),
             ...schedule.callRoundDates.map((date, index) => ({ date, mode: 'phone_call' as const, title: `Calling round ${index + 1}` })),
           ].filter(round => round.date).sort((a, b) => a.date!.localeCompare(b.date!));
-          for (const [index, round] of rounds.entries()) {
+          for (const round of rounds) {
             await FarmTouchService.createSession({ farmId: farm.id, workspaceId: farm.workspace_id ?? currentWorkspaceId, mode: round.mode, title: round.title,
-              cycleNumber: index + 1, scheduledDate: `${round.date}T12:00:00`, homesTarget: imported.totalCount });
+              scheduledDate: `${round.date}T12:00:00`, homesTarget: imported.totalCount });
           }
         } catch (error) {
           await showFeedbackDialog({ title: 'Farm saved — touchpoints need attention', description: `Your plan is saved. Add any missing touchpoints on the Dashboard. ${getErrorMessage(error)}`, tone: 'warning' });
