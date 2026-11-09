@@ -30,9 +30,10 @@ async function handle(req:NextRequest,{params}:{params:Promise<{path:string[]}>}
  }
  const raw=req.method==='GET'?'{}':await req.text(); if(raw.length>16384) throw new CardError('Request too large',413); let body; try {body=JSON.parse(raw);} catch {throw new CardError('Invalid JSON');} if(!body||typeof body!=='object'||Array.isArray(body)) throw new CardError('Invalid request');
  if(path[0]==='public') {
-  const token=path[1]; const {client,share,content}=await publicCard(token);
+  const token=path[1]; const {client,share,test,content}=await publicCard(token);
   if(req.method==='GET'&&path[2]==='contact') return new NextResponse(await contactDownload(content),{headers:{'Content-Type':'text/vcard;charset=utf-8','Content-Disposition':'attachment; filename="contact.vcf"','Cache-Control':'no-store'}});
   if(req.method!=='POST') throw new CardError('Not found',404);
+  if(test) throw new CardError('Test links do not record activity or accept referrals',404);
   const ip=req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
   const bucket=createHash('sha256').update(`${token}:${ip}:${path[2]}`).digest('hex');
   const {data:allowed,error:limitError}=await client.rpc('card_take_rate_limit',{p_bucket:bucket,p_limit:path[2]==='events'?60:8});
@@ -78,6 +79,19 @@ async function handle(req:NextRequest,{params}:{params:Promise<{path:string[]}>}
   const campaignId=uuid.parse(req.nextUrl.searchParams.get('campaignId'));
   const {data,error}=await client.from('card_property_engagement').select('address_id,building_id,qualified_views,last_engaged_at').eq('workspace_id',workspaceId).eq('campaign_id',campaignId);if(error) throw error;return json({engagement:data});
  }
+ if(path.length===1&&path[0]==='test-text'&&req.method==='POST') {
+  const {data:profile,error:profileError}=await client.from('card_profiles').select('id,content,published').eq('workspace_id',workspaceId).eq('rep_id',user.id).maybeSingle();
+  if(profileError) throw profileError;
+  const card=cardContentSchema.safeParse(profile?.content);
+  if(!profile?.published||!card.success||!cardHasDetails(card.data)) throw new CardError('Save your business card first',409);
+  const {data:allowed,error:limitError}=await client.rpc('card_take_rate_limit',{p_bucket:createHash('sha256').update(`card-test-text:${workspaceId}:${user.id}`).digest('hex'),p_limit:12});
+  if(limitError||!allowed) throw new CardError('Please try again shortly',429);
+  const token=`test-${randomBytes(24).toString('hex')}`;
+  const {error}=await client.from('card_shares').insert({token,profile_id:profile.id,workspace_id:workspaceId,rep_id:user.id,idempotency_key:crypto.randomUUID()});
+  if(error) throw error;
+  const url=`${origin()}/c/${token}`;
+  return json({message:cardMessage('',card.data.phone,url),phone:card.data.phone});
+ }
  if(path[0]==='shares'&&path.length===1&&req.method==='POST') {
   const contactId=uuid.parse(body.contactId),key=uuid.parse(body.idempotencyKey);
   const {data:contact}=await client.from('contacts').select('*').eq('id',contactId).eq('user_id',user.id).eq('workspace_id',workspaceId).maybeSingle();if(!contact) throw new CardError('Save and sync this lead before sending',409);
@@ -113,7 +127,7 @@ async function handle(req:NextRequest,{params}:{params:Promise<{path:string[]}>}
   return json({shares:shares??[]});
  }
  if(path[0]==='shares'&&path[1]&&req.method==='POST') {
-  const id=uuid.parse(path[1]);const {data:share}=await client.from('card_shares').select('id').eq('id',id).eq('workspace_id',workspaceId).eq('rep_id',user.id).maybeSingle();if(!share) throw new CardError('Share unavailable',404);
+  const id=uuid.parse(path[1]);const {data:share}=await client.from('card_shares').select('id,token').eq('id',id).eq('workspace_id',workspaceId).eq('rep_id',user.id).maybeSingle();if(!share||share.token.startsWith('test-')) throw new CardError('Share unavailable',404);
   if(path[2]==='revoke'){const {error}=await client.from('card_shares').update({revoked_at:new Date().toISOString()}).eq('id',id);if(error) throw error;return json({ok:true});}
   if(path[2]==='composer'){const type=z.enum(['composer_opened','composer_cancelled','composer_sent','composer_failed']).parse(body.type);const eventId=uuid.parse(body.eventId);const {error}=await client.from('card_events').upsert({share_id:id,visit_id:eventId,event_key:type,event_type:type},{onConflict:'share_id,visit_id,event_key',ignoreDuplicates:true});if(error) throw error;return json({ok:true});}
  }

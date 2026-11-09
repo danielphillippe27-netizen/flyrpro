@@ -14,10 +14,12 @@ export async function cardScope(req:NextRequest,workspaceId:string) {
  return {client,user,workspaceId};
 }
 export async function publicCard(token:string) {
- if(!/^[a-f0-9]{48}$/.test(token)) throw new CardError('Card unavailable',404);
+ if(!/^(test-)?[a-f0-9]{48}$/.test(token)) throw new CardError('Card unavailable',404);
  const client=db();
  const {data:share}=await client.from('card_shares').select('*').eq('token',token).is('revoked_at',null).maybeSingle();
  if(!share) throw new CardError('Card unavailable',404);
+ const test = token.startsWith('test-');
+ if(test && Date.now() - Date.parse(share.created_at) >= 24 * 60 * 60 * 1000) throw new CardError('Card unavailable',404);
  const {data:member}=await client.from('workspace_members').select('user_id').eq('workspace_id',share.workspace_id).eq('user_id',share.rep_id).maybeSingle(); if(!member) throw new CardError('Card unavailable',404);
  // Revoking the original share also revokes all referral descendants.
  let parent=share.parent_share_id; let depth=0;
@@ -25,5 +27,5 @@ export async function publicCard(token:string) {
  const {data:profile}=await client.from('card_profiles').select('content,published').eq('id',share.profile_id).maybeSingle();
  const {data:feature}=await client.from('card_workspace_features').select('enabled').eq('workspace_id',share.workspace_id).maybeSingle();
  if(!profile?.published||!feature?.enabled) throw new CardError('Card unavailable',404);
- return {client,share,content:cardContentSchema.parse(profile.content)};
+ return {client,share,test,content:cardContentSchema.parse(profile.content)};
 }

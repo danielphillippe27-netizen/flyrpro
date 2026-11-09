@@ -12,6 +12,6 @@ export async function generateMetadata({params}:{params:Promise<{token:string}>}
 }
 export default async function Page({params}:{params:Promise<{token:string}>}) {
  const {token}=await params;
- try {const {content,share}=await loadCard(token);return <PublicCard content={content} token={token} referral={!!share.parent_share_id}/>;}
+ try {const {content,share,test}=await loadCard(token);return <PublicCard content={content} token={token} referral={!!share.parent_share_id} test={test}/>;}
  catch(error){if(error instanceof CardError)notFound();throw error;}
 }
