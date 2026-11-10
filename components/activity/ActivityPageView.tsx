@@ -1,19 +1,19 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useId, useMemo, useRef } from 'react';
 import { useWorkspace } from '@/lib/workspace-context';
 import { getClientAsync } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SessionBreadcrumbMap } from '@/components/home/team/SessionBreadcrumbMap';
 import { Route, Hand, Activity, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SessionFarmLink } from '@/components/activity/SessionFarmLink';
+import { ActivityRouteMap, SessionRouteDialog } from '@/components/activity/SessionRouteDialog';
+import { getSessionCounts, parseSessionRoute, SESSION_METRICS, type SessionMetric } from '@/lib/activity-session';
 
 const PAGE_SIZE = 25;
-const inFlightActivityKeys = new Set<string>();
 const TYPE_FILTERS = [
   { value: '', label: 'All', icon: Activity },
   { value: 'session_completed', label: 'Sessions', icon: Route },
@@ -34,16 +34,16 @@ function getRangeForPreset(preset: RangePreset): { start: string; end: string } 
   const start = new Date();
   if (preset === 'week') {
     start.setDate(start.getDate() - 6);
-    start.setUTCHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
   } else if (preset === 'month') {
     start.setDate(1);
-    start.setUTCHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
   } else if (preset === 'year') {
     start.setMonth(0, 1);
-    start.setUTCHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
   } else {
     start.setFullYear(start.getFullYear() - 15);
-    start.setUTCHours(0, 0, 0, 0);
+    start.setHours(0, 0, 0, 0);
   }
   return { start: start.toISOString(), end: end.toISOString() };
 }
@@ -83,6 +83,12 @@ type ActivityResponse = {
 };
 
 type SessionPathGeojson = string | GeoJSON.LineString | null;
+
+type TeamActivityFilters = {
+  start: string;
+  end: string;
+  memberIds: readonly string[];
+};
 
 function formatDateKey(iso: string): string {
   const d = new Date(iso);
@@ -186,11 +192,25 @@ type ActivityPageViewProps = {
   hideTypeFilters?: boolean;
   defaultRangePreset?: RangePreset;
   emptyMessage?: string;
+  sessionRouteFeed?: boolean;
   /** When set, activity is limited to this campaign and the list omits redundant campaign names. */
   campaignId?: string;
   /** Hides period and member controls (e.g. campaign activity tab: sessions only, no chrome). */
   hideFilterControls?: boolean;
+  teamFilters?: TeamActivityFilters;
 };
+
+export function SessionActivityFeed({ teamFilters }: { teamFilters?: TeamActivityFilters } = {}) {
+  return (
+    <ActivityPageView
+      forcedTypeFilter="session_completed"
+      sessionRouteFeed
+      hideFilterControls={!!teamFilters}
+      emptyMessage="No sessions in this period."
+      teamFilters={teamFilters}
+    />
+  );
+}
 
 export function ActivityPageView({
   forcedTypeFilter,
@@ -199,6 +219,8 @@ export function ActivityPageView({
   emptyMessage = 'No activity in this period.',
   campaignId,
   hideFilterControls = false,
+  sessionRouteFeed = false,
+  teamFilters,
 }: ActivityPageViewProps = {}) {
   const { currentWorkspaceId } = useWorkspace();
   const [rangePreset, setRangePreset] = useState<RangePreset>(defaultRangePreset);
@@ -211,9 +233,15 @@ export function ActivityPageView({
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionMetric, setSessionMetric] = useState<SessionMetric | 'all'>('all');
+  const [selectedRoute, setSelectedRoute] = useState<{ event: ActivityEvent; path: GeoJSON.LineString } | null>(null);
+  const routeTriggerRef = useRef<HTMLButtonElement>(null);
+  const requestRef = useRef<AbortController>(null);
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
 
-  const { start, end } = useMemo(() => getRangeForPreset(rangePreset), [rangePreset]);
+  const presetRange = useMemo(() => getRangeForPreset(rangePreset), [rangePreset]);
+  const { start, end } = teamFilters ?? presetRange;
+  const teamMemberIds = teamFilters?.memberIds;
   const rangePresetLabels = useMemo(() => {
     const now = new Date();
     return {
@@ -236,18 +264,14 @@ export function ActivityPageView({
         setLoading(false);
         return;
       }
-      const requestKey = [
-        currentWorkspaceId,
-        activeTypeFilter || 'all',
-        start,
-        end,
-        selectedMemberId,
-        campaignId ?? '',
-        String(off),
-        append ? 'append' : 'replace',
-      ].join('|');
-      if (inFlightActivityKeys.has(requestKey)) return;
-      inFlightActivityKeys.add(requestKey);
+      requestRef.current?.abort();
+      const request = new AbortController();
+      requestRef.current = request;
+      if (!append) {
+        setEvents([]);
+        setTotal(0);
+        setOffset(0);
+      }
       setLoading(true);
       setError(null);
       try {
@@ -259,7 +283,10 @@ export function ActivityPageView({
           offset: String(off),
         });
         if (activeTypeFilter) params.set('type', activeTypeFilter);
-        if (hideFilterControls || selectedMemberId === 'all') {
+        if (sessionRouteFeed && sessionMetric !== 'all') params.set('sessionMetric', sessionMetric);
+        if (teamMemberIds?.length) {
+          for (const memberId of teamMemberIds) params.append('memberIds', memberId);
+        } else if (hideFilterControls || selectedMemberId === 'all') {
           params.set('includeMembers', 'true');
         } else {
           params.set('memberId', selectedMemberId);
@@ -271,6 +298,7 @@ export function ActivityPageView({
         const accessToken = sessionResult?.data.session?.access_token ?? null;
         const res = await fetch(`/api/activity?${params.toString()}`, {
           credentials: 'include',
+          signal: request.signal,
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
         });
         if (!res.ok) {
@@ -278,6 +306,7 @@ export function ActivityPageView({
           throw new Error(payload?.error || payload?.message || `Failed to load activity (${res.status})`);
         }
         const data = (await res.json()) as ActivityResponse;
+        if (request.signal.aborted) return;
         const list = (data.events ?? []) as ActivityEvent[];
         setEvents((prev) => (append ? [...prev, ...list] : list));
         setTotal(data.total ?? 0);
@@ -294,14 +323,14 @@ export function ActivityPageView({
           setTeamMembers(data.members);
         }
       } catch (e) {
+        if (request.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Failed to load activity');
         if (!append) setEvents([]);
       } finally {
-        inFlightActivityKeys.delete(requestKey);
-        setLoading(false);
+        if (!request.signal.aborted) setLoading(false);
       }
     },
-    [currentWorkspaceId, start, end, activeTypeFilter, hideFilterControls, selectedMemberId, campaignId]
+    [currentWorkspaceId, start, end, activeTypeFilter, hideFilterControls, selectedMemberId, campaignId, sessionRouteFeed, sessionMetric, teamMemberIds]
   );
 
   useEffect(() => {
@@ -313,7 +342,8 @@ export function ActivityPageView({
   }, [forcedTypeFilter]);
 
   useEffect(() => {
-    fetchActivity(0, false);
+    void fetchActivity(0, false);
+    return () => requestRef.current?.abort();
   }, [fetchActivity]);
 
   useEffect(() => {
@@ -323,7 +353,14 @@ export function ActivityPageView({
   }, [teamMembers, selectedMemberId]);
 
   const groupedByDate = events.reduce<Record<string, ActivityEvent[]>>((acc, ev) => {
-    const key = ev.event_time.slice(0, 10);
+    let key = ev.event_time.slice(0, 10);
+    if (sessionRouteFeed) {
+      const date = new Date(ev.event_time);
+      if (Number.isFinite(date.getTime())) {
+        date.setHours(12, 0, 0, 0);
+        key = date.toISOString();
+      }
+    }
     if (!acc[key]) acc[key] = [];
     acc[key].push(ev);
     return acc;
@@ -332,41 +369,68 @@ export function ActivityPageView({
   const sortedDates = Object.keys(groupedByDate).sort((a, b) =>
     sortAscending ? a.localeCompare(b) : b.localeCompare(a)
   );
-  const hasMore = offset + events.length < total;
+  const hasMore = events.length < total;
   const loadMore = () => fetchActivity(offset + PAGE_SIZE, true);
+
+  const routePayload = selectedRoute?.event.payload;
+  const routeCounts = routePayload ? getSessionCounts(routePayload) : null;
+  const routeMetrics = routeCounts && routePayload ? [
+    ...SESSION_METRICS.filter(({ id }) => id !== 'flyers' ||
+      (routePayload.session_mode ?? routePayload.mode) === 'flyer' || toCount(routeCounts.flyers) > 0)
+      .map(({ id, label }) => ({ label, value: formatMetric(routeCounts[id]) })),
+    { label: 'Active time', value: formatDuration(routePayload.active_seconds) },
+    { label: 'Distance', value: routePayload.distance_meters != null ? `${formatMetric(routePayload.distance_meters)} m` : '—' },
+    { label: 'Conversation rate', value: formatRatePercent(routeCounts.conversations, routeCounts.doors) },
+    { label: 'Lead rate', value: formatRatePercent(routeCounts.leads, routeCounts.conversations) },
+  ] : [];
 
   return (
     <div className="space-y-4">
-      {!hideFilterControls && (
+      {(!hideFilterControls || sessionRouteFeed) && (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-muted-foreground">Period:</span>
-          {(['week', 'month', 'year'] as const).map((preset) => (
-            <Button
-              key={preset}
-              variant={rangePreset === preset ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setRangePreset(preset)}
-            >
-              {rangePresetLabels[preset]}
-            </Button>
-          ))}
-          {canIncludeMembers && (
+          {!hideFilterControls && (
             <>
-              <span className="text-sm text-muted-foreground ml-2">|</span>
-              <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
-                <SelectTrigger size="sm" className="w-[220px]">
-                  <SelectValue placeholder="All team members" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All team members</SelectItem>
-                  {teamMembers.map((member) => (
-                    <SelectItem key={member.user_id} value={member.user_id}>
-                      {member.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <span className="text-sm text-muted-foreground">Period:</span>
+              {(['week', 'month', 'year'] as const).map((preset) => (
+                <Button
+                  key={preset}
+                  variant={rangePreset === preset ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setRangePreset(preset)}
+                >
+                  {rangePresetLabels[preset]}
+                </Button>
+              ))}
+              {canIncludeMembers && (
+                <>
+                  <span className="text-sm text-muted-foreground ml-2">|</span>
+                  <Select value={selectedMemberId} onValueChange={setSelectedMemberId}>
+                    <SelectTrigger size="sm" className="w-[220px]">
+                      <SelectValue placeholder="All team members" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All team members</SelectItem>
+                      {teamMembers.map((member) => (
+                        <SelectItem key={member.user_id} value={member.user_id}>
+                          {member.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
             </>
+          )}
+          {sessionRouteFeed && (
+            <Select value={sessionMetric} onValueChange={(value) => setSessionMetric(value as SessionMetric | 'all')}>
+              <SelectTrigger size="sm" aria-label="Session outcomes" className="min-w-36 bg-card">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All outcomes</SelectItem>
+                {SESSION_METRICS.map(({ id, label }) => <SelectItem key={id} value={id}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           )}
         </div>
       )}
@@ -397,15 +461,27 @@ export function ActivityPageView({
         {loading && events.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">Loading activity…</div>
         ) : sortedDates.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">{emptyMessage}</div>
+          <div className="p-8 text-center text-muted-foreground">{sessionRouteFeed && sessionMetric !== 'all' ? 'No sessions match these filters.' : emptyMessage}</div>
         ) : (
           sortedDates.map((dateKey) => (
-            <div key={dateKey}>
-              <div className="sticky top-0 z-10 bg-muted/80 backdrop-blur px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border">
-                {formatDateKey(dateKey + 'T12:00:00Z')}
+            <div key={dateKey} className="group">
+              <div className={cn(
+                'border-b border-border bg-muted/80 px-4 py-2 text-xs font-medium text-muted-foreground',
+                sessionRouteFeed ? 'group-first:rounded-t-xl' : 'sticky top-0 z-10 backdrop-blur'
+              )}>
+                {formatDateKey(sessionRouteFeed ? dateKey : dateKey + 'T12:00:00Z')}
               </div>
               <ul className="divide-y divide-border/50">
-                {(groupedByDate[dateKey] ?? []).map((ev) => (
+                {(groupedByDate[dateKey] ?? []).map((ev) => sessionRouteFeed ? (
+                  <SessionFeedRow
+                    key={ev.id}
+                    event={ev}
+                    onOpen={(path, trigger) => {
+                      routeTriggerRef.current = trigger;
+                      setSelectedRoute({ event: ev, path });
+                    }}
+                  />
+                ) : (
                   <li key={ev.id} className="px-4 py-3 text-sm">
                     <button
                       type="button"
@@ -453,7 +529,22 @@ export function ActivityPageView({
         </div>
       )}
 
-      <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
+      {sessionRouteFeed && (
+        <SessionRouteDialog
+          session={selectedRoute ? {
+            path: selectedRoute.path,
+            title: eventActorLabel(selectedRoute.event),
+            time: new Date(selectedRoute.event.event_time).toLocaleString(),
+            campaignId: selectedRoute.event.campaign_id ??
+              (typeof routePayload?.campaign_id === 'string' ? routePayload.campaign_id : null),
+            metrics: routeMetrics,
+          } : null}
+          onClose={() => setSelectedRoute(null)}
+          returnFocus={() => routeTriggerRef.current?.focus()}
+        />
+      )}
+
+      {!sessionRouteFeed && <Dialog open={!!selectedEvent} onOpenChange={(open) => !open && setSelectedEvent(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{selectedEvent ? `${eventLabel(selectedEvent.event_type)} details` : 'Activity details'}</DialogTitle>
@@ -466,7 +557,7 @@ export function ActivityPageView({
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               {selectedEvent.event_type === 'session_completed' && (
                 <>
-                  <SessionBreadcrumbMap pathGeojson={getSessionPathGeojson(selectedEvent)} />
+                  <ActivityRouteMap pathGeojson={getSessionPathGeojson(selectedEvent)} />
 
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div className="rounded border p-2">
@@ -548,7 +639,62 @@ export function ActivityPageView({
             </div>
           )}
         </DialogContent>
-      </Dialog>
+      </Dialog>}
     </div>
+  );
+}
+
+
+function SessionFeedRow({
+  event,
+  onOpen,
+}: {
+  event: ActivityEvent;
+  onOpen: (path: GeoJSON.LineString, trigger: HTMLButtonElement) => void;
+}) {
+  const path = useMemo(() => parseSessionRoute(event.payload.path_geojson), [event.payload.path_geojson]);
+  const counts = getSessionCounts(event.payload);
+  const metricsId = useId();
+  const title = eventActorLabel(event);
+  const rowClass = 'grid w-full gap-x-5 gap-y-2 px-4 py-3 text-left sm:px-5 lg:grid-cols-[minmax(14rem,1.5fr)_minmax(19rem,2fr)_8rem] lg:items-center';
+  const content = (
+    <>
+      <span className="block min-w-0">
+        <span className="block truncate text-sm font-semibold">{title}</span>
+        <time dateTime={event.event_time} className="text-xs text-muted-foreground">{formatTime(event.event_time)}</time>
+      </span>
+      <span id={metricsId} className="grid grid-cols-4 gap-2">
+        {SESSION_METRICS.map(({ id, label }) => (
+          <span key={id}>
+            <span className="block text-[11px] text-muted-foreground sm:text-xs">{id === 'flyers' ? 'Flyers' : label}</span>
+            <span className="block text-sm font-medium tabular-nums">{counts[id] == null ? '—' : formatMetric(counts[id])}</span>
+          </span>
+        ))}
+      </span>
+      <span className="flex items-center gap-1.5 text-xs font-medium lg:justify-self-end">
+        {path ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-primary">
+            <Route className="size-3.5" aria-hidden="true" /> GPS route <ChevronRight className="size-3" aria-hidden="true" />
+          </span>
+        ) : <span className="text-muted-foreground">No GPS route</span>}
+      </span>
+    </>
+  );
+
+  return (
+    <li>
+      {path ? (
+        <button
+          type="button"
+          aria-label={`View GPS route for ${title} at ${formatTime(event.event_time)}`}
+          aria-describedby={metricsId}
+          aria-haspopup="dialog"
+          onClick={(e) => onOpen(path, e.currentTarget)}
+          className={cn(rowClass, 'cursor-pointer transition-colors hover:bg-muted/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring')}
+        >
+          {content}
+        </button>
+      ) : <div className={rowClass}>{content}</div>}
+    </li>
   );
 }

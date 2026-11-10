@@ -47,6 +47,11 @@ const nextConfig = {
   async redirects() {
     return [
       {
+        source: "/leaderboard",
+        destination: "/stats?tab=leaderboard",
+        permanent: false,
+      },
+      {
         source: "/members",
         destination: "/routes",
         permanent: true,

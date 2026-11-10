@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { SessionActivityFeed } from '@/components/activity/ActivityPageView';
 import { useWorkspace } from '@/lib/workspace-context';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,8 +19,8 @@ import type { TeamControlsRange } from '@/components/home/team/TeamControlsBar';
 
 const PAGE_SIZE = 25;
 const TYPE_FILTERS = [
-  { value: '', label: 'All', icon: Activity },
   { value: 'session_completed', label: 'Sessions', icon: Route },
+  { value: '', label: 'All activity', icon: Activity },
   { value: 'knock', label: 'Knocks', icon: Hand },
   { value: 'followup', label: 'Follow-ups', icon: MessageSquare },
   { value: 'appointment', label: 'Appointments', icon: Calendar },
@@ -122,8 +123,35 @@ async function getActivityFetchError(response: Response): Promise<string> {
 }
 
 export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
+  const [typeFilter, setTypeFilter] = useState('session_completed');
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Activity type">
+        {TYPE_FILTERS.map(({ value, label, icon: Icon }) => (
+          <Button
+            key={value || 'all'}
+            variant={typeFilter === value ? 'default' : 'outline'}
+            size="sm"
+            aria-pressed={typeFilter === value}
+            onClick={() => setTypeFilter(value)}
+          >
+            <Icon className="w-3.5 h-3.5 mr-1" aria-hidden="true" />
+            {label}
+          </Button>
+        ))}
+      </div>
+      {typeFilter === 'session_completed' ? (
+        <SessionActivityFeed teamFilters={{ start: range.start, end: range.end, memberIds }} />
+      ) : (
+        <TeamEventFeed range={range} memberIds={memberIds} typeFilter={typeFilter} />
+      )}
+    </div>
+  );
+}
+
+function TeamEventFeed({ range, memberIds, typeFilter }: TeamActivityTabProps & { typeFilter: string }) {
   const { currentWorkspaceId } = useWorkspace();
-  const [typeFilter, setTypeFilter] = useState<string>('');
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -183,10 +211,6 @@ export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
     fetchActivity(0, false);
   }, [fetchActivity]);
 
-  const onFilterChange = (value: string) => {
-    setTypeFilter(value);
-  };
-
   const groupedByDate = events.reduce<Record<string, ActivityEvent[]>>((acc, ev) => {
     const key = ev.event_time.slice(0, 10);
     if (!acc[key]) acc[key] = [];
@@ -224,21 +248,6 @@ export function TeamActivityTab({ range, memberIds }: TeamActivityTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-muted-foreground">Type:</span>
-        {TYPE_FILTERS.map(({ value, label, icon: Icon }) => (
-          <Button
-            key={value || 'all'}
-            variant={typeFilter === value ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onFilterChange(value)}
-          >
-            <Icon className="w-3.5 h-3.5 mr-1" />
-            {label}
-          </Button>
-        ))}
-      </div>
-
       {error && (
         <Card className="border-destructive/50">
           <CardContent className="py-3 text-sm text-destructive">{error}</CardContent>

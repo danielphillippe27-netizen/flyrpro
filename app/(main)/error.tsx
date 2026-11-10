@@ -11,7 +11,6 @@ import {
   Home,
   Settings,
   Target,
-  Trophy,
   Users,
 } from 'lucide-react';
 import { FarmIcon } from '@/components/icons/FarmIcon';
@@ -25,7 +24,6 @@ const navItems = [
   { href: '/leads', label: 'Leads', icon: Users },
   { href: '/appointments', label: 'Appointments', icon: Clock },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays },
-  { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { href: '/stats', label: 'Performance', icon: Gauge },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];

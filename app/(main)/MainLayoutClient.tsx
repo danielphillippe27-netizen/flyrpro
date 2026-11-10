@@ -36,7 +36,6 @@ const baseTabs = [
   { href: '/follow-up', icon: CornerDownRight, label: 'Follow Up' },
   { href: '/appointments', icon: Clock, label: 'Appointments' },
   { href: '/calendar', icon: CalendarDays, label: 'Calendar' },
-  { href: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { href: '/stats', icon: Gauge, label: 'Performance' },
 ];
 
@@ -84,7 +83,6 @@ const memberTabs = baseTabs.filter((tab) =>
     '/appointments',
     '/calendar',
     '/follow-up',
-    '/leaderboard',
     '/stats',
   ].includes(tab.href)
 );

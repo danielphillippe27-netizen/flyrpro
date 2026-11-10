@@ -19,13 +19,9 @@ export function StatsPageView() {
     });
   }, []);
 
-  return (
-    <div className="mt-6">
-      {accessLevel === 'salesperson' ? (
-        <SalespersonPerformanceView />
-      ) : (
-        <YouViewContent userId={userId} authChecked={authChecked} />
-      )}
-    </div>
+  return accessLevel === 'salesperson' ? (
+    <SalespersonPerformanceView />
+  ) : (
+    <YouViewContent userId={userId} authChecked={authChecked} />
   );
 }

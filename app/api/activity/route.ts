@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSessionCounts, parseSessionRoute, SESSION_METRICS } from '@/lib/activity-session';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 
@@ -227,7 +228,7 @@ async function fetchSyntheticSessionEventsFromSessions(
         flyers_delivered: Number(row.flyers_delivered ?? 0) || 0,
         active_seconds: Number(row.active_seconds ?? 0) || 0,
         distance_meters: Number(row.distance_meters ?? 0) || 0,
-        ...(typeof row.path_geojson === 'string' ? { path_geojson: row.path_geojson } : {}),
+        ...(row.path_geojson != null ? { path_geojson: row.path_geojson } : {}),
       },
     })) as SessionEventRow[];
 }
@@ -750,8 +751,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const workspaceId = firstNonEmptyString(searchParams.get('workspaceId'));
     const typeFilter = (searchParams.get('type') || '').trim() || null;
+    const sessionMetric = SESSION_METRICS.find(({ id }) => id === searchParams.get('sessionMetric'))?.id;
     const includeMembersRequested = toBool(searchParams.get('includeMembers'));
     const requestedMemberId = firstNonEmptyString(searchParams.get('memberId'));
+    const requestedMemberIds = requestedMemberId
+      ? [requestedMemberId]
+      : [...new Set(searchParams.getAll('memberIds').map((id) => id.trim()).filter(Boolean))];
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '30', 10) || 30));
     const offset = Math.max(0, parseInt(searchParams.get('offset') ?? '0', 10) || 0);
     const { start, end } = parseRange(searchParams.get('start'), searchParams.get('end'));
@@ -810,24 +815,24 @@ export async function GET(request: NextRequest) {
     if (userRole === 'owner') {
       workspaceUserIds.add(requestUser.id);
     }
-    if (requestedMemberId) {
+    if (requestedMemberIds.length > 0) {
       if (!canIncludeMembers) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
-      if (!workspaceUserIds.has(requestedMemberId)) {
+      if (requestedMemberIds.some((id) => !workspaceUserIds.has(id))) {
         return NextResponse.json({ error: 'Team member not found' }, { status: 404 });
       }
     }
 
     const scopedUserIds = canIncludeMembers
-      ? requestedMemberId
-        ? [requestedMemberId]
+      ? requestedMemberIds.length > 0
+        ? requestedMemberIds
         : includeMembersRequested
           ? Array.from(workspaceUserIds)
           : [requestUser.id]
       : [requestUser.id];
     const scopedUserIdSet = new Set(scopedUserIds);
-    const includeMembers = canIncludeMembers && (includeMembersRequested || Boolean(requestedMemberId));
+    const includeMembers = canIncludeMembers && (includeMembersRequested || requestedMemberIds.length > 0);
     const memberOptionsPromise = canIncludeMembers
       ? loadWorkspaceMemberOptions(admin, workspaceId, workspaceMemberRows)
       : Promise.resolve([] as ActivityMemberOption[]);
@@ -1072,6 +1077,9 @@ export async function GET(request: NextRequest) {
         const key = `session_completed:${firstNonEmptyString(row.session_id, row.id)}`;
         const existing = bySessionKey.get(key);
         if (existing) {
+          const eventPath = existing.payload?.path_geojson;
+          const sessionPath = row.payload?.path_geojson;
+          const path = parseSessionRoute(eventPath) ? eventPath : sessionPath ?? eventPath;
           bySessionKey.set(key, {
             ...existing,
             session_id: firstNonEmptyString(existing.session_id, row.session_id, row.id),
@@ -1079,6 +1087,7 @@ export async function GET(request: NextRequest) {
             payload: {
               ...(row.payload ?? {}),
               ...(existing.payload ?? {}),
+              ...(path != null ? { path_geojson: path } : {}),
             },
           });
         } else {
@@ -1107,6 +1116,10 @@ export async function GET(request: NextRequest) {
             extractCampaignId(row) ?? (sid ? sessionCampaignMapFull.get(sid) ?? null : null);
           return resolved === scopedCampaignId;
         });
+      }
+
+      if (typeFilter === 'session_completed' && sessionMetric) {
+        rows = rows.filter(({ payload }) => Number(getSessionCounts(payload ?? {})[sessionMetric]) > 0);
       }
 
       count = rows.length;

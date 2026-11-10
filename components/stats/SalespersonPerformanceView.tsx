@@ -167,7 +167,7 @@ export function SalespersonPerformanceView() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-normal text-foreground">Performance</h1>
+          <h2 className="text-xl font-semibold text-foreground">Your Stats</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {payload ? `${payload.salesperson.fullName} · ${formatRange(payload.range.start, payload.range.end)}` : 'Salesperson activity'}
           </p>

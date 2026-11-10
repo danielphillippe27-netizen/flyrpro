@@ -201,12 +201,12 @@ export function LeaderboardContentView() {
   }, [loadLeaderboard]);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5">
+    <div className="space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white sm:text-4xl">
+          <h2 className="text-xl font-semibold text-foreground">
             Leaderboard
-          </h1>
+          </h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Track performance inside {currentWorkspace?.name ?? 'your workspace'}.
           </p>
