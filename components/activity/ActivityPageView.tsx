@@ -234,7 +234,7 @@ export function ActivityPageView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionMetric, setSessionMetric] = useState<SessionMetric | 'all'>('all');
-  const [selectedRoute, setSelectedRoute] = useState<{ event: ActivityEvent; path: GeoJSON.LineString } | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<{ event: ActivityEvent; path: GeoJSON.LineString | null } | null>(null);
   const routeTriggerRef = useRef<HTMLButtonElement>(null);
   const requestRef = useRef<AbortController>(null);
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null);
@@ -531,6 +531,7 @@ export function ActivityPageView({
         <SessionRouteDialog
           session={selectedRoute ? {
             path: selectedRoute.path,
+            id: selectedRoute.event.session_id ?? selectedRoute.event.id,
             title: eventActorLabel(selectedRoute.event),
             time: new Date(selectedRoute.event.event_time).toLocaleString(),
             campaignId: selectedRoute.event.campaign_id ??
@@ -646,7 +647,7 @@ function SessionFeedRow({
   onOpen,
 }: {
   event: ActivityEvent;
-  onOpen: (path: GeoJSON.LineString, trigger: HTMLButtonElement) => void;
+  onOpen: (path: GeoJSON.LineString | null, trigger: HTMLButtonElement) => void;
 }) {
   const path = useMemo(() => parseSessionRoute(event.payload.path_geojson), [event.payload.path_geojson]);
   const counts = getSessionCounts(event.payload);
@@ -672,17 +673,16 @@ function SessionFeedRow({
           <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-primary">
             <Route className="size-3.5" aria-hidden="true" /> GPS route <ChevronRight className="size-3" aria-hidden="true" />
           </span>
-        ) : <span className="text-muted-foreground">No GPS route</span>}
+        ) : <span className="text-muted-foreground">View details</span>}
       </span>
     </>
   );
 
   return (
     <li>
-      {path ? (
         <button
           type="button"
-          aria-label={`View GPS route for ${title} at ${formatTime(event.event_time)}`}
+          aria-label={`View session for ${title} at ${formatTime(event.event_time)}`}
           aria-describedby={metricsId}
           aria-haspopup="dialog"
           onClick={(e) => onOpen(path, e.currentTarget)}
@@ -690,7 +690,7 @@ function SessionFeedRow({
         >
           {content}
         </button>
-      ) : <div className={rowClass}>{content}</div>}
+
     </li>
   );
 }

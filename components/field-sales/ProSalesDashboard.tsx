@@ -7,21 +7,30 @@ import { ProSalesCommissionHome } from "./ProSalesCommissionHome";
 import { ProSalesHome } from "./ProSalesHome";
 import { ProSalesLeaderboard } from "./ProSalesLeaderboard";
 import { ProSalesReport } from "./ProSalesReport";
-export function ProSalesDashboard({ workspace, settings }: { workspace: string; settings?: ReactNode }) {
+export function ProSalesDashboard({ workspace, settings, showEarnings = false }: { workspace: string; settings?: ReactNode; showEarnings?: boolean }) {
   const search = useSearchParams();
-  const [entryContext, setEntryContext] = useState<SaleEntryContext>(() => {
+  const [entryContext, setEntryContext] = useState<SaleEntryContext>((): SaleEntryContext => {
     const appointment = search.get("appointment");
     const lead = search.get("lead");
+    const fieldAppointment = search.get("booking");
+    const opportunity = search.get("opportunity");
+    if (fieldAppointment) return { field_appointment_id: fieldAppointment };
+    if (opportunity) return { opportunity_id: opportunity, ...(lead ? { contact_id: lead } : {}) };
+    const property = search.get("property");
+    if ((lead || property) && search.get("source") === "door") return {
+      ...(lead ? { contact_id: lead } : {}), ...(property ? { campaign_address_id: property } : {}), sale_source: "door",
+    };
     return appointment ? { appointment_id: appointment, ...(lead ? { contact_id: lead } : {}) } : {};
   });
   const [recording, setRecording] = useState(() => Object.keys(entryContext).length > 0);
   const [saved, setSaved] = useState<string | null>(null);
   const [section, setSection] = useState<"overview" | "performance" | "leaderboards">("overview");
   return <div className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
-    <header className="flex flex-wrap items-center justify-between gap-4"><h1 className="text-2xl font-semibold">Sales</h1><button className="rounded-xl bg-primary px-5 py-3 font-medium text-primary-foreground" onClick={() => { setEntryContext({}); setRecording(true); }}>Convert appointment</button></header>
+    <header className="flex flex-wrap items-center justify-between gap-4"><h1 className="text-2xl font-semibold">Sales</h1><button className="rounded-xl bg-primary px-5 py-3 font-medium text-primary-foreground" onClick={() => { setEntryContext({}); setRecording(true); }}>Record sale</button></header>
     <nav aria-label="Sales views" className="flex flex-wrap gap-2 rounded-xl bg-muted/50 p-1 text-sm">
       {([['overview','Overview'],['performance','Performance'],['leaderboards','Leaderboards']] as const).map(([value,label]) => <button key={value} className={`rounded-lg px-4 py-2 ${section===value?'bg-background font-medium shadow-sm':''}`} aria-pressed={section===value} onClick={()=>setSection(value)}>{label}</button>)}
       <Link className="rounded-lg px-4 py-2" href="/sales/opportunities">Pipeline & follow-ups</Link><Link className="rounded-lg px-4 py-2" href="/sales/goals">Goals & pace</Link>
+      {showEarnings && <Link className="rounded-lg px-4 py-2" href="/sales/earnings">My Earnings</Link>}
     </nav>
     {saved && <p role="status" className="rounded-xl border p-3">Sale saved. <Link className="underline" href={`/sales/${saved}`}>Open sale →</Link></p>}
     {section === "overview" && <div className="grid items-start gap-4 lg:grid-cols-2"><ProSalesHome/><ProSalesCommissionHome/></div>}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { addDays, addHours, addMonths, addWeeks, addYears, format, isSameDay, startOfDay, startOfWeek } from 'date-fns';
 import {
   ChevronDown,
@@ -15,6 +15,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { AppointmentDialog, BookingTrigger } from '@/components/appointments/RoofingAppointments';
+import { appointmentsChanged, listAppointments, type AppointmentList } from '@/lib/field-sales/appointments';
 import { useWorkspace } from '@/lib/workspace-context';
 import {
   CALENDAR_COLOR_HEX,
@@ -167,6 +169,10 @@ export function CalendarView() {
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
+  const [appointmentId, setAppointmentId] = useState<string>();
+  const [appointmentGate, setAppointmentGate] = useState<{ workspace: string; data: AppointmentList }>();
+  const requestEpoch = useRef(0);
+  const canonical = appointmentGate?.workspace === currentWorkspaceId ? appointmentGate?.data : undefined;
   const [editingItem, setEditingItem] = useState<CalendarItem | null>(null);
   const [draftStart, setDraftStart] = useState<Date>(addHours(startOfDay(new Date()), new Date().getHours() + 1));
 
@@ -194,6 +200,7 @@ export function CalendarView() {
   }, [canFilterMembers, currentWorkspaceId]);
 
   const fetchEvents = useCallback(async () => {
+    const epoch = ++requestEpoch.current;
     if (!currentWorkspaceId) {
       setEvents([]);
       setError('No workspace selected');
@@ -206,6 +213,29 @@ export function CalendarView() {
     try {
       const range = visibleRange(visibleDate, 6, 6);
       const allEvents: CalendarEventRow[] = [];
+      const canonicalEvents = async () => {
+        const filter = {
+          p_start: range.start.toISOString(),
+          p_end: range.end.toISOString(),
+          p_team: canFilterMembers,
+        };
+        const first = await listAppointments(currentWorkspaceId, filter);
+        if (!first) return { first, rows: [] };
+        const rows = [...first.appointments];
+        let page = first;
+        while (page.appointments.length === 100) {
+          const last = page.appointments[99];
+          const next = await listAppointments(currentWorkspaceId, {
+            ...filter, p_after_start: last.start_at, p_after_id: last.id,
+          });
+          if (!next) break;
+          rows.push(...next.appointments);
+          page = next;
+        }
+        return { first, rows };
+      };
+      const appointments = canonicalEvents().then(result => ({ result, error: undefined as unknown }),
+        error => ({ result: null, error }));
       let nextOffset: number | null = 0;
 
       while (nextOffset !== null) {
@@ -226,19 +256,35 @@ export function CalendarView() {
         if (!response.ok) throw new Error(await apiErrorMessage(response, 'Failed to load calendar'));
         const data = (await response.json()) as EventsResponse;
         allEvents.push(...(data.events ?? []));
-        if (data.canIncludeMembers !== undefined) setCanIncludeMembers(Boolean(data.canIncludeMembers));
+        if (epoch === requestEpoch.current && data.canIncludeMembers !== undefined) setCanIncludeMembers(Boolean(data.canIncludeMembers));
         nextOffset =
           typeof data.nextOffset === 'number' && data.nextOffset > nextOffset
             ? data.nextOffset
             : null;
       }
 
-      setEvents(allEvents);
+      const { result, error } = await appointments;
+      if (epoch !== requestEpoch.current) return;
+      if (error) throw error;
+      setAppointmentGate(result?.first ? { workspace: currentWorkspaceId, data: result.first } : undefined);
+      const appointmentRows: CalendarEventRow[] = (result?.rows ?? [])
+        .filter(item => item.status !== 'cancelled' && (selectedMemberIds.length === 0 ||
+          (item.assignee_id && selectedMemberIds.includes(item.assignee_id))))
+        .map(item => ({
+          id: item.id, user_id: item.assignee_id, workspace_id: item.workspace_id,
+          title: `${item.appointment_type}: ${item.contact_name}`,
+          start_at: item.start_at, end_at: item.end_at, is_all_day: false, event_type: 'appointment',
+          contact_id: item.contact_id, contact_name: item.contact_name, contact_address: item.property_label,
+          source_kind: 'field_appointment', source_id: item.id, notes: item.notes, location: item.property_label,
+          color_key: 'red', created_at: item.start_at, updated_at: item.start_at, deleted_at: null,
+        }));
+      setEvents([...allEvents, ...appointmentRows]);
     } catch (fetchError) {
+      if (epoch !== requestEpoch.current) return;
       setEvents([]);
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load calendar');
     } finally {
-      setLoading(false);
+      if (epoch === requestEpoch.current) setLoading(false);
     }
   }, [canFilterMembers, currentWorkspaceId, selectedMemberIds, visibleDate]);
 
@@ -310,7 +356,18 @@ export function CalendarView() {
     setEditorOpen(true);
   }
 
+  useEffect(() => {
+    const refresh = () => { void fetchEvents(); };
+    window.addEventListener(appointmentsChanged, refresh);
+    return () => window.removeEventListener(appointmentsChanged, refresh);
+  }, [fetchEvents]);
+
   function openEdit(item: CalendarItem) {
+    if (item.row?.source_kind === 'field_appointment') {
+      setAppointmentId(item.id);
+      return;
+    }
+    if (canonical?.enabled && item.eventType === 'appointment') return;
     if (!item.row || item.kind === 'session' || item.kind === 'reminder') return;
     setEditingItem(item);
     setDraftStart(item.startAt);
@@ -426,6 +483,8 @@ export function CalendarView() {
             <Button variant="outline" size="sm" onClick={() => void fetchEvents()} disabled={loading} aria-label="Refresh">
               <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
             </Button>
+            {canonical?.can_write && currentWorkspaceId ? <BookingTrigger key={currentWorkspaceId}
+              workspace={currentWorkspaceId} context={{ initialDate: selectedDate > new Date() ? selectedDate : draftStart }} /> : null}
             <Button size="sm" onClick={() => openCreate()} aria-label="Add event">
               <Plus className="mr-1 h-4 w-4" />
               Add
@@ -494,6 +553,8 @@ export function CalendarView() {
         )}
       </div>
 
+      {appointmentId && currentWorkspaceId ? <AppointmentDialog workspace={currentWorkspaceId} id={appointmentId}
+        canWrite={canonical?.can_write === true} onClose={() => setAppointmentId(undefined)} onUpdated={fetchEvents} /> : null}
       <CalendarEventDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
@@ -502,6 +563,7 @@ export function CalendarView() {
         workspaceId={currentWorkspaceId}
         onSave={saveEvent}
         onDelete={deleteEvent}
+        canonicalAppointments={canonical?.enabled === true}
       />
     </div>
   );
@@ -896,6 +958,7 @@ function CalendarEventDialog({
   workspaceId,
   onSave,
   onDelete,
+  canonicalAppointments,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -904,6 +967,7 @@ function CalendarEventDialog({
   workspaceId: string | null;
   onSave: (payload: Record<string, unknown>) => Promise<void>;
   onDelete: (item: CalendarItem) => Promise<void>;
+  canonicalAppointments: boolean;
 }) {
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
@@ -926,7 +990,7 @@ function CalendarEventDialog({
     const end = item?.endAt ?? addHours(initialStart, 1);
     const resolvedType = EDITABLE_EVENT_TYPES.includes(source?.event_type as CalendarEventType)
       ? (source?.event_type as CalendarEventType)
-      : 'appointment';
+      : canonicalAppointments ? 'personal' : 'appointment';
     const resolvedColor = CALENDAR_COLOR_KEYS.includes(source?.color_key as CalendarColorKey)
       ? (source?.color_key as CalendarColorKey)
       : EVENT_TYPE_META[resolvedType].defaultColorKey;
@@ -953,7 +1017,7 @@ function CalendarEventDialog({
         : null
     );
     setError(null);
-  }, [initialStart, item, open]);
+  }, [initialStart, item, open, canonicalAppointments]);
 
   useEffect(() => {
     if (!open || !workspaceId) return;
@@ -1060,7 +1124,7 @@ function CalendarEventDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {EDITABLE_EVENT_TYPES.map((type) => (
+                  {EDITABLE_EVENT_TYPES.filter(type => !canonicalAppointments || type !== 'appointment').map((type) => (
                     <SelectItem key={type} value={type}>
                       {EVENT_TYPE_META[type].label}
                     </SelectItem>

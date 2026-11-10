@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceSalesSettings } from '@/components/field-sales/WorkspaceSalesSettings';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -908,6 +909,7 @@ function SettingsPageContent() {
 
           {!isSalespersonSettings ? <FarmSettingsCard key={currentWorkspaceId} workspaceId={currentWorkspaceId} /> : null}
           {!isSalespersonSettings ? <WorkspaceCoverageSettings /> : null}
+          <WorkspaceSalesSettings key={currentWorkspaceId} />
           {!isSalespersonSettings ? (
             <StormMapsSettingsCard workspaceId={currentWorkspaceId} />
           ) : null}

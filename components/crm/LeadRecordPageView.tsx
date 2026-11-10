@@ -1,5 +1,7 @@
 'use client';
 
+import { RoofingContactPanel } from '@/components/field-sales/RoofingContactPanel';
+
 import { PrivateMessages } from '@/components/crm-ai/PrivateMessages';
 
 import { ContactOutreach } from '@/components/outreach/ContactOutreach';
@@ -889,6 +891,7 @@ export function LeadRecordPageView({ contactId }: { contactId: string }) {
         <div className="mb-4"><PrivateMessages contactId={contact.id} /></div>
         <div className="grid gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
           <aside className="space-y-4">
+            <RoofingContactPanel contactId={contact.id} contactName={contact.full_name} />
             <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-border dark:bg-card">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">

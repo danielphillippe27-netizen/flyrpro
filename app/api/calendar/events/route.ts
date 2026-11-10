@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceMembershipForUser } from '@/app/api/_utils/workspace';
+import { calendarContact } from '@/lib/calendar/contact-access';
 import { normalizeCalendarEventPayload } from '@/lib/calendar/api';
 import type { CalendarEventRow } from '@/lib/calendar/types';
 
@@ -502,6 +503,7 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
   let workspaceId: string | null = null;
+  let canScheduleForTeam = false;
   if (workspaceIdParam) {
     const membership = await resolveWorkspaceMembershipForUser(admin, user.id, workspaceIdParam);
     if (membership.error || !membership.workspaceId) {
@@ -511,11 +513,18 @@ export async function POST(request: NextRequest) {
       );
     }
     workspaceId = membership.workspaceId;
+    canScheduleForTeam = membership.role === 'owner' || membership.role === 'admin';
   }
 
   let normalized;
   try {
     normalized = normalizeCalendarEventPayload(body);
+    if (normalized.contact_id) {
+      const contact = await calendarContact(admin, normalized.contact_id, user.id, workspaceId, canScheduleForTeam);
+      if (!contact) return NextResponse.json({ error: 'Contact access denied' }, { status: 403 });
+      normalized.contact_name = contact.full_name;
+      normalized.contact_address = contact.address;
+    }
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Invalid calendar event' },
@@ -538,7 +547,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.code === '0A000' ? 409 : 500 });
   }
 
   return NextResponse.json(

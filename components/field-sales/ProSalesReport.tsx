@@ -10,8 +10,9 @@ type Report = {
   enabled: boolean; needs_setup?: boolean; currency: string; timezone: string;
   capabilities: Record<string, boolean>; period_start: string; period_end: string; previous_start: string; previous_end: string;
   current_pipeline?: Pipeline;
+  outstanding_commission_minor?: string;
   summary: Summary; previous: Summary; change_percent: Record<string,string | null>;
-  metrics: { available: boolean; doors: number | null; conversations: number | null; leads: number | null; appointments: number | null; appointments_completed: number | null; opportunities: number | null; close_rate: string | null; revenue_per_door_minor: string | null };
+  metrics: { appointments_set?: number; appointments_closed?: number; appointments_scheduled?: number; appointments_no_show?: number; estimates_sent?: number; available: boolean; doors: number | null; conversations: number | null; leads: number | null; appointments: number | null; appointments_completed: number | null; opportunities: number | null; close_rate: string | null; revenue_per_door_minor: string | null };
   metric_notes: string; as_of: string; total_records: number; has_more: boolean;
   sales: { id: string; rep_name: string; product: string; status: string; sold_on: string; value_minor?: string; campaign_name?: string }[];
   groups: { id: string | null; name: string; sales: number; sold_value_minor?: string; average_ticket_minor?: string }[];
@@ -64,6 +65,19 @@ function ProSalesReportContent({embedded,initialScope}:{embedded:boolean;initial
     {d.capabilities.export && <button className={input} onClick={()=>exportPage(d)}>Export displayed sales</button>}
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Sales metrics">{cards.slice(0,5).map(([label,value,key])=><article key={key} className="rounded-2xl border p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>{d.change_percent[key]!=null && <p className="mt-2 text-xs text-muted-foreground">{Number(d.change_percent[key])>0?"+":""}{d.change_percent[key]}% vs previous period</p>}</article>)}</section>
     <section className="grid gap-3 sm:grid-cols-2" aria-label="Completed and collected">{cards.slice(5).map(([label,value,key])=><article key={key} className="rounded-2xl border p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>{d.change_percent[key]!=null && <p className="mt-2 text-xs text-muted-foreground">{d.change_percent[key]}% vs previous period</p>}</article>)}</section>
+    {d.outstanding_commission_minor !== undefined && <Link href="/sales/earnings" className="block rounded-xl border p-4">
+      <p className="text-sm text-muted-foreground">Workspace approved commissions awaiting payment</p>
+      <p className="text-2xl font-semibold">{money(d.outstanding_commission_minor, d.currency)}</p>
+    </Link>}
+    <section className="grid grid-cols-2 gap-3" aria-label="Appointment performance">
+      <div className="rounded-xl border p-3"><p>Appointments set</p><strong>{d.metrics.appointments_set ?? "—"}</strong></div>
+      <div className="rounded-xl border p-3"><p>Appointments closed</p><strong>{d.metrics.appointments_closed ?? "—"}</strong></div>
+    </section>
+    {d.metrics.available && d.metrics.appointments_scheduled !== undefined && <section className="grid gap-3 sm:grid-cols-3" aria-label="Appointments and estimates">
+      <div className="rounded-xl border p-3"><p>Scheduled visits</p><strong>{d.metrics.appointments_scheduled}</strong></div>
+      <div className="rounded-xl border p-3"><p>No-shows</p><strong>{d.metrics.appointments_no_show}</strong></div>
+      <div className="rounded-xl border p-3"><p>Estimates sent</p><strong>{d.metrics.estimates_sent}</strong></div>
+    </section>}
     {d.current_pipeline && <PipelineSummary data={d.current_pipeline} currency={d.currency}/>}
     <div className="flex gap-4 text-sm"><button className="underline" onClick={()=>setStage("sales")}>Inspect verified sales</button><button className="underline" onClick={()=>setStage("completed")}>Inspect completed jobs</button><button className="underline" onClick={()=>setStage("collected")}>Inspect payments</button></div>
     <p className="text-sm text-muted-foreground">Comparison: {d.previous_start} – {d.previous_end}. Sold uses contract date; completed uses completion date; collected uses payment date.</p>

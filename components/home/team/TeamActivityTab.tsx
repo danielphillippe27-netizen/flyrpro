@@ -1,5 +1,6 @@
 'use client';
 
+import { SessionSales } from '@/components/field-sales/SessionSales';
 import { useEffect, useState, useCallback } from 'react';
 import { SessionActivityFeed } from '@/components/activity/ActivityPageView';
 import { useWorkspace } from '@/lib/workspace-context';
@@ -357,6 +358,7 @@ function TeamEventFeed({ range, memberIds, typeFilter }: TeamActivityTabProps & 
                 </div>
 
                 <SessionBreadcrumbMap pathGeojson={selectedSession.path_geojson} />
+                <SessionSales sessionId={selectedSession.id} />
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <div className="rounded-xl border border-border/60 bg-muted/10 p-4">

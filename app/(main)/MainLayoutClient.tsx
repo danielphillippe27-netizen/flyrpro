@@ -1,5 +1,6 @@
 'use client';
 
+import { useFieldSales } from '@/lib/field-sales/client';
 import { useInboxEnabled } from '@/lib/hooks/useInboxEnabled';
 
 import Link from 'next/link';
@@ -47,6 +48,7 @@ const salesLeaderboardTab = { href: '/sales-leaderboard', icon: Trophy, label: '
 const diallerTab = { href: '/dialer', icon: PhoneCall, label: 'Dialler' };
 const demoTab = { href: '/demo-center', icon: PlayCircle, label: 'Demo' };
 const inboxTab = { href: '/inbox', icon: Inbox, label: 'Inbox' };
+const fieldSalesTab = { href: '/sales', icon: BriefcaseBusiness, label: 'Sales' };
 const salesPipelineTab = { href: '/sales/pipeline', icon: KanbanSquare, label: 'Pipeline' };
 const settingsTab = { href: '/settings', icon: Settings, label: 'Settings' };
 const salespersonWorkspaceTabs = [
@@ -92,9 +94,9 @@ type TabDef = { href: string; icon: LucideIcon; label: string };
 function tabIsActive(tab: TabDef, pathname: string | null): boolean {
   if (tab.href === '/campaigns' && (pathname === '/farms' || pathname?.startsWith('/farms/'))) return true;
   if (tab.href === '/settings') {
-    return pathname === '/settings' || !!pathname?.startsWith('/settings/') ||
-      pathname === '/sales' || (!!pathname?.startsWith('/sales/') && !pathname.startsWith('/sales/pipeline'));
+    return pathname === '/settings' || !!pathname?.startsWith('/settings/');
   }
+  if (tab.href === '/sales' && pathname?.startsWith('/sales/pipeline')) return false;
   return pathname === tab.href || !!pathname?.startsWith(tab.href + '/');
 }
 
@@ -365,6 +367,7 @@ function MainLayoutContent({
   canUseInbox: boolean;
 }) {
   const { enabled: inboxEnabled } = useInboxEnabled();
+  const { data: fieldSales } = useFieldSales({}, true);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessLevel, isAmbassador } = useWorkspace();
@@ -379,6 +382,10 @@ function MainLayoutContent({
     const withAmbassadorPortal = (items: TabDef[]) => {
       items = items.filter(tab => (canUseInbox && inboxEnabled) || tab.href !== '/inbox');
       if(macCrm){items=items.map(tab=>tab.href==='/leads'?{...tab,href:'/contacts',label:'Contacts'}:tab.href==='/inbox'?{...tab,label:'Business inbox'}:tab);if (canUseInbox && inboxEnabled) items.splice(1,0,{href:'/messages',icon:Inbox,label:'Inbox'});}
+      if (fieldSales?.enabled && !isSelfServeDemoFlow) {
+        const index = items.findIndex(tab => tab.href === '/stats' || tab.href === '/settings');
+        items.splice(index < 0 ? items.length : index, 0, fieldSalesTab);
+      }
       if (isAmbassador && !items.some(tab => tab.href === ambassadorPortalTab.href)) {
         const index = items.findIndex(tab => tab.href === '/settings');
         items = index === -1 ? [...items, ambassadorPortalTab] : [...items.slice(0, index), ambassadorPortalTab, ...items.slice(index)];

@@ -25,8 +25,10 @@ export type Sale = {
 export type SalesData = {
   enabled: boolean;
   pro_sales_version?: number;
+  roofing_earnings_enabled?: boolean;
   capabilities?: Record<string, boolean>;
   verification_required?: boolean;
+  settings?: { roofing_sales_enabled?: boolean; roofing_required_sale_fields?: string[] };
   needs_setup?: boolean;
   role: string;
   user_id: string;
@@ -90,7 +92,7 @@ export const salesChanged = "wolfgrid:field-sales-changed";
 export function useFieldSales<T = SalesData>(
   filter: SalesFilter = {},
   bootstrap = false,
-  resource?: "field_sales_workbench" | "field_sales_report" | "field_sales_drilldown" | "field_sales_leaderboard" | "field_sales_target_list" | "field_sales_home" | "field_sales_commission_home" | "field_sales_entry",
+  resource?: "field_sales_workbench" | "field_sales_report" | "field_sales_drilldown" | "field_sales_leaderboard" | "field_sales_target_list" | "field_sales_home" | "field_sales_commission_home" | "field_sales_entry" | "field_sales_workspace_command" | "field_sales_session_summary",
   reportFilter?: Record<string, string | number>,
   resourceSelector?: string,
 ) {
@@ -149,6 +151,8 @@ export function useFieldSales<T = SalesData>(
             ? { p_workspace: currentWorkspaceId, ...(resource === "field_sales_entry" ? {p_context: JSON.parse(reportFilterJSON)} : {p_filter: JSON.parse(reportFilterJSON)}),
                 ...(resource === "field_sales_drilldown" ? {p_kind: resourceSelector} : {}),
                 ...(resource === "field_sales_leaderboard" ? {p_metric: resourceSelector ?? null} : {}) }
+            : resource === "field_sales_session_summary"
+            ? { p_workspace: currentWorkspaceId, p_session: resourceSelector }
             : bootstrap || resource
             ? { p_workspace: currentWorkspaceId }
             : {
@@ -232,7 +236,7 @@ export async function salesCommand(
   const { data: result, error } = await createClient().rpc(resource, {
     p_workspace: workspace,
     p_action: action,
-    p_data: data,
+    p_data: resource === "field_sales_command" ? { ...data, client_contract_version: 2 } : data,
   });
   if (error) throw new Error(error.message);
   window.dispatchEvent(new Event(salesChanged));

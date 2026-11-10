@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceMembershipForUser } from '@/app/api/_utils/workspace';
+import { calendarContact } from '@/lib/calendar/contact-access';
 import { normalizeCalendarEventPayload } from '@/lib/calendar/api';
 import type { CalendarEventRow } from '@/lib/calendar/types';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -48,16 +49,19 @@ async function fetchAuthorizedEvent(request: NextRequest, id: string) {
   }
 
   const event = data as unknown as CalendarEventRow;
+  let canScheduleForTeam = false;
   if (event.workspace_id) {
     const membership = await resolveWorkspaceMembershipForUser(admin, user.id, event.workspace_id);
     if (membership.error || !membership.workspaceId) {
       return { error: NextResponse.json({ error: 'Workspace access denied' }, { status: 403 }) };
     }
-  } else if (event.user_id !== user.id) {
+    canScheduleForTeam = membership.role === 'owner' || membership.role === 'admin';
+  }
+  if (event.user_id !== user.id && !canScheduleForTeam) {
     return { error: NextResponse.json({ error: 'Calendar event access denied' }, { status: 403 }) };
   }
 
-  return { admin, event };
+  return { admin, event, userId: user.id, canScheduleForTeam };
 }
 
 export async function PATCH(
@@ -72,6 +76,13 @@ export async function PATCH(
   let normalized;
   try {
     normalized = normalizeCalendarEventPayload(body, resolved.event);
+    if (normalized.contact_id) {
+      const contact = await calendarContact(resolved.admin, normalized.contact_id, resolved.userId,
+        resolved.event.workspace_id, resolved.canScheduleForTeam);
+      if (!contact) return NextResponse.json({ error: 'Contact access denied' }, { status: 403 });
+      normalized.contact_name = contact.full_name;
+      normalized.contact_address = contact.address;
+    }
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Invalid calendar event' },
@@ -91,7 +102,7 @@ export async function PATCH(
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.code === '0A000' ? 409 : 500 });
   }
 
   return NextResponse.json({ event: { ...(data as unknown as CalendarEventRow), kind: 'standalone' } });
@@ -112,7 +123,7 @@ export async function DELETE(
     .eq('id', id);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: error.code === '0A000' ? 409 : 500 });
   }
 
   return NextResponse.json({ ok: true });
