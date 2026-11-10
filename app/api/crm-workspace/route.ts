@@ -89,7 +89,7 @@ const schema = z.discriminatedUnion("action", [
       version: z.number().int().positive(),
     })
     .strict(),
-  z.object({ ...common, action: z.literal("read"), id: uuid }).strict(),
+  z.object({ ...common, action: z.literal("read"), id: uuid, messageId: uuid.optional() }).strict(),
 ]);
 export async function GET(request: NextRequest) {
   try {
@@ -126,11 +126,17 @@ export async function POST(request: NextRequest) {
       throw new CrmRequestError("Check the contact details and try again.");
     const { action, workspaceId, ...payload } = input.data;
     await requireCrmWorkspace(api, workspaceId);
-    const result = await api.rpc("coco_crm_command", {
-      ws: workspaceId,
-      command: action,
-      payload,
-    });
+    const result = input.data.action === "read" && input.data.messageId
+      ? await api.rpc("coco_read_through_message", {
+          ws: workspaceId,
+          target: input.data.id,
+          message_id: input.data.messageId,
+        })
+      : await api.rpc("coco_crm_command", {
+          ws: workspaceId,
+          command: action,
+          payload,
+        });
     if (result.error) {
       if (result.error.code === "42501")
         throw new CrmRequestError(

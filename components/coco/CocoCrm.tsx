@@ -19,7 +19,6 @@ import {
   Plus,
   Search,
   RefreshCw,
-  Send,
   Settings2,
   Sparkles,
   SquarePen,
@@ -416,6 +415,7 @@ function CocoWorkspace({
   const [savingHistoryRange, setSavingHistoryRange] = useState(false);
   const [historyReviewError, setHistoryReviewError] = useState("");
   const refreshOpenThread = useRef<(() => Promise<void>) | null>(null);
+  const [readReceipts, setReadReceipts] = useState<Record<string, string>>({});
   const hasPagedHistory = useRef(false);
   const messageScroll = useRef<HTMLDivElement>(null),
     scrollConversation = useRef<string | undefined>(undefined),
@@ -542,6 +542,7 @@ function CocoWorkspace({
           client_id: c.id,
           channel: c.phone ? "sms" : "email",
           last_message_at: null,
+          last_incoming_at: null,
           last_read_at: null,
           preview: "Start a conversation",
           message_id: null,
@@ -565,6 +566,13 @@ function CocoWorkspace({
       ? sortedConversations.find((c) => c.client_id === inboxContact.id)
       : sortedConversations[0]);
   const conversationContact = activeConversation && clientsById[activeConversation.client_id];
+  const readAtFor = (conversation: Conversation | undefined) =>
+    Math.max(
+      Date.parse(conversation?.last_read_at ?? "") || 0,
+      Date.parse(readReceipts[conversation?.id ?? ""] ?? "") || 0,
+    );
+  const activeReadAt = useRef(0);
+  activeReadAt.current = readAtFor(activeConversation);
   const activeContactRef = useRef<string | undefined>(undefined);
   activeContactRef.current = activeConversation?.client_id;
   const latestSubmittedByContact = new Map(submittedMessages.map((message) => [message.client_id, message]));
@@ -675,12 +683,14 @@ function CocoWorkspace({
     [userId, workspaceId],
   );
   useEffect(() => {
-    const id = activeConversation?.client_id;
-    if (!id || area !== "Inbox") {
+    const id = selectedConversation ? activeConversation?.client_id : undefined;
+    if (!id || area !== "Inbox" || emailClient) {
       setHistory([]);
       return;
     }
     let active = true;
+    let markingRead = false;
+    let acknowledgedAt = 0;
     setHistory([]);
     setHistoryError("");
     setHistoryMore(false);
@@ -699,34 +709,39 @@ function CocoWorkspace({
           (a.sent_at ?? a.created_at).localeCompare(b.sent_at ?? b.created_at),
         );
       });
-    };
-    refreshOpenThread.current = refresh;
-    const load = async () => {
-      try {
-        await refresh();
-        if (active) {
-          await cocoApi(
-            userId,
-            workspaceId,
-            "read",
-            { id },
-            abort.current.signal,
-          );
-          if (active)
-            setData((current) => ({
-              ...current,
-              conversations: current.conversations.map((c) =>
-                c.client_id === id
-                  ? { ...c, last_read_at: new Date().toISOString() }
-                  : c,
-              ),
-            }));
+      if (document.visibilityState !== "visible" || !stickToLatest.current || markingRead) return;
+      let latestIncoming: Message | undefined;
+      let latestIncomingAt = Math.max(activeReadAt.current, acknowledgedAt);
+      for (const message of result.messages) {
+        const timestamp = Date.parse(message.sent_at ?? message.imported_at ?? "");
+        if (message.direction === "incoming" && timestamp > latestIncomingAt) {
+          latestIncoming = message;
+          latestIncomingAt = timestamp;
         }
-      } catch (e) {
-        if (active) setHistoryError((e as Error).message);
+      }
+      if (!latestIncoming) return;
+      markingRead = true;
+      try {
+        const receipt = await cocoApi<{ last_read_at: string }>(
+          userId, workspaceId, "read", { id, messageId: latestIncoming.id }, abort.current.signal,
+        );
+        const receiptAt = Date.parse(receipt.last_read_at);
+        acknowledgedAt = receiptAt;
+        if (alive.current) {
+          setReadReceipts((current) => Date.parse(current[id] ?? "") >= receiptAt
+            ? current
+            : { ...current, [id]: receipt.last_read_at });
+        }
+      } catch {
+        // Keep the unread dot until a later refresh can save the receipt.
+      } finally {
+        markingRead = false;
       }
     };
-    void load();
+    refreshOpenThread.current = refresh;
+    void refresh().catch((e) => {
+      if (active) setHistoryError((e as Error).message);
+    });
     const timer = setInterval(() => {
       if (document.visibilityState === "visible")
         void refresh().catch(() => {});
@@ -736,7 +751,7 @@ function CocoWorkspace({
       refreshOpenThread.current = null;
       clearInterval(timer);
     };
-  }, [activeConversation?.client_id, area, userId, workspaceId, historyPage]); // History is paged independently from the contact list.
+  }, [activeConversation?.client_id, selectedConversation, area, emailClient, userId, workspaceId, historyPage]); // History is paged independently from the contact list.
   async function refreshInbox() {
     if (refreshingInbox) return;
     setRefreshingInbox(true);
@@ -1767,10 +1782,6 @@ function CocoWorkspace({
                       ) : "—"}
                       {syncEnabled === false && " · Sync paused"}
                     </span>
-                    <button type="button" aria-label="Refresh conversations" title="Refresh conversations"
-                      disabled={refreshingInbox} onClick={() => void refreshInbox()}>
-                      {refreshingInbox ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                    </button>
                   </div>
                 </div>
                 <div className="conversation-scroll">
@@ -1786,17 +1797,14 @@ function CocoWorkspace({
                         Date.parse(submitted.created_at) > Date.parse(conversation.last_message_at) + 2000);
                       const lastAt = showSubmitted ? submitted.sent_at : conversation.last_message_at;
                       const recent = lastAt && Date.now() - Date.parse(lastAt) < 86_400_000;
-                      const unread =
-                        conversation.last_message_at &&
-                        (!conversation.last_read_at ||
-                          conversation.last_message_at >
-                            conversation.last_read_at);
+                      const unread = Date.parse(conversation.last_incoming_at ?? "") > readAtFor(conversation);
                       return (
                         <button
                           key={conversation.id}
                           className={`conversation-row ${activeConversation?.id === conversation.id ? "selected" : ""}`}
                           onClick={() => selectConversation(conversation)}
                         >
+                          {unread && <span className="unread-dot" role="img" aria-label="Unread messages" />}
                           <Avatar name={conversationName(conversation)} />
                           <span className="conversation-preview">
                             <span>
@@ -1810,7 +1818,6 @@ function CocoWorkspace({
                               {(showSubmitted ? submitted.body : conversation.preview) ?? "Attachment"}
                             </small>
                           </span>
-                          {unread && <span className="unread-dot" />}
                         </button>
                       );
                     })}
@@ -1823,6 +1830,49 @@ function CocoWorkspace({
                 </div>
               </div>
               <div className="thread-panel">
+                {!emailClient && (
+                  <div className="thread-header messages-contact-header">
+                    <div className="thread-actions">
+                      {activeConversation && (
+                        <button
+                          type="button"
+                          className="thread-back"
+                          aria-label="Back to conversations"
+                          onClick={() => {
+                            setSelectedConversation(null);
+                            setInboxContact(null);
+                          }}
+                        >
+                          <ArrowLeft size={20} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="thread-refresh"
+                        aria-label="Refresh conversations"
+                        title="Refresh conversations"
+                        disabled={refreshingInbox}
+                        onClick={() => void refreshInbox()}
+                      >
+                        {refreshingInbox
+                          ? <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+                          : <RefreshCw size={15} aria-hidden="true" />}
+                      </button>
+                    </div>
+                    {activeConversation && conversationContact && (
+                      <ConversationContactCard
+                        key={conversationContact.id}
+                        client={conversationContact}
+                        connection={`${activeConversation.channel.toUpperCase()} · ${deviceOnline ? "Mac connected" : "Mac offline"}`}
+                        onOpenClient={() => openClient(conversationContact.id)}
+                        onEmail={() => openContactInbox(conversationContact, "email")}
+                      />
+                    )}
+                    {activeConversation && (
+                      <a className="messages-phone-call" aria-label="Call conversation contact" title="Call" aria-disabled={!conversationContact?.phone} href={conversationContact?.phone ? `tel:${encodeURIComponent(conversationContact.phone)}` : undefined}><Phone size={19} /></a>
+                    )}
+                  </div>
+                )}
                 {emailClient ? (
                   <EmailComposer
                     key={emailClient.id}
@@ -1841,28 +1891,6 @@ function CocoWorkspace({
                   />
                 ) : activeConversation ? (
                   <>
-                    <div className="thread-header messages-contact-header">
-                      <button
-                        className="thread-back"
-                        aria-label="Back to conversations"
-                        onClick={() => {
-                          setSelectedConversation(null);
-                          setInboxContact(null);
-                        }}
-                      >
-                        <ArrowLeft size={20} />
-                      </button>
-                      {conversationContact && (
-                        <ConversationContactCard
-                          key={conversationContact.id}
-                          client={conversationContact}
-                          connection={`${activeConversation.channel.toUpperCase()} · ${deviceOnline ? "Mac connected" : "Mac offline"}`}
-                          onOpenClient={() => openClient(conversationContact.id)}
-                          onEmail={() => openContactInbox(conversationContact, "email")}
-                        />
-                      )}
-                      <a className="messages-phone-call" aria-label="Call conversation contact" title="Call" aria-disabled={!conversationContact?.phone} href={conversationContact?.phone ? `tel:${encodeURIComponent(conversationContact.phone)}` : undefined}><Phone size={19} /></a>
-                    </div>
                     <div
                       className="thread-messages"
                       ref={messageScroll}
@@ -1966,7 +1994,7 @@ function CocoWorkspace({
                           </button>
                         </div>
                       )}
-                      <div className="composer">
+                      <div className="composer-row">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button className="attachment-button" aria-label="Add to message" title="Templates and attachments" disabled={sending}>
@@ -1978,26 +2006,27 @@ function CocoWorkspace({
                             <DropdownMenuItem onSelect={() => void chooseAttachments()}>Attachments</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
-                        <textarea
-                          aria-label="Message draft"
-                          placeholder="Write a message…"
-                          value={composer}
-                          readOnly={sending}
-                          onChange={(e) => setComposer(e.target.value)}
-                        />
-                        <button
-                          className="send-button"
-                          data-recipient={
-                            clientsById[activeConversation.client_id ?? ""]
-                              ?.phone ?? ""
-                          }
-                          aria-label="Send message"
-                          disabled={sending || !composer.trim()}
-                          title="Send with Apple Messages"
-                          onClick={() => void sendMessage()}
-                        >
-                          <Send size={17} />
-                        </button>
+                        <div className="composer" data-draft={composer}>
+                          <textarea
+                            aria-label="Message draft"
+                            aria-description="Press Enter to send or Shift+Enter for a new line."
+                            placeholder="Write a message…"
+                            rows={1}
+                            enterKeyHint="send"
+                            value={composer}
+                            readOnly={sending}
+                            onChange={(e) => setComposer(e.target.value)}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key !== "Enter" || event.shiftKey || event.altKey ||
+                                event.ctrlKey || event.metaKey || event.nativeEvent.isComposing ||
+                                event.keyCode === 229
+                              ) return;
+                              event.preventDefault();
+                              if (!event.repeat) void sendMessage();
+                            }}
+                          />
+                        </div>
                       </div>
                       {!deviceOnline && (
                         <p className="composer-note">Your Mac is offline. Drafts stay in this session until you reconnect.</p>

@@ -1044,13 +1044,17 @@
   white-space: nowrap;
 }
 .coco-crm .unread-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--surface);
+  background: #0095ff;
   position: absolute;
-  right: 10px;
-  bottom: 15px;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.coco-crm .conversation-row.selected .unread-dot {
+  background: #fff;
 }
 .coco-crm .thread-panel {
   min-width: 0;
@@ -1144,44 +1148,70 @@
   background: var(--card);
   padding: 14px 27px;
 }
-.coco-crm .composer {
+.coco-crm .composer-row {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+}
+.coco-crm .composer-row .attachment-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  padding: 0;
   border: 1px solid var(--line);
-  border-radius: 11px;
-  padding: 9px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text);
+}
+.coco-crm .composer {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   background: var(--card);
 }
-.coco-crm .composer > button {
-  border: 0;
-  background: none;
-  color: var(--coco-muted);
-  padding: 8px;
-  line-height: 0;
+.coco-crm .composer:focus-within,
+.coco-crm .composer-row .attachment-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+/* Match the textarea's wrapping so the pill grows with the draft. */
+.coco-crm .composer textarea,
+.coco-crm .composer::after {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 30px;
+  max-height: 120px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.coco-crm .composer::after {
+  content: attr(data-draft) " ";
+  visibility: hidden;
+  overflow: hidden;
 }
 .coco-crm .composer textarea {
+  align-self: stretch;
   border: 0;
   outline: 0;
   resize: none;
-  min-height: 37px;
-  max-height: 120px;
-  flex: 1;
-  padding: 8px 2px;
   color: var(--text);
-  font-size: 12px;
+  background: transparent;
+  overflow: auto;
 }
 .coco-crm .composer textarea::placeholder {
   color: var(--coco-muted);
 }
 .coco-crm .composer .sparkle-button {
   color: var(--cocoa);
-}
-.coco-crm .composer .send-button {
-  background: var(--cocoa);
-  color: var(--primary-foreground);
-  border-radius: 8px;
-  padding: 10px;
 }
 .coco-crm .composer-note {
   text-align: center;
@@ -1666,8 +1696,7 @@
     text-overflow: ellipsis;
   }
   .coco-crm .conversation-preview time,
-  .coco-crm .conversation-preview small,
-  .coco-crm .unread-dot {
+  .coco-crm .conversation-preview small {
     display: none;
   }
   .coco-crm .thread-header {
@@ -1697,16 +1726,6 @@
   }
   .coco-crm .composer-area {
     padding: 7px;
-  }
-  .coco-crm .composer {
-    gap: 0;
-    padding: 5px;
-  }
-  .coco-crm .composer > button {
-    padding: 5px;
-  }
-  .coco-crm .composer textarea {
-    font-size: 11px;
   }
   .coco-crm .composer-note {
     font-size: 8px;
@@ -3446,9 +3465,6 @@
   .coco-crm .conversation-preview small {
     font-size: 11px;
   }
-  .coco-crm .unread-dot {
-    display: block;
-  }
   .coco-crm .thread-panel {
     display: none;
   }
@@ -3479,9 +3495,6 @@
   }
   .coco-crm .composer-area {
     padding: 10px;
-  }
-  .coco-crm .composer textarea {
-    font-size: 13px;
   }
   .coco-crm .bubble {
     font-size: 12px;
@@ -4636,9 +4649,6 @@
   .coco-crm .bubble {
     max-width: min(75%, 650px);
   }
-  .coco-crm .unread-dot {
-    display: block;
-  }
 }
 /* Inbox already exposes Ask Dot in its titlebar; keep the composer unobstructed. */
 .coco-crm .app-shell:has(.inbox-shell) .dot-launcher {
@@ -4960,13 +4970,6 @@
   .coco-crm .conversation-list {
     padding: 8px;
   }
-  .coco-crm .composer {
-    flex-wrap: wrap;
-  }
-  .coco-crm .composer textarea {
-    min-width: 60%;
-    flex: 1;
-  }
 }
 
 /* Compact Apple Contacts-style browser and contact card. */
@@ -5025,14 +5028,16 @@
 
 /* A quiet, centered conversation header, like Messages on macOS. */
 .coco-crm .thread-header.messages-contact-header { display:grid; grid-template-columns:40px minmax(0,1fr) 40px; align-items:center; min-height:78px; padding:8px 16px; gap:8px; background:var(--bg); border-bottom:1px solid var(--line); }
-.coco-crm .messages-contact-header .thread-back { grid-column:1; grid-row:1; }
+.coco-crm .messages-contact-header .thread-actions { grid-column:1; grid-row:1; gap:6px; }
 .coco-crm .messages-contact-header .messages-contact-identity { grid-column:2; grid-row:1; justify-self:center; display:flex; flex-direction:column; align-items:center; gap:3px; max-width:100%; padding:0 8px; border:0; background:transparent; color:var(--text); }
 .coco-crm .messages-contact-identity .avatar { width:30px; height:30px; flex:0 0 30px; aspect-ratio:1; font-size:11px; background:var(--primary); color:var(--primary-foreground); }
 .coco-crm .messages-contact-name { display:flex; align-items:center; gap:3px; max-width:100%; padding:3px 8px; border-radius:12px; background:var(--surface); font-size:12px; line-height:16px; font-weight:600; }
 .coco-crm .messages-contact-header .messages-phone-call { grid-column:3; grid-row:1; justify-self:end; display:grid; place-items:center; width:32px; height:32px; padding:0; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--text); }
 .coco-crm .messages-phone-call[aria-disabled=true] { opacity:.35; pointer-events:none; }
 .coco-crm .messages-contact-identity:focus-visible,.coco-crm .messages-phone-call:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
-@media(max-width:760px) { .coco-crm .thread-header.messages-contact-header { min-height:72px; padding:6px 12px; } }
+@media(max-width:760px) {
+  .coco-crm .thread-header.messages-contact-header { grid-template-columns:68px minmax(0,1fr) 68px; min-height:72px; padding:6px 12px; }
+}
 
 .coco-crm .messages-contact-name { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 
@@ -5096,28 +5101,27 @@
 .coco-crm .new-conversation-button { display:grid; place-items:center; flex:0 0 36px; height:36px; padding:0; border:1px solid var(--border); border-radius:50%; background:var(--card); color:var(--foreground); cursor:pointer; }
 .coco-crm .new-conversation-button:hover { background:var(--accent); }
 .coco-crm .conversation-list .search-field { width:100%; max-width:none; height:36px; margin:0; border-radius:20px; background:color-mix(in srgb,var(--card) 85%,transparent); }
-.coco-crm .conversation-sync { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:32px; margin-top:5px; padding-left:6px; color:var(--muted-foreground); font-size:11px; }
-.coco-crm .conversation-sync button { display:grid; place-items:center; width:32px; height:32px; flex-shrink:0; border:1px solid var(--border); border-radius:50%; background:var(--card); color:var(--foreground); }
-.coco-crm .conversation-sync button:disabled { opacity:.55; }
+.coco-crm .conversation-sync { margin-top:5px; padding-left:6px; color:var(--muted-foreground); font-size:11px; }
 .coco-crm .conversation-recent-dot { display:inline-block; width:7px; height:7px; margin-right:5px; border-radius:50%; background:#25b760; vertical-align:1px; }
 .coco-crm .conversation-row.selected .conversation-recent-dot { background:#86efac; box-shadow:0 0 0 1px #14532d; }
 .conversation-history-button { margin-top:6px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--foreground); }
-.conversation-history-button:focus-visible,.coco-crm .conversation-sync button:focus-visible,.coco-crm .new-conversation-button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.conversation-history-button:focus-visible,.coco-crm .thread-refresh:focus-visible,.coco-crm .new-conversation-button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
 .coco-crm .conversation-scroll { flex:1; min-height:0; max-width:none; overflow-y:auto; overscroll-behavior:contain; padding:12px 8px; }
-.coco-crm .conversation-row { position:relative; min-height:72px; margin:0; padding:10px; border:0; border-radius:8px; background:transparent; gap:12px; }
-.coco-crm .conversation-row::after { content:""; position:absolute; left:58px; right:8px; bottom:0; height:1px; background:var(--border); }
+.coco-crm .conversation-row { position:relative; min-height:72px; margin:0; padding:10px 10px 10px 19px; border:0; border-radius:8px; background:transparent; gap:12px; }
+.coco-crm .conversation-row::after { content:""; position:absolute; left:67px; right:8px; bottom:0; height:1px; background:var(--border); }
 .coco-crm .conversation-row .avatar { width:36px; height:36px; flex:0 0 36px; background:var(--card); color:var(--foreground); border:1px solid var(--border); }
-.coco-crm .conversation-row.selected { background:var(--primary); color:var(--primary-foreground); }
+.coco-crm .conversation-row.selected { --conversation-selection: #0071e3; background:var(--conversation-selection); color:var(--primary-foreground); }
 .coco-crm .conversation-row.selected::after { background:transparent; }
-.coco-crm .conversation-row.selected .conversation-preview strong,.coco-crm .conversation-row.selected .conversation-preview small,.coco-crm .conversation-row.selected .conversation-preview time { color:var(--primary-foreground); }
-.coco-crm .conversation-row.selected .avatar { background:color-mix(in srgb,var(--primary-foreground) 20%,var(--primary)); color:var(--primary-foreground); border-color:transparent; }
+.coco-crm .conversation-row.selected .conversation-preview strong,.coco-crm .conversation-row.selected .conversation-preview small,.coco-crm .conversation-row.selected .conversation-preview time { color:inherit; }
+.coco-crm .conversation-row.selected .avatar { background:color-mix(in srgb,var(--primary-foreground) 20%,var(--conversation-selection)); color:inherit; border-color:transparent; }
 .coco-crm .inbox-shell .thread-panel { position:relative; overflow:hidden; }
 .coco-crm .thread-header.messages-contact-header { position:absolute; top:0; left:0; right:0; z-index:4; background:transparent; border:0; pointer-events:none; }
 .coco-crm .messages-contact-header > * { pointer-events:auto; }
-.coco-crm .messages-contact-name,.coco-crm .messages-contact-header .messages-phone-call { background:color-mix(in srgb,var(--secondary) 85%,transparent); backdrop-filter:blur(12px); }
+.coco-crm .messages-contact-header .thread-refresh { display:grid; place-items:center; width:32px; height:32px; padding:0; flex-shrink:0; border-radius:50%; color:var(--text); }
+.coco-crm .messages-contact-header .thread-refresh:disabled { opacity:.55; }
+.coco-crm .messages-contact-name,.coco-crm .messages-contact-header .messages-phone-call,.coco-crm .messages-contact-header .thread-refresh { background:color-mix(in srgb,var(--secondary) 85%,transparent); backdrop-filter:blur(12px); }
 .coco-crm .thread-panel .thread-messages { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding-top:100px; scroll-padding-top:100px; }
-.coco-crm .thread-panel .composer-area { flex-shrink:0; padding:10px 16px 6px; background:transparent; border:0; }
-.coco-crm .composer { border-radius:22px; background:var(--card); }
+.coco-crm .thread-panel .composer-area { flex-shrink:0; padding:6px 16px 8px; background:transparent; border:0; }
 .coco-crm .bubble { font-size:13px; line-height:1.45; border-radius:18px; }
 .coco-crm .bubble .submitted-attachment { display:block; color:inherit; overflow-wrap:anywhere; }
 .coco-crm .contacts-lists { min-height:0; overflow-y:auto; overscroll-behavior:contain; }

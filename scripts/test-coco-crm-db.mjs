@@ -11,6 +11,7 @@ await db.exec(await fs.readFile('supabase/migrations/20261028070000_coco_crm_pag
 await db.exec(await fs.readFile('supabase/migrations/20261028071000_coco_attachment_manifest.sql','utf8'));
 await db.exec(await fs.readFile('supabase/migrations/20261028072000_coco_ai_tasks.sql','utf8'));
 await db.exec(await fs.readFile('supabase/migrations/20261028080000_apple_review_save_details.sql','utf8'));
+await db.exec(await fs.readFile('supabase/migrations/20261110021500_coco_incoming_unread.sql','utf8'));
 
 await db.exec(`set role authenticated;set request.jwt.claim.sub='${u}'`);
 const run=async(command,payload={})=>(await db.query('select coco_crm_command($1,$2,$3) result',[w,command,JSON.stringify(payload)])).rows[0].result;
@@ -19,6 +20,21 @@ await db.query('select set_mac_crm_preferences($1,true,false)',[w]);await db.que
 const imported={rowID:1,guid:'attachment-message',participants:['+19055550101'],direction:'incoming',body:'Synthetic fixture',bodyStatus:'decoded',service:'iMessage',sentAt:'2026-10-28T12:00:00Z',hasAttachments:true,attachments:[{guid:'file1',fileName:'example.pdf',mimeType:'application/pdf',byteCount:3,status:'excluded'}]};
 await db.query('select import_mac_contact_messages($1,$2,0,$3,1)',[d,c,JSON.stringify([imported])]);assert.equal((await db.query("select attachment_manifest->0->>'fileName' name from mac_contact_messages where external_id='attachment-message'")).rows[0].name,'example.pdf');
 await assert.rejects(db.query('select import_mac_contact_messages($1,$2,1,$3,2)',[d,c,JSON.stringify([{...imported,rowID:2,guid:'invalid-file',attachments:[{...imported.attachments[0],localPath:'/private/forged'}]}])]),'local paths cannot enter the transaction');
+const outgoing = {...imported,rowID:2,guid:'outgoing-fixture',direction:'outgoing',sentAt:'2026-10-28T12:01:00Z',hasAttachments:false,attachments:[]};
+await db.query('select import_mac_contact_messages($1,$2,1,$3,2)',[d,c,JSON.stringify([outgoing])]);
+const initialConversation = (await snapshot()).conversations.find(conversation=>conversation.id===c);
+assert.equal(Date.parse(initialConversation.last_message_at),Date.parse(outgoing.sentAt));
+assert.equal(Date.parse(initialConversation.last_incoming_at),Date.parse(imported.sentAt));
+const incomingId = (await db.query("select id from mac_contact_messages where external_id='attachment-message'")).rows[0].id;
+const markRead = async id => (await db.query('select coco_read_through_message($1,$2,$3) result',[w,c,id])).rows[0].result;
+await assert.rejects(markRead(initialConversation.message_id),'outgoing messages cannot advance read receipts');
+assert.equal(Date.parse((await markRead(incomingId)).last_read_at),Date.parse(imported.sentAt));
+const newer = {...imported,rowID:3,guid:'new-unread-fixture',sentAt:'2026-10-28T12:02:00Z'};
+await db.query('select import_mac_contact_messages($1,$2,2,$3,3)',[d,c,JSON.stringify([newer])]);
+const unreadConversation = (await snapshot()).conversations.find(conversation=>conversation.id===c);
+assert(Date.parse(unreadConversation.last_incoming_at)>Date.parse(unreadConversation.last_read_at));
+await markRead(unreadConversation.message_id);
+assert.equal(Date.parse((await markRead(incomingId)).last_read_at),Date.parse(newer.sentAt),'a stale retry cannot move the receipt backwards');
 const reviewArgs=[w,d,'review-fixture','Riley Tradesperson',JSON.stringify(['6475550199']),'[]','6475550199','',null,'Tradie','Fixture note'];
 const reviewSQL='select import_apple_contact_details($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) id';
 const reviewID=(await db.query(reviewSQL,reviewArgs)).rows[0].id;

@@ -56,6 +56,7 @@ export type Message = {
   body_status: string;
   sender_identifier?: string | null;
   sent_at: string | null;
+  imported_at?: string;
   created_at: string;
   attachments: MessageAttachment[];
 };
@@ -65,6 +66,7 @@ export type Conversation = {
   channel: string;
   participants?: string[];
   last_message_at: string | null;
+  last_incoming_at: string | null;
   last_read_at: string | null;
   preview: string | null;
   message_id: string | null;

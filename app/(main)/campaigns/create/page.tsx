@@ -77,6 +77,7 @@ const SELF_SERVE_PREVIEW_PITCH_DEGREES = 62;
 const SELF_SERVE_PREVIEW_START_BEARING = -35;
 const SELF_SERVE_PREVIEW_ORBIT_DURATION_MS = 11000;
 const CAMPAIGN_BUILDING_LIMIT = 1000;
+const BUILDING_FOOTPRINT_MIN_ZOOM = 12;
 
 type TeamMember = {
   user_id: string;
@@ -479,6 +480,7 @@ export default function CreateCampaignPage() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapStyleRevision, setMapStyleRevision] = useState(0);
   const [isSatellite, setIsSatellite] = useState(false);
+  const [isAtBuildingZoom, setIsAtBuildingZoom] = useState(false);
   const [mapSearchQuery, setMapSearchQuery] = useState('');
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
@@ -765,7 +767,7 @@ export default function CreateCampaignPage() {
 
   /** Add residential-only 2D building footprints from Mapbox vector tiles.
    *  Hides built-in style buildings and renders residential buildings with theme-aware slate at 80% opacity.
-   *  Works with streets-v11 / dark-v11 / satellite-streets-v12 styles. */
+   *  Used on the standard basemap. */
   const add2DBuildingsLayer = (m: mapboxgl.Map) => {
     const buildingLayerId = '2d-buildings';
     if (m.getLayer(buildingLayerId)) return; // already added
@@ -803,7 +805,7 @@ export default function CreateCampaignPage() {
         source: 'composite',
         'source-layer': 'building',
         type: 'fill',
-        minzoom: 12,
+        minzoom: BUILDING_FOOTPRINT_MIN_ZOOM,
         // Exclude explicitly non-residential building types
         filter: [
           'match',
@@ -880,6 +882,13 @@ export default function CreateCampaignPage() {
       zoom: 15,
     });
     appliedBaseStyleKeyRef.current = resolvedMapStyle.key;
+
+    const mapInstance = map.current;
+    const updateBuildingZoom = () => {
+      setIsAtBuildingZoom(mapInstance.getZoom() >= BUILDING_FOOTPRINT_MIN_ZOOM);
+    };
+    mapInstance.on('zoom', updateBuildingZoom);
+    updateBuildingZoom();
 
     map.current.on('load', () => {
       setMapLoaded(true);
@@ -988,6 +997,7 @@ export default function CreateCampaignPage() {
     drawRef.current = draw;
 
     return () => {
+      mapInstance.off('zoom', updateBuildingZoom);
       if (map.current) {
         // Temporarily suppress AbortError from Mapbox's in-flight tile requests
         const suppressAbort = (e: PromiseRejectionEvent) => {
@@ -1037,8 +1047,9 @@ export default function CreateCampaignPage() {
       appliedBaseStyleKeyRef.current = expectedStyleKey;
       setMapStyleRevision((current) => current + 1);
 
-      // Keep custom residential building overlays off satellite mode.
-      if (!isSatellite) {
+      if (isSatellite) {
+        hideBaseBuildingLayers(map.current);
+      } else {
         add2DBuildingsLayer(map.current);
       }
 
@@ -2554,27 +2565,29 @@ export default function CreateCampaignPage() {
                 <span>Clear boundary</span>
               </button>
 
-              <div
-                aria-live="polite"
-                className={`rounded-xl border px-3 py-2.5 ${
-                  campaignBuildingLimitExceeded
-                    ? 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-300'
-                    : selfServeSoftSurfaceClass
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em]">
-                    <Building2 className="h-4 w-4" />
-                    Buildings
-                  </span>
-                  <span className="text-lg font-black tabular-nums">{campaignBuildingCount.toLocaleString()}</span>
+              {mapLoaded && !isSatellite && isAtBuildingZoom && (
+                <div
+                  aria-live="polite"
+                  className={`rounded-xl border px-3 py-2.5 ${
+                    campaignBuildingLimitExceeded
+                      ? 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-300'
+                      : selfServeSoftSurfaceClass
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em]">
+                      <Building2 className="h-4 w-4" />
+                      Buildings
+                    </span>
+                    <span className="text-lg font-black tabular-nums">{campaignBuildingCount.toLocaleString()}</span>
+                  </div>
+                  {campaignBuildingLimitExceeded ? (
+                    <p className="mt-1 text-[11px] font-black uppercase tracking-wide">
+                      1,000 building limit — area too large
+                    </p>
+                  ) : null}
                 </div>
-                {campaignBuildingLimitExceeded ? (
-                  <p className="mt-1 text-[11px] font-black uppercase tracking-wide">
-                    1,000 building limit — area too large
-                  </p>
-                ) : null}
-              </div>
+              )}
 
               {stormContext && !isSelfServeDemo && <details className="rounded-xl border border-cyan-300/30 bg-slate-950 p-3 text-xs text-white">
                 <summary className="cursor-pointer font-semibold text-cyan-200">Review storm area · {stormContext.event.title}</summary>
