@@ -58,7 +58,7 @@ export function OutreachTools({ clients, userId, workspaceId, onSaved }: { clien
   </div>;
 }
 
-export function RelationshipPanel({ client, userId, tasks, messages, onSaved }: { client: Client; userId: string; tasks: Task[]; messages: Message[]; onSaved: () => Promise<void> }) {
+export function RelationshipPanel({ client, userId, tasks, messages, onSaved, showTimeline = true }: { client: Client; userId: string; tasks: Task[]; messages: Message[]; onSaved: () => Promise<void>; showTimeline?: boolean }) {
   const [data, setData] = useState<RelationshipData | null>(null);
   const [fields, setFields] = useState<SpecialField[]>([]);
   const [name, setName] = useState('');
@@ -81,7 +81,7 @@ export function RelationshipPanel({ client, userId, tasks, messages, onSaved }: 
       setData({ ...data, fields, version: result.version }); setMessage('Fields saved.');
     } catch (error) { setMessage(errorMessage(error)); } finally { setBusy(false); }
   }
-  const timeline = [
+  const timeline = !showTimeline ? [] : [
     ...(data?.events ?? []).map(event => ({ id: event.id, at: event.occurred_at, title: `${event.kind === 'follow-up' ? 'Follow-up scheduled' : event.kind.replaceAll('-', ' ')} · ${event.title}`, body: event.body })),
     ...tasks.filter(task => task.completed_at).map(task => ({ id: `task-${task.id}`, at: task.completed_at!, title: `Task completed · ${task.title}`, body: task.notes || '' })),
     ...messages.map(item => ({ id: `message-${item.id}`, at: item.sent_at || item.created_at, title: item.direction === 'outgoing' ? 'Message sent' : 'Message received', body: item.body || 'Attachment' })),
@@ -106,10 +106,10 @@ export function RelationshipPanel({ client, userId, tasks, messages, onSaved }: 
         const result = await relationshipApi<RelationshipData>(userId, client.workspace_id, undefined, client.id);
         setData(current => current ? { ...current, events: result.events } : result); await onSaved();
       }} />
-      <h3>Touch-point history</h3>
+      {showTimeline && <><h3>Touch-point history</h3>
       <p className="relationship-hint">Logged activities, completed tasks and loaded conversations. Dates here do not automatically schedule annual reminders.</p>
       {!timeline.length && <p>No touch points recorded yet.</p>}
-      <ol className="relationship-timeline">{timeline.map(event => <li key={event.id}><strong>{event.title}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>{event.body && <p>{letterText(event.body, client)}</p>}</li>)}</ol>
+      <ol className="relationship-timeline">{timeline.map(event => <li key={event.id}><strong>{event.title}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>{event.body && <p>{letterText(event.body, client)}</p>}</li>)}</ol></>}
     </>}
     {!data && message && <button type="button" onClick={() => setReload(value => value + 1)}>Retry loading</button>}
   </section>;

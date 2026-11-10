@@ -256,6 +256,7 @@ struct WolfGridWebView: NSViewRepresentable {
             var result = apple.status(); result["deviceId"] = deviceID
             result["agentVersion"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
             result["historyRanges"] = true; result["backgroundEnabled"] = backgroundEnabled
+            result["callHistory"] = true
             do { try MacMessagesProvider().checkReadAccess(); result["messagesAllowed"] = true; result["status"] = "ready" }
             catch MacMessageError.unsupported { result["messagesAllowed"] = false; result["status"] = "schema_changed" }
             catch { result["messagesAllowed"] = false; result["status"] = "permission_required" }
@@ -265,6 +266,41 @@ struct WolfGridWebView: NSViewRepresentable {
             let states = ["paused": "Paused", "syncing": "Syncing approved conversations", "connected": "Monitoring approved conversations", "idle": "Waiting for the next sync check", "permission_required": "Messages permission needed", "authentication_required": "Sign-in needed", "schema_changed": "Messages update needed", "offline": "Offline · retrying", "error": "Mac update needed"]
             guard let title = states[state] else { replyHandler(nil, "Invalid runtime state"); return }
             runtimeState = title; replyHandler(["ok": true], nil); return
+        }
+        if action == "call-history" {
+            guard !fromRuntime, let view = message.webView, let page = view.url,
+                  ["/messages", "/inbox", "/contacts", "/leads"].contains(page.path),
+                  let user = input["userId"] as? String, let workspace = input["workspaceId"] as? String,
+                  session == user + ":" + workspace,
+                  let contact = input["contactId"] as? String, UUID(uuidString: contact) != nil else {
+                replyHandler(nil, "Open a CRM contact in your current workspace."); return
+            }
+            let started = generation
+            Task { @MainActor in
+                @MainActor func current() -> Bool {
+                    generation == started && session == user + ":" + workspace && view.url == page
+                }
+                do {
+                    let payload = try await view.callAsyncJavaScript("""
+                        const query = new URLSearchParams({workspaceId: workspace, contactId: contact, view: 'call-identifiers'});
+                        const response = await fetch('/api/coco/recipient?' + query, {cache: 'no-store', headers: {'x-wolfgrid-user-id': owner}});
+                        return response.ok ? await response.json() : null;
+                        """, arguments: ["owner": user, "workspace": workspace, "contact": contact], in: nil, contentWorld: .defaultClient) as? [String: Any]
+                    guard current(), payload?["id"] as? String == contact,
+                          let handles = payload?["identifiers"] as? [String], handles.count <= 100 else {
+                        replyHandler(nil, "Could not verify this CRM contact."); return
+                    }
+                    let identifiers = Set(handles.filter { MacMessagesProvider.normalizedIdentifier($0) == $0 })
+                    let calls = try await Task.detached { try MacCallHistory().recent(identifiers: identifiers) }.value
+                    guard current() else { replyHandler(nil, "Session changed; result discarded."); return }
+                    replyHandler(["status": identifiers.isEmpty ? "unmatched" : "ready", "calls": calls.map {
+                        ["startedAt": $0.startedAt, "connected": $0.connected, "kind": $0.kind, "direction": $0.direction, "durationSeconds": $0.durationSeconds, "providerId": $0.providerID as Any? ?? NSNull()]
+                    }], nil)
+                } catch {
+                    replyHandler(nil, "Apple call history is unavailable. Check Phone or FaceTime and WolfGrid’s Full Disk Access.")
+                }
+            }
+            return
         }
         guard !busy else { replyHandler(nil, "A Mac operation is already running"); return }
         guard fromRuntime || ["/settings/mac", "/settings/integrations/apple", "/messages", "/inbox", "/contacts", "/leads"].contains(message.webView?.url?.path ?? "") else { replyHandler(nil, "Open Mac settings"); return }
@@ -343,7 +379,7 @@ struct WolfGridWebView: NSViewRepresentable {
                     guard fromRuntime, input["scanId"] as? String == scanID else { throw MacMessageError.unsupported("Approve CRM sync first") }
                     let expectedSession = session
                     result = try await cocoAttachments.upload(input: input, current: { [weak self] in self?.session == expectedSession && self?.scanID == input["scanId"] as? String })
-                case "gmail-auth", "message-attachments", "message-clear-attachments", "message-send":
+                case "gmail-auth", "message-attachments", "message-clear-attachments", "message-send", "contact-message-send", "contact-phone-call":
                     guard !fromRuntime, let user = input["userId"] as? String, let workspace = input["workspaceId"] as? String,
                           session == user + ":" + workspace, let view = message.webView else { throw CocoNativeError(message: "Your account or workspace changed.") }
                     if action == "gmail-auth" {
@@ -356,9 +392,17 @@ struct WolfGridWebView: NSViewRepresentable {
                         result = cocoMessages.choose(contactID: id, scope: session)
                     } else {
                         let page = view.url
-                        result = try await cocoMessages.send(input: input, view: view, current: {
-                            self.session == startedSession && self.generation == started && view.url == page && self.trusted(view.url)
-                        })
+                        let current = { self.session == startedSession && self.generation == started && view.url == page && self.trusted(view.url) }
+                        if action == "contact-phone-call" {
+                            guard let id = input["contactId"] as? String, UUID(uuidString: id) != nil else {
+                                throw CocoNativeError(message: "Choose a CRM contact.")
+                            }
+                            let phone = try await cocoMessages.recipient(user: user, workspace: workspace, contactID: id, mode: "contact-call", view: view)
+                            guard current() else { throw CocoNativeError(message: "Your account or workspace changed.") }
+                            result = try apple.handoff(identifier: phone, name: input["contactName"] as? String ?? "CRM contact", phone: true, stillAuthorized: current)
+                        } else {
+                            result = try await cocoMessages.send(input: input, view: view, mode: action == "contact-message-send" ? "contact-text" : "", current: current)
+                        }
                     }
                 case "contacts-review":
                     guard !fromRuntime, let user = input["userId"] as? String, let workspace = input["workspaceId"] as? String,

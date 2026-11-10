@@ -234,13 +234,13 @@ export function FollowUpTaskBoard() {
   return (
     <div className="min-h-screen bg-gray-50 text-slate-900 dark:bg-background dark:text-foreground">
       <header className="sticky top-0 z-10 border-b border-border bg-white dark:bg-card">
-        <div className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6 lg:px-8">
           <h1 className="text-2xl font-bold text-foreground">Follow Up</h1>
           <p className="mt-1 text-muted-foreground">All follow-ups across your activity feed</p>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted-foreground">Period:</span>
           {(['today', 'overdue', 'future'] as const).map((bucket) => (
@@ -280,8 +280,8 @@ export function FollowUpTaskBoard() {
           </div>
         )}
 
-        <section className="min-h-[300px] divide-y divide-border rounded-xl border border-border bg-card">
-          <div className="min-h-[300px] divide-y divide-slate-100 dark:divide-border/70">
+        <section className="divide-y divide-border rounded-xl border border-border bg-card">
+          <div className="divide-y divide-slate-100 dark:divide-border/70">
             {loading && events.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground">
                 Loading follow-ups...
@@ -293,7 +293,7 @@ export function FollowUpTaskBoard() {
             ) : (
               groupedEvents.map((group) => (
                 <div key={group.date}>
-                  <div className="bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700 dark:bg-muted/40 dark:text-foreground">
+                  <div className="bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:bg-muted/40 dark:text-foreground">
                     {formatDateHeader(group.date)} ({group.items.length})
                   </div>
                   <ul className="divide-y divide-slate-100 dark:divide-border/60">
@@ -302,13 +302,13 @@ export function FollowUpTaskBoard() {
                       const hue = (name.charCodeAt(0) + index * 23) % 360;
 
                       return (
-                        <li key={event.id} className="grid grid-cols-[32px_48px_1fr_auto] items-center gap-4 px-4 py-4">
+                        <li key={event.id} className="grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 sm:gap-3">
                           <span
                             aria-hidden="true"
-                            className="block h-6 w-6 rounded-md border border-slate-300 dark:border-border"
+                            className="block h-5 w-5 rounded-md border border-slate-300 dark:border-border"
                           />
                           <div
-                            className="flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold text-white"
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white"
                             style={{
                               backgroundColor: `hsl(${hue}, 40%, 56%)`,
                             }}
@@ -316,17 +316,17 @@ export function FollowUpTaskBoard() {
                             {initials(name)}
                           </div>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-red-600 dark:text-red-400">{name}</div>
-                            <div className="mt-0.5 truncate text-sm text-slate-700 dark:text-muted-foreground">
+                            <div className="truncate text-sm font-semibold leading-[18px] text-red-600 dark:text-red-400">{name}</div>
+                            <div className="truncate text-sm leading-[18px] text-slate-700 dark:text-muted-foreground">
                               {taskSummary(event)}
                             </div>
-                            <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
-                              <User className="h-3.5 w-3.5" />
-                              <span>{event.display_name ?? 'Me'}</span>
+                            <div className="flex items-center gap-1 text-xs text-slate-400">
+                              <User className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{event.display_name ?? 'Me'}</span>
                             </div>
                           </div>
-                          <div className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-muted-foreground">
-                            <Clock className="h-4 w-4 text-slate-400" />
+                          <div className="flex items-center gap-1 whitespace-nowrap text-xs font-medium text-slate-600 dark:text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5 text-slate-400" />
                             {formatDueTime(event.event_time)}
                           </div>
                         </li>

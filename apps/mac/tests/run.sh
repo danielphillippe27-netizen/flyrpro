@@ -4,7 +4,7 @@ root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d /tmp/wolfgrid-mac-tests.XXXXXX)
 trap 'rm -rf "$work"' EXIT
 python3 "$root/tests/fixture.py" "$work/fixture.db"
-swiftc "$root/Sources/MacMessagesProvider.swift" "$root/Sources/MacOAuthPolicy.swift" "$root/Sources/AppleDate.swift" "$root/tests/main.swift" -o "$work/tests"
+swiftc "$root/Sources/MacMessagesProvider.swift" "$root/Sources/MacCallHistory.swift" "$root/Sources/MacOAuthPolicy.swift" "$root/Sources/AppleDate.swift" "$root/tests/main.swift" -o "$work/tests"
 "$work/tests" "$work/fixture.db"
 
 mkdir -p "$work/review"

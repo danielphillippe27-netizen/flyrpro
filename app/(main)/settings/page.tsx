@@ -611,6 +611,11 @@ function SettingsPageContent() {
           ) : null}
 
           {!isSalespersonSettings ? <InboxSettingsCard /> : null}
+          <Link href="/settings/email-templates" className="flex items-center gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground hover:bg-muted/50">
+            <Mail className="h-5 w-5 shrink-0" aria-hidden="true" />
+            <div className="flex-1"><h2 className="font-semibold">Email templates</h2><p className="mt-1 text-sm text-muted-foreground">Create and edit reusable emails for contacts.</p></div>
+            <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+          </Link>
 
           {/* Account Section */}
           <Card>

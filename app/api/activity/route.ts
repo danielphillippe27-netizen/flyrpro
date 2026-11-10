@@ -702,6 +702,41 @@ async function loadSessionCampaignMap(
   );
 }
 
+async function withSessionAppointmentCounts(
+  admin: ReturnType<typeof createAdminClient>,
+  workspaceId: string,
+  rows: SessionEventRow[]
+): Promise<SessionEventRow[]> {
+  const sessionIdFor = (row: SessionEventRow) =>
+    row.event_type === 'session_completed' ? firstNonEmptyString(row.session_id, row.ref_id) : null;
+  const sessionIds = [...new Set(rows.map(sessionIdFor).filter((id): id is string =>
+    id != null && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)
+  ))];
+  const counts = new Map<string, { user_id: string; appointments_count: number }>();
+
+  // Keep the PostgREST URL bounded when filtering the entire feed by appointments.
+  for (let start = 0; start < sessionIds.length; start += 100) {
+    const { data, error } = await admin
+      .from('session_analytics')
+      .select('id, user_id, appointments_count')
+      .eq('workspace_id', workspaceId)
+      .in('id', sessionIds.slice(start, start + 100));
+
+    if (error) {
+      console.warn('[activity] Failed to load session appointment counts:', error.message);
+      break;
+    }
+    for (const row of data ?? []) counts.set(row.id, row);
+  }
+
+  return rows.map((row) => {
+    const count = counts.get(sessionIdFor(row) ?? '');
+    return count?.user_id === row.user_id
+      ? { ...row, payload: { ...row.payload, appointments_count: count.appointments_count } }
+      : row;
+  });
+}
+
 async function loadCampaignMap(
   admin: ReturnType<typeof createAdminClient>,
   campaignIds: string[]
@@ -751,7 +786,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const workspaceId = firstNonEmptyString(searchParams.get('workspaceId'));
     const typeFilter = (searchParams.get('type') || '').trim() || null;
-    const sessionMetric = SESSION_METRICS.find(({ id }) => id === searchParams.get('sessionMetric'))?.id;
+    const requestedMetric = searchParams.get('sessionMetric');
+    const sessionMetric = SESSION_METRICS.find(({ id }) => id === requestedMetric)?.id;
+    const filterByAppointments = typeFilter === 'session_completed' && sessionMetric === 'appointments';
     const includeMembersRequested = toBool(searchParams.get('includeMembers'));
     const requestedMemberId = firstNonEmptyString(searchParams.get('memberId'));
     const requestedMemberIds = requestedMemberId
@@ -1118,12 +1155,20 @@ export async function GET(request: NextRequest) {
         });
       }
 
+      if (filterByAppointments) {
+        rows = await withSessionAppointmentCounts(admin, workspaceId, rows);
+      }
       if (typeFilter === 'session_completed' && sessionMetric) {
         rows = rows.filter(({ payload }) => Number(getSessionCounts(payload ?? {})[sessionMetric]) > 0);
+      } else if (typeFilter === 'session_completed' && requestedMetric === 'flyers') {
+        rows = rows.filter(({ payload }) => Number(payload?.flyers_delivered) > 0);
       }
 
       count = rows.length;
       rows = rows.slice(offset, offset + limit);
+      if (!filterByAppointments) {
+        rows = await withSessionAppointmentCounts(admin, workspaceId, rows);
+      }
     } else {
       let result = await runEventsQueryWithFallbacks(true, true);
       if (result.error) {

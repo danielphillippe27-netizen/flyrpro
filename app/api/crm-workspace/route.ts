@@ -55,6 +55,13 @@ const schema = z.discriminatedUnion("action", [
       value: z.string().trim().min(1).max(60),
     })
     .strict(),
+  z.object({
+    ...common,
+    action: z.literal("bulk-tags"),
+    ids: z.array(uuid).min(1).max(500),
+    tag: z.string().trim().min(1).max(60),
+    operation: z.enum(["add", "remove"]),
+  }).strict(),
   z
     .object({
       ...common,
@@ -93,7 +100,7 @@ const schema = z.discriminatedUnion("action", [
 ]);
 export async function GET(request: NextRequest) {
   try {
-    const { api } = await crmRequest(request, "mac");
+    const { api } = await crmRequest(request, "crm");
     const ws = request.nextUrl.searchParams.get("workspaceId");
     const offset = Number(request.nextUrl.searchParams.get("offset") ?? 0);
     if (
@@ -120,24 +127,40 @@ export async function GET(request: NextRequest) {
 }
 export async function POST(request: NextRequest) {
   try {
-    const { api } = await crmRequest(request, "mac", true);
+    const { api } = await crmRequest(request, "crm", true);
     const input = schema.safeParse(await readCrmBody(request, 80000));
     if (!input.success)
       throw new CrmRequestError("Check the contact details and try again.");
     const { action, workspaceId, ...payload } = input.data;
     await requireCrmWorkspace(api, workspaceId);
-    const result = input.data.action === "read" && input.data.messageId
+    const result = action === "create"
+      ? await api.rpc("coco_create_contact_dedup", { ws: workspaceId, payload })
+      : input.data.action === "read" && input.data.messageId
       ? await api.rpc("coco_read_through_message", {
           ws: workspaceId,
           target: input.data.id,
           message_id: input.data.messageId,
         })
-      : await api.rpc("coco_crm_command", {
-          ws: workspaceId,
-          command: action,
-          payload,
-        });
+      : input.data.action === "bulk-tags"
+        ? await api.rpc("coco_bulk_contact_tags", {
+            ws: workspaceId,
+            ids: input.data.ids,
+            tag: input.data.tag,
+            operation: input.data.operation,
+          })
+        : await api.rpc("coco_crm_command", {
+            ws: workspaceId,
+            command: action,
+            payload,
+          });
     if (result.error) {
+      if (action === "create" && result.error.code === "23505")
+        throw new CrmRequestError("More than one existing contact matches. Search for the contact first.", 409);
+      if (action === "bulk-tags" && result.error.code === "23514")
+        throw new CrmRequestError(
+          "A contact already has 20 tags. Remove a tag before adding another.",
+          409,
+        );
       if (result.error.code === "42501")
         throw new CrmRequestError(
           "Contact unavailable in this account and workspace.",

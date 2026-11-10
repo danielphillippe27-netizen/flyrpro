@@ -375,9 +375,7 @@ export function ActivityPageView({
   const routePayload = selectedRoute?.event.payload;
   const routeCounts = routePayload ? getSessionCounts(routePayload) : null;
   const routeMetrics = routeCounts && routePayload ? [
-    ...SESSION_METRICS.filter(({ id }) => id !== 'flyers' ||
-      (routePayload.session_mode ?? routePayload.mode) === 'flyer' || toCount(routeCounts.flyers) > 0)
-      .map(({ id, label }) => ({ label, value: formatMetric(routeCounts[id]) })),
+    ...SESSION_METRICS.map(({ id, label }) => ({ label, value: formatMetric(routeCounts[id]) })),
     { label: 'Active time', value: formatDuration(routePayload.active_seconds) },
     { label: 'Distance', value: routePayload.distance_meters != null ? `${formatMetric(routePayload.distance_meters)} m` : '—' },
     { label: 'Conversation rate', value: formatRatePercent(routeCounts.conversations, routeCounts.doors) },
@@ -576,12 +574,10 @@ export function ActivityPageView({
                         {formatMetric(firstDefined(selectedEvent.payload.leads_created, selectedEvent.payload.leads))}
                       </div>
                     </div>
-                    {(selectedEvent.payload.session_mode ?? selectedEvent.payload.mode) === 'flyer' && (
-                      <div className="rounded border p-2">
-                        <div className="text-muted-foreground text-xs">Flyers Delivered</div>
-                        <div className="font-medium">{formatMetric(selectedEvent.payload.flyers_delivered)}</div>
-                      </div>
-                    )}
+                    <div className="rounded border p-2">
+                      <div className="text-muted-foreground text-xs">Appointments</div>
+                      <div className="font-medium">{formatMetric(getSessionCounts(selectedEvent.payload).appointments)}</div>
+                    </div>
                     <div className="rounded border p-2">
                       <div className="text-muted-foreground text-xs">Active Time</div>
                       <div className="font-medium">{formatDuration(selectedEvent.payload.active_seconds)}</div>
@@ -666,7 +662,7 @@ function SessionFeedRow({
       <span id={metricsId} className="grid grid-cols-4 gap-2">
         {SESSION_METRICS.map(({ id, label }) => (
           <span key={id}>
-            <span className="block text-[11px] text-muted-foreground sm:text-xs">{id === 'flyers' ? 'Flyers' : label}</span>
+            <span className="block text-[11px] text-muted-foreground sm:text-xs">{label}</span>
             <span className="block text-sm font-medium tabular-nums">{counts[id] == null ? '—' : formatMetric(counts[id])}</span>
           </span>
         ))}

@@ -9,7 +9,7 @@ import { useWorkspace } from '@/lib/workspace-context';
 import { nativeContactUrl, recipientsFor, type OutreachContact, type OutreachMode } from '@/lib/outreach/native';
 import { GmailConnection, outreachRequest } from './GmailConnection';
 
-export function ContactOutreach({ contacts, compact = false, iconOnly = false }: { contacts: OutreachContact[]; compact?: boolean; iconOnly?: boolean }) {
+export function ContactOutreach({ contacts, compact = false, iconOnly = false, showMessage = true, disabled = false }: { contacts: OutreachContact[]; compact?: boolean; iconOnly?: boolean; showMessage?: boolean; disabled?: boolean }) {
   const { currentWorkspaceId } = useWorkspace();
   const [mode, setMode] = useState<OutreachMode | null>(null);
   const [available, setAvailable] = useState<OutreachContact[]>([]);
@@ -25,8 +25,12 @@ export function ContactOutreach({ contacts, compact = false, iconOnly = false }:
   const [results, setResults] = useState<Record<string, string>>({});
   const requestId = useRef('');
   const stop = useRef(false);
+  const trigger = useRef<HTMLElement | null>(null);
+  const [skippedCount, setSkippedCount] = useState(0);
   function open(next: OutreachMode) {
+    trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const eligible = recipientsFor(contacts, next);
+    setSkippedCount(contacts.length - eligible.length);
     setAvailable(eligible); setSelected(eligible.map(c => c.id)); setMode(next); setQueue(null); setIndex(0); setNotice(''); setResults({}); requestId.current = crypto.randomUUID();
   }
   function start() { setQueue(available.filter(c => selected.includes(c.id))); setIndex(0); }
@@ -53,29 +57,34 @@ export function ContactOutreach({ contacts, compact = false, iconOnly = false }:
   const title = mode === 'call' ? 'Call list' : mode === 'message' ? 'Message list' : 'Email list';
   return <>
     {iconOnly ? <div className="flex items-center gap-2">
-      <Button type="button" size="icon-sm" variant="outline" aria-label="Message list" title="Message list" disabled={!contacts.length} onClick={() => open('message')}><MessageSquare /></Button>
-      <Button type="button" size="icon-sm" variant="outline" aria-label="Call list" title="Call list" disabled={!contacts.length} onClick={() => open('call')}><Phone /></Button>
-      <Button type="button" size="icon-sm" variant="outline" aria-label="Email list" title="Email list" disabled={!contacts.length} onClick={() => open('email')}><Mail /></Button>
+      {showMessage && <Button type="button" size="icon-sm" variant="outline" aria-label="Message list" title="Message list" disabled={disabled || !contacts.length} onClick={() => open('message')}><MessageSquare /></Button>}
+      <Button type="button" size="icon-sm" variant="outline" aria-label="Call list" title="Call list" disabled={disabled || !contacts.length} onClick={() => open('call')}><Phone /></Button>
+      <Button type="button" size="icon-sm" variant="outline" aria-label="Email list" title="Email list" disabled={disabled || !contacts.length} onClick={() => open('email')}><Mail /></Button>
     </div> : <div className="flex flex-wrap gap-2">
-      {compact && contacts[0] && nativeContactUrl(contacts[0], 'message') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'message')!}><MessageSquare className="mr-1.5 h-4 w-4" />Messages</a></Button> : <Button type="button" size="sm" variant="outline" disabled={!contacts.length || compact} onClick={() => open('message')}><MessageSquare className="mr-1.5 h-4 w-4" />{compact ? 'Messages' : 'Message list'}</Button>}
-      {compact && contacts[0] && nativeContactUrl(contacts[0], 'call') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'call')!}><Phone className="mr-1.5 h-4 w-4" />Call on Mac / iPhone</a></Button> : <Button type="button" size="sm" variant="outline" disabled={!contacts.length || compact} onClick={() => open('call')}><Phone className="mr-1.5 h-4 w-4" />{compact ? 'Call on Mac / iPhone' : 'Call list'}</Button>}
-      <Button type="button" size="sm" variant="outline" disabled={!contacts.length} onClick={() => open('email')}><Mail className="mr-1.5 h-4 w-4" />{compact ? 'Gmail' : 'Email list'}</Button>
+      {compact && contacts[0] && nativeContactUrl(contacts[0], 'message') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'message')!}><MessageSquare className="mr-1.5 h-4 w-4" />Messages</a></Button> : <Button type="button" size="sm" variant="outline" disabled={disabled || !contacts.length || compact} onClick={() => open('message')}><MessageSquare className="mr-1.5 h-4 w-4" />{compact ? 'Messages' : 'Message list'}</Button>}
+      {compact && contacts[0] && nativeContactUrl(contacts[0], 'call') ? <Button size="sm" variant="outline" asChild><a href={nativeContactUrl(contacts[0], 'call')!}><Phone className="mr-1.5 h-4 w-4" />Call on Mac / iPhone</a></Button> : <Button type="button" size="sm" variant="outline" disabled={disabled || !contacts.length || compact} onClick={() => open('call')}><Phone className="mr-1.5 h-4 w-4" />{compact ? 'Call on Mac / iPhone' : 'Call list'}</Button>}
+      <Button type="button" size="sm" variant="outline" disabled={disabled || !contacts.length} onClick={() => open('email')}><Mail className="mr-1.5 h-4 w-4" />{compact ? 'Gmail' : 'Email list'}</Button>
     </div>}
     <Dialog open={mode !== null} onOpenChange={open => { if (!open && !sendingRef.current) setMode(null); }}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" showCloseButton={!busy}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" showCloseButton={!busy} onCloseAutoFocus={event => {
+        if (trigger.current?.isConnected) {
+          event.preventDefault();
+          trigger.current.focus();
+        }
+      }}>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{mode === 'email' ? 'Send a separate email to each selected contact from your connected Gmail.' : mode === 'message' ? 'Open each contact in Messages. Copy your message, paste it into Messages, then press Send.' : 'Open each number in your calling app, then return here for the next contact.'}</DialogDescription></DialogHeader>
         {mode === 'email' && <GmailConnection onConnected={setGmail} />}
         {!queue ? <>
-          <p className="text-sm text-muted-foreground">{available.length} unique recipients · {contacts.length - available.length} missing, invalid or duplicate</p>
+          <p className="text-sm text-muted-foreground">{available.length} unique recipients · {skippedCount} missing, invalid or duplicate</p>
           {mode === 'email' && <Input aria-label="Email subject" placeholder="Subject" maxLength={200} value={subject} onChange={e => setSubject(e.target.value)} />}
           {mode !== 'call' && <Textarea aria-label="Message body" placeholder="Write your message…" maxLength={mode === 'email' ? 20000 : 5000} value={body} onChange={e => setBody(e.target.value)} />}
           <Button variant="ghost" size="sm" onClick={() => setSelected(selected.length === available.length ? [] : available.map(c => c.id))}>{selected.length === available.length ? 'Deselect all' : 'Select all'}</Button>
           <div className="max-h-60 space-y-1 overflow-y-auto">{available.map(c => <label key={c.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted"><input type="checkbox" checked={selected.includes(c.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, c.id] : ids.filter(id => id !== c.id))} /><span className="min-w-0"><span className="block truncate font-medium">{c.full_name || 'Contact'}</span><span className="block text-sm text-muted-foreground">{mode === 'email' ? c.email : c.phone_e164 || c.phone}</span></span></label>)}</div>
-          <Button disabled={!selected.length || (mode === 'email' && (!gmail || !subject.trim() || !body.trim())) || (mode === 'message' && !body.trim())} onClick={start}>{mode === 'email' ? 'Review' : 'Start'} {selected.length} contacts</Button>
+          <Button disabled={!selected.length || (mode === 'email' && (!gmail || !subject.trim() || !body.trim())) || (mode === 'message' && !body.trim())} onClick={start}>{mode === 'email' ? 'Review' : 'Start'} {selected.length} {selected.length === 1 ? 'contact' : 'contacts'}</Button>
         </> : mode === 'email' ? <>
           <p className="text-sm">From <strong>{gmail}</strong> · {queue.length} recipients</p><p className="text-xs text-muted-foreground">Keep this tab open while sending. Accepted means Gmail received the email, not confirmed delivery.</p><h3 className="font-semibold">{subject}</h3><p className="whitespace-pre-wrap text-sm">{body}</p>
           <ul className="max-h-48 overflow-y-auto text-sm space-y-2">{queue.map(c => <li key={c.id}>{c.full_name || 'Contact'} ({c.email}): {results[c.id] === 'accepted' ? 'Accepted by Gmail' : results[c.id] || 'Not sent'}</li>)}</ul>
-          <Button disabled={busy || !gmail || !currentWorkspaceId || queue.every(c => results[c.id])} onClick={() => void sendEmails()}>{busy ? 'Sending…' : Object.keys(results).length ? 'Continue unsent emails' : `Send ${queue.length} emails`}</Button>
+          <Button disabled={busy || !gmail || !currentWorkspaceId || queue.every(c => results[c.id])} onClick={() => void sendEmails()}>{busy ? 'Sending…' : Object.keys(results).length ? 'Continue unsent emails' : `Send ${queue.length} ${queue.length === 1 ? 'email' : 'emails'}`}</Button>
           {busy && <Button variant="outline" onClick={() => { stop.current = true; setNotice('Pausing after the current email.'); }}>Pause after current email</Button>}
         </> : current ? <>
           <p className="text-sm text-muted-foreground">{index + 1} of {queue.length}</p><h3 className="text-xl font-semibold">{current.full_name || 'Contact'}</h3><p>{current.phone_e164 || current.phone}</p>

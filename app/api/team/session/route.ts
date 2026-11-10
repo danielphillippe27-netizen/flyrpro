@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 
-    const [campaignResult, profileResult] = await Promise.all([
+    const [campaignResult, profileResult, appointmentResult] = await Promise.all([
       session.campaign_id
         ? supabase
             .from('campaigns')
@@ -142,7 +142,17 @@ export async function GET(request: NextRequest) {
             .eq('user_id', session.user_id)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      supabase
+        .from('session_analytics')
+        .select('appointments_count')
+        .eq('workspace_id', resolution.workspaceId)
+        .eq('id', session.id)
+        .maybeSingle(),
     ]);
+
+    if (appointmentResult.error) {
+      console.warn('[team/session] Failed to load appointment count:', appointmentResult.error.message);
+    }
 
     const campaign = campaignResult.data as CampaignNameRow | null;
     const profile = profileResult.data as UserProfileNameRow | null;
@@ -164,6 +174,7 @@ export async function GET(request: NextRequest) {
         doors_hit: doorsHit,
         conversations,
         flyers_delivered: Number(session.flyers_delivered ?? 0) || 0,
+        appointments_count: appointmentResult.data?.appointments_count ?? null,
         leads_created: leadsCreated,
         conversations_per_door: doorsHit > 0 ? conversations / doorsHit : 0,
         leads_per_conversation: conversations > 0 ? leadsCreated / conversations : 0,

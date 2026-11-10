@@ -12,7 +12,13 @@ import {
 } from "@/lib/mac-companion/server";
 import { cocoGmailAccess } from "@/lib/coco/gmail";
 import { gmailMime } from "@/lib/outreach/gmail";
+import { contactGmailMime } from "@/lib/coco/gmail-mime";
 export const runtime = "nodejs";
+const extraRecipients = z.array(z.string().email().max(254)).max(10).optional();
+const file = z.object({
+  name: z.string().trim().min(1).max(150).refine(value => !/[\x00-\x1f\x7f]/.test(value)),
+  data: z.string().min(1).max(2_800_000).regex(/^[a-zA-Z0-9+/]+={0,2}$/),
+}).strict();
 export async function POST(request: NextRequest) {
   try {
     const { api, user } = await crmRequest(request, "mac", true);
@@ -22,6 +28,10 @@ export async function POST(request: NextRequest) {
         client_id: z.string().uuid(),
         expected_email:z.string().email().max(254),
         request_id: z.string().uuid(),
+        reply_to: z.string().uuid().optional(),
+        cc: extraRecipients,
+        bcc: extraRecipients,
+        files: z.array(file).max(5).optional(),
         subject: z
           .string()
           .trim()
@@ -36,24 +46,39 @@ export async function POST(request: NextRequest) {
           .refine((s) => !s.includes("\0")),
       })
       .strict()
-      .parse(await readCrmBody(request, 450000));
+      .parse(await readCrmBody(request, 3_300_000));
     await requireCrmWorkspace(api, b.workspace_id);
     const { data: c } = await api
       .from("contacts")
-      .select("id,email")
+      .select("id,email,do_not_contact")
       .eq("id", b.client_id)
       .eq("workspace_id", b.workspace_id)
       .eq("user_id", user.id)
       .maybeSingle();
     if (!c?.email || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(c.email))
       throw new CrmRequestError("Contact needs a valid email.", 403);
+    if (c.do_not_contact) throw new CrmRequestError("This contact is marked do not contact.", 403);
     if(c.email.trim().toLowerCase()!==b.expected_email.trim().toLowerCase())throw new CrmRequestError('The recipient changed. Reopen this contact before sending.',409);
-    const gmail = await cocoGmailAccess(user.id, "send");
-    const raw = gmailMime(gmail.email, c.email, b.subject, b.body),
-      hash = createHash("sha256")
-        .update(JSON.stringify([b.workspace_id, c.id, raw]))
-        .digest("hex");
+    const gmail = await cocoGmailAccess(user.id, "send").catch(() => null);
+    if (!gmail) return privateJson({ error: "Reconnect Gmail before sending.", reconnect: true }, 403);
     const admin = createAdminClient();
+    let reply: { threadId: string; messageId: string; subject: string } | undefined;
+    if (b.reply_to) {
+      const { data: original } = await admin.from("crm_contact_gmail_history").select("thread_id,message_id_header,subject")
+        .eq("id", b.reply_to).eq("user_id", user.id).eq("workspace_id", b.workspace_id)
+        .eq("contact_id", b.client_id).eq("mailbox", gmail.email.toLowerCase()).eq("recipient", c.email.toLowerCase()).maybeSingle();
+      if (!original?.message_id_header || !/^<[^<>\s\x00-\x1f\x7f]{1,250}>$/.test(original.message_id_header))
+        throw new CrmRequestError("This email cannot be replied to in WolfGrid.", 403);
+      reply = { threadId: original.thread_id, messageId: original.message_id_header, subject: original.subject };
+    }
+    if ((b.files ?? []).reduce((sum, f) => sum + Buffer.from(f.data, "base64").length, 0) > 2_000_000)
+      throw new CrmRequestError("Attachments must be under 2 MB combined.");
+    const subject = reply ? `Re: ${reply.subject.replace(/^re:\s*/i, "")}` : b.subject;
+    const extended = Boolean(reply || b.cc?.length || b.bcc?.length || b.files?.length);
+    const raw = extended ? contactGmailMime(gmail.email, c.email, subject, b.body, { ...b, messageId: reply?.messageId })
+      : gmailMime(gmail.email, c.email, subject, b.body);
+    const hash = createHash("sha256")
+      .update(JSON.stringify(extended ? [b.workspace_id, c.id, raw, reply?.threadId] : [b.workspace_id, c.id, raw])).digest("hex");
     const { error: claim } = await admin
       .from("crm_email_send_requests")
       .insert({
@@ -92,7 +117,7 @@ export async function POST(request: NextRequest) {
       );
     }
     let status = "unknown",
-      id: string | null = null;
+      id: string | null = null, threadId: string | null = null, reconnect = false;
     try {
       const response = await fetch(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
@@ -102,7 +127,7 @@ export async function POST(request: NextRequest) {
             Authorization: `Bearer ${gmail.token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ raw }),
+          body: JSON.stringify({ raw, ...(reply ? { threadId: reply.threadId } : {}) }),
           signal: AbortSignal.timeout(30000),
         },
       );
@@ -110,9 +135,13 @@ export async function POST(request: NextRequest) {
         const result = await response.json();
         if (typeof result.id === "string") {
           id = result.id;
+          threadId = typeof result.threadId === "string" ? result.threadId : null;
           status = "sent";
         }
-      } else if (response.status < 500) status = "failed";
+      } else if (response.status < 500) {
+        status = "failed";
+        reconnect = response.status === 401 || response.status === 403;
+      }
     } catch {
       /* An interrupted provider response may still mean acceptance. No automatic retry. */
     }
@@ -121,8 +150,12 @@ export async function POST(request: NextRequest) {
       .update({ status, gmail_message_id: id })
       .eq("user_id", user.id)
       .eq("id", b.request_id);
-    if (status === "sent" && !saved.error)
+    if (status === "sent" && !saved.error) {
+      await admin.from("crm_email_send_requests").update({ gmail_thread_id: threadId, subject })
+        .eq("user_id", user.id).eq("id", b.request_id);
       return privateJson({ sent: true, message_id: id });
+    }
+    if (reconnect) return privateJson({ error: "Reconnect Gmail before sending.", reconnect: true, attempted: true }, 403);
     return privateJson(
       {
         error:

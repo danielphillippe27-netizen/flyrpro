@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,10 +13,11 @@ import {
   Mail,
   MessageCircle,
   Phone,
+  Tags,
+  Trash2,
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
-  Video,
   Plus,
   Search,
   RefreshCw,
@@ -47,12 +49,14 @@ import {
   type Conversation,
   type ContactLabel,
 } from "@/lib/coco/types";
+import { ContactOutreach } from "@/components/outreach/ContactOutreach";
 import { OutreachTools, RelationshipPanel } from "./RelationshipTools";
 import { ContactDetailsEditor } from "./ContactDetailsEditor";
 import { EmailComposer } from "./EmailComposer";
 import { GmailClientImport } from "./GmailClientImport";
 import { AppleContactsReview } from "./AppleContactsReview";
 import { ContactListImport } from "./ContactListImport";
+import { ContactWorkspace } from "./ContactWorkspace";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import "./coco.css";
@@ -187,26 +191,6 @@ function ConversationContactCard({
         </DialogClose>
       </DialogContent>
     </Dialog>
-  );
-}
-function ContactContext({ client }: { client: Client }) {
-  return (
-    <section className="surface">
-      <div className="surface-header">
-        <h2>WolfGrid</h2>
-      </div>
-      {client.appointment_at && (
-        <div className="mini-message">
-          <strong>Appointment</strong>
-          <p>{new Date(client.appointment_at).toLocaleString()}</p>
-        </div>
-      )}
-      <div className="mini-message">
-        <Link href={`/leads/${client.id}`} className="coco-record-link">
-          Open full WolfGrid record <ArrowRight size={14} />
-        </Link>
-      </div>
-    </section>
   );
 }
 function MessageBody({ body, showPreview = true }: { body: string; showPreview?: boolean }) {
@@ -375,17 +359,26 @@ function CocoWorkspace({
       ContactLabel | "All" | "Unlabeled"
     >("All"),
     [contactsCollapsed, setContactsCollapsed] = useState(false),
-    [bulkStage, setBulkStage] = useState("Lead"),
-    [bulkLabel, setBulkLabel] = useState<ContactLabel>("Client");
+    [bulkStage, setBulkStage] = useState("Lead");
   const [editingContact, setEditingContact] = useState<string | null>(null);
+  const noteDrafts = useRef(new Map<string, string>());
   useEffect(() => { setEditingContact(null); }, [selectedClient]);
-  const [contactSelectionMode, setContactSelectionMode] = useState(false),
-    [selectedContacts, setSelectedContacts] = useState<string[]>([]),
+  const [selectedContacts, setSelectedContacts] = useState<string[]>([]),
     [savingLabels, setSavingLabels] = useState(false),
     [savingStage, setSavingStage] = useState(false),
-    [applyingBulkLabel, setApplyingBulkLabel] = useState(false),
-    [deletingContacts, setDeletingContacts] = useState(false),
-    [confirmDelete, setConfirmDelete] = useState(false);
+    [bulkBusy, setBulkBusy] = useState(false),
+    [bulkDialog, setBulkDialog] = useState<"tags" | "delete" | null>(null);
+  const bulkLock = useRef(false);
+  const selectAllContacts = useRef<HTMLInputElement>(null);
+  const bulkDialogTrigger = useRef<HTMLButtonElement>(null);
+  const [tagOperation, setTagOperation] = useState<"add" | "remove">("add");
+  const [tag, setTag] = useState("");
+  const [bulkFeedback, setBulkFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+  useEffect(() => {
+    setSelectedContacts([]);
+    setBulkDialog(null);
+    setBulkFeedback(null);
+  }, [search, contactFilter]);
   const [showAddClient, setShowAddClient] = useState(false),
     [showAddTask, setShowAddTask] = useState(false),
     [savingNew, setSavingNew] = useState(false),
@@ -404,7 +397,6 @@ function CocoWorkspace({
     [gmailStatus, setGmailStatus] = useState<GmailStatus | null>(null),
     [integrationBusy, setIntegrationBusy] = useState(false);
   const [history, setHistory] = useState<Message[]>([]),
-    [detailMessages, setDetailMessages] = useState<Message[]>([]),
     [historyMore, setHistoryMore] = useState(false),
     [historyError, setHistoryError] = useState(""),
     [loadingHistory, setLoadingHistory] = useState(false),
@@ -452,7 +444,7 @@ function CocoWorkspace({
         undefined,
         abort.current.signal,
         userId,
-      ),
+      ).catch(() => null),
       fetch(`/api/coco/gmail/status?workspaceId=${workspaceId}`, {
         headers: { "x-wolfgrid-user-id": userId },
         signal: abort.current.signal,
@@ -460,19 +452,19 @@ function CocoWorkspace({
       }).then(async (r) => (r.ok ? await r.json() : null)),
     ]);
     if (!alive.current) return;
-    setSyncEnabled(state.preferences?.sync_enabled ?? false);
-    const latestCheck = state.devices.find((device) => device.status === "connected")?.last_seen_at;
+    setSyncEnabled(state?.preferences?.sync_enabled ?? false);
+    const latestCheck = state?.devices.find((device) => device.status === "connected")?.last_seen_at;
     if (latestCheck) setLastMacCheck(latestCheck);
     setDeviceOnline(
-      hasMacBridge() || state.devices.some(
+      hasMacBridge() || (state?.devices ?? []).some(
         (d) =>
           ["connected", "syncing", "idle"].includes(d.status) &&
           Date.now() - Date.parse(d.last_seen_at) < 70000,
       ),
     );
 
-    if (gmail) setGmailStatus(gmail);
-    return state.preferences?.sync_enabled ?? false;
+    setGmailStatus(gmail);
+    return state?.preferences?.sync_enabled ?? false;
   }, [userId, workspaceId]);
   useEffect(() => {
     void loadData().catch((e) => {
@@ -631,19 +623,29 @@ function CocoWorkspace({
   yesterday.setDate(today.getDate() - 1);
   const recentDay = new Date(today);
   recentDay.setDate(today.getDate() - 6);
-  const filteredContacts = data.clients
+  const filteredContacts = useMemo(() => data.clients
     .filter(
       (c) =>
         (contactFilter === "All" ||
           (contactFilter === "Unlabeled"
             ? !c.contact_labels.length
-            : clientStage(c.id).trim().toLowerCase() === contactFilter.toLowerCase() ||
+            : (c.stage ?? "Lead").trim().toLowerCase() === contactFilter.toLowerCase() ||
               c.contact_labels.some(label => label.trim().toLowerCase() === contactFilter.toLowerCase()))) &&
         `${displayName(c)} ${c.phone ?? ""} ${c.email ?? ""}`
           .toLowerCase()
           .includes(search.toLowerCase()),
     )
-    .sort((a, b) => displayName(a).localeCompare(displayName(b)));
+    .sort((a, b) => displayName(a).localeCompare(displayName(b))), [data.clients, contactFilter, search]);
+  const selectedIds = new Set(selectedContacts);
+  const selectedClients = filteredContacts.filter(client => selectedIds.has(client.id));
+  const selectedCount = selectedClients.length;
+  const allContactsSelected = selectedCount > 0 && selectedCount === filteredContacts.length;
+  useEffect(() => {
+    if (selectAllContacts.current) {
+      selectAllContacts.current.indeterminate = selectedCount > 0 && !allContactsSelected;
+    }
+  }, [allContactsSelected, selectedCount, area, contactsCollapsed]);
+  const removableTags = [...new Set(selectedClients.flatMap(client => client.contact_labels))].sort();
   const historyPage = useCallback(
     async (id: string, before?: Message) => {
       const q = `?workspaceId=${workspaceId}&contactId=${id}${before?.sent_at ? `&before=${encodeURIComponent(before.sent_at)}&beforeId=${before.id}` : before ? `&beforeNull=true&beforeId=${before.id}` : ""}`;
@@ -799,20 +801,6 @@ function CocoWorkspace({
     }
   }
   useEffect(() => {
-    if (!selectedClient) return;
-    let active = true;
-    void historyPage(selectedClient)
-      .then((r) => {
-        if (active) setDetailMessages(r.messages);
-      })
-      .catch(() => {
-        if (active) setDetailMessages([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [selectedClient, userId, workspaceId, historyPage]);
-  useEffect(() => {
     const el = messageScroll.current;
     if (!el) return;
     const changed = scrollConversation.current !== activeConversation?.id;
@@ -861,54 +849,43 @@ function CocoWorkspace({
       setSavingStage(false);
     }
   }
-  async function bulkCommand(
-    action: "bulk-label" | "bulk-stage" | "delete",
-    value?: string,
-  ) {
-    let changed = 0;
-    for (let i = 0; i < selectedContacts.length; i += 500) {
-      const ids = selectedContacts.slice(i, i + 500);
-      await mutate(action, {
-        ids,
-        ...(action === "delete" ? { confirmation: "DELETE" } : { value }),
-      });
-      changed += ids.length;
-    }
-    return changed;
-  }
-  async function setSelectedContactStages() {
-    if (savingStage) return;
-    setSavingStage(true);
+  async function runBulkAction(action: "bulk-tags" | "bulk-stage" | "delete", payload: Record<string, unknown>) {
+    if (bulkLock.current || !selectedCount) return;
+    bulkLock.current = true;
+    setBulkBusy(true);
+    setBulkFeedback(null);
+    const ids = selectedClients.map(client => client.id);
+    let completed = 0;
     try {
-      await bulkCommand("bulk-stage", bulkStage);
-      await loadData();
-      setNotice("Stage updated for selected contacts.");
+      for (let start = 0; start < ids.length; start += 500) {
+        const batch = ids.slice(start, start + 500);
+        await mutate(action, { ...payload, ids: batch });
+        completed += batch.length;
+      }
+      setBulkFeedback({ text: action === "delete"
+        ? `${completed} ${completed === 1 ? "contact deleted" : "contacts deleted"}.`
+        : `${action === "bulk-tags" ? "Tags" : "Stage"} updated for ${completed} ${completed === 1 ? "contact" : "contacts"}.` });
     } catch (e) {
-      setError((e as Error).message);
-      await loadData();
+      setBulkFeedback({ text: `${completed ? `Processed ${completed} of ${ids.length}. ` : ""}${(e as Error).message}`, error: true });
     } finally {
-      setSavingStage(false);
-    }
-  }
-  function toggleContactSelection(id: string) {
-    setSelectedContacts((current) =>
-      current.includes(id) ? current.filter((v) => v !== id) : [...current, id],
-    );
-  }
-  async function addLabelToSelectedContacts() {
-    if (applyingBulkLabel) return;
-    setApplyingBulkLabel(true);
-    try {
-      await bulkCommand("bulk-label", bulkLabel);
-      await loadData();
-      setNotice(
-        `${bulkLabel} label added. Use the ${bulkLabel} filter to see these contacts.`,
-      );
-    } catch (e) {
-      setError((e as Error).message);
-      await loadData();
-    } finally {
-      setApplyingBulkLabel(false);
+      if (action === "delete" && completed) {
+        const deleted = new Set(ids.slice(0, completed));
+        setSelectedContacts(current => current.filter(id => !deleted.has(id)));
+        setSelectedClient(current => current && deleted.has(current) ? null : current);
+        setData(current => ({ ...current, clients: current.clients.filter(client => !deleted.has(client.id)) }));
+      }
+      try {
+        await loadData();
+      } catch {
+        setBulkFeedback(current => ({
+          text: `${current?.text ?? ""} Could not refresh the contact list. Reload to see the latest changes.`,
+          error: true,
+        }));
+      } finally {
+        bulkLock.current = false;
+        setBulkBusy(false);
+        setBulkDialog(null);
+      }
     }
   }
   async function updateContactLabels(
@@ -929,23 +906,6 @@ function CocoWorkspace({
       setError((e as Error).message);
     } finally {
       setSavingLabels(false);
-    }
-  }
-  async function deleteSelectedContacts() {
-    if (deletingContacts) return;
-    setDeletingContacts(true);
-    try {
-      const count = await bulkCommand("delete");
-      setNotice(`${count} contacts deleted.`);
-      setSelectedContacts([]);
-      setSelectedClient(null);
-      setConfirmDelete(false);
-      await loadData();
-    } catch (e) {
-      setError((e as Error).message);
-      await loadData();
-    } finally {
-      setDeletingContacts(false);
     }
   }
   async function toggleTask(task: Task) {
@@ -971,8 +931,9 @@ function CocoWorkspace({
         phone: String(form.get("phone") || "") || null,
         email: String(form.get("email") || "") || null,
         contact_labels: form.getAll("contact_labels"),
-      })) as { id: string };
+      })) as { id: string; existing?: boolean };
       await loadData();
+      if (row.existing) setNotice("Opened the existing contact.");
       setSelectedClient(row.id);
       setContactFilter("All");
       setSearch("");
@@ -1236,6 +1197,7 @@ function CocoWorkspace({
                     <input
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
+                      disabled={bulkBusy}
                       aria-label="Search contacts"
                       placeholder="Search contacts..."
                     />
@@ -1245,12 +1207,12 @@ function CocoWorkspace({
                   </button>
                 </header>
                 <div className="contacts-filter-tabs" role="group" aria-label="Contact filters">
-                  <button aria-pressed={contactFilter === "All"} onClick={() => setContactFilter("All")}>
+                  <button disabled={bulkBusy} aria-pressed={contactFilter === "All"} onClick={() => setContactFilter("All")}>
                     All ({data.clients.length})
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className={contactFilter !== "All" ? "is-active" : ""} aria-label={contactFilter === "All" ? "Filter contacts" : `Filter contacts: ${contactFilter}`}>
+                      <button disabled={bulkBusy} className={contactFilter !== "All" ? "is-active" : ""} aria-label={contactFilter === "All" ? "Filter contacts" : `Filter contacts: ${contactFilter}`}>
                         <span>{contactFilter === "All" ? "Filter" : contactFilter}</span><ChevronDown size={14} />
                       </button>
                     </DropdownMenuTrigger>
@@ -1276,118 +1238,61 @@ function CocoWorkspace({
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  <div className="bulk-contact-actions">
-                    <button
-                      disabled={
-                        deletingContacts ||
-                        applyingBulkLabel ||
-                        !filteredContacts.length
-                      }
-                      onClick={() => {
-                        setContactSelectionMode(true);
-                        setSelectedContacts((current) => [
-                          ...new Set([
-                            ...current,
-                            ...filteredContacts.map((client) => client.id),
-                          ]),
-                        ]);
-                      }}
-                    >
-                      Select all
-                    </button>
-                    {contactSelectionMode && (
+                  <div className="contact-selection-bar" role="group" aria-label="Contact selection">
+                    <label>
+                      <input
+                        ref={selectAllContacts}
+                        type="checkbox"
+                        aria-label="Select all matching contacts"
+                        checked={allContactsSelected}
+                        disabled={bulkBusy || !filteredContacts.length}
+                        onChange={event => setSelectedContacts(event.target.checked ? filteredContacts.map(client => client.id) : [])}
+                      />
+                      <span aria-live="polite">{selectedCount ? `${selectedCount} selected` : "Select all"}</span>
+                    </label>
+                    {selectedCount > 0 && (
                       <>
-                        <span>{selectedContacts.length} selected</span>
-                        <button
-                          disabled={deletingContacts || applyingBulkLabel}
-                          onClick={() => {
-                            setSelectedContacts([]);
-                            setContactSelectionMode(false);
-                          }}
-                        >
-                          Cancel selection
-                        </button>
-                        {selectedContacts.length > 0 && (
-                          <>
-                            <OutreachTools clients={data.clients.filter(client => selectedContacts.includes(client.id))} userId={userId} workspaceId={workspaceId} onSaved={loadData} />
-                            <label className="bulk-label-picker">
-                              Stage
-                              <select
-                                aria-label="Stage for selected contacts"
-                                value={
-                                  bulkStage ||
-                                  [...renderedData.stages].sort(
-                                    (a, b) => a.position - b.position,
-                                  )[0]?.id ||
-                                  ""
-                                }
-                                onChange={(event) =>
-                                  setBulkStage(event.target.value)
-                                }
-                                disabled={savingStage}
-                              >
-                                {[...renderedData.stages]
-                                  .sort((a, b) => a.position - b.position)
-                                  .map((stage) => (
-                                    <option key={stage.id} value={stage.id}>
-                                      {stage.name}
-                                    </option>
-                                  ))}
-                              </select>
-                            </label>
-                            <button
-                              disabled={
-                                savingStage ||
-                                applyingBulkLabel ||
-                                deletingContacts
-                              }
-                              onClick={() => void setSelectedContactStages()}
-                            >
-                              {savingStage ? "Saving stage…" : "Set stage"}
-                            </button>
-                            <label className="bulk-label-picker">
-                              Label
-                              <select
-                                aria-label="Label for selected contacts"
-                                value={bulkLabel}
-                                disabled={applyingBulkLabel || deletingContacts}
-                                onChange={(event) =>
-                                  setBulkLabel(
-                                    event.target.value as ContactLabel,
-                                  )
-                                }
-                              >
-                                {availableLabels.map((label) => (
-                                  <option key={label} value={label}>
-                                    {label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <button
-                              disabled={
-                                applyingBulkLabel ||
-                                deletingContacts ||
-                                savingLabels
-                              }
-                              onClick={() => void addLabelToSelectedContacts()}
-                            >
-                              {applyingBulkLabel
-                                ? "Adding label…"
-                                : "Add label"}
-                            </button>
-                            <button
-                              className="delete-contacts"
-                              disabled={deletingContacts || applyingBulkLabel}
-                              onClick={() => setConfirmDelete(true)}
-                            >
-                              Delete selected
-                            </button>
-                          </>
-                        )}
+                        <button type="button" className="deselect-contacts" disabled={bulkBusy} onClick={() => setSelectedContacts([])}>Deselect all</button>
+                        <div className="contact-selection-tools" role="group" aria-label="Actions for selected contacts">
+                          <ContactOutreach
+                            contacts={selectedClients.map(client => ({
+                              id: client.id,
+                              full_name: displayName(client),
+                              phone: client.phone,
+                              email: client.email,
+                            }))}
+                            iconOnly
+                            showMessage={false}
+                            disabled={bulkBusy}
+                          />
+                          <button type="button" aria-label="Add or remove tags" title="Add or remove tags" disabled={bulkBusy || savingLabels} onClick={event => {
+                            bulkDialogTrigger.current = event.currentTarget;
+                            setTagOperation("add");
+                            setTag("");
+                            setBulkDialog("tags");
+                          }}><Tags size={16} /></button>
+                          <button type="button" aria-label="Delete selected contacts" title="Delete selected contacts" className="delete-contacts" disabled={bulkBusy} onClick={event => {
+                            bulkDialogTrigger.current = event.currentTarget;
+                            setBulkDialog("delete");
+                          }}><Trash2 size={16} /></button>
+                        </div>
                       </>
                     )}
                   </div>
+                  {bulkFeedback && <p className="contact-bulk-feedback" role={bulkFeedback.error ? "alert" : "status"}>{bulkFeedback.text}</p>}
+                  {selectedCount > 0 && <details className="contact-more-actions">
+                    <summary>More actions</summary>
+                    <div className="bulk-contact-actions">
+                      <label>
+                        Stage
+                        <select aria-label="Stage for selected contacts" value={bulkStage} disabled={bulkBusy || savingStage} onChange={event => setBulkStage(event.target.value)}>
+                          {stages.map(stage => <option key={stage} value={stage}>{stage}</option>)}
+                        </select>
+                      </label>
+                      <button type="button" disabled={bulkBusy || savingStage} onClick={() => void runBulkAction("bulk-stage", { value: bulkStage })}>Set stage</button>
+                      <OutreachTools clients={selectedClients} userId={userId} workspaceId={workspaceId} onSaved={loadData} />
+                    </div>
+                  </details>}
                   <div className="surface client-list">
                     <div className="list-head">
                       <span>CLIENT</span>
@@ -1402,15 +1307,16 @@ function CocoWorkspace({
                         className={`contact-list-row ${selectedClient === client.id ? "selected" : ""}`}
                         key={client.id}
                       >
-                        {contactSelectionMode && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${displayName(client)}`}
-                            checked={selectedContacts.includes(client.id)}
-                            disabled={deletingContacts || applyingBulkLabel}
-                            onChange={() => toggleContactSelection(client.id)}
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${displayName(client)}`}
+                          checked={selectedIds.has(client.id)}
+                          disabled={bulkBusy}
+                          onChange={event => {
+                            const checked = event.target.checked;
+                            setSelectedContacts(current => checked ? [...current, client.id] : current.filter(id => id !== client.id));
+                          }}
+                        />
                         <button
                           className="client-row"
                           aria-pressed={selectedClient === client.id}
@@ -1451,38 +1357,34 @@ function CocoWorkspace({
               {selectedClient ? (
                 (() => {
                   const client = clientsById[selectedClient];
-                  if (!client) return null;
+                  if (!client) return <div className="contact-detail-empty"><h2>Contact not in this workspace</h2>
+                    <button type="button" onClick={() => setSelectedClient(null)}>Return to contacts</button></div>;
                   const clientTasks = data.tasks.filter(
                     (task) => task.client_id === client.id,
                   );
-                  const clientMessages = detailMessages
-                    .filter((m) => m.client_id === client.id)
-                    .slice(-3);
                   return (
                     <>
-                      <header className="page-header detail-header">
-                        <div className="contact-profile-toolbar">
-                          <button className="back-button" onClick={() => { setSelectedClient(null); setEditingContact(null); }}><ArrowLeft size={17} /> All contacts</button>
-                          <button className="contact-edit-button" aria-label="Edit contact" disabled={editingContact === client.id} onClick={() => setEditingContact(client.id)}>{editingContact === client.id ? "Editing" : "Edit"}</button>
-                        </div>
-                        <div className="detail-title">
-                          <Avatar name={displayName(client)} size="large" />
-                          <div>
-                            <h1>{displayName(client)}</h1>
-                            <p>
-                              {clientStage(client.id)} ·{" "}
-                              {client.email ?? "No email"}
-                            </p>
+                      <div className="contact-profile-toolbar workbench-toolbar">
+                        <button className="back-button" onClick={() => { setSelectedClient(null); setEditingContact(null); }}><ArrowLeft size={17} /> All contacts</button>
+                      </div>
+                      <ContactWorkspace
+                        key={`${userId}:${workspaceId}:${client.id}`}
+                        client={client} contacts={data.clients} userId={userId} tasks={clientTasks}
+                        noteDrafts={noteDrafts.current} onSaved={loadData}
+                        onOpenMessages={canUseInbox ? () => openContactInbox(client, "text") : undefined}
+                        email={{ enabled: Boolean(gmailStatus?.connected && gmailStatus.can_send), from: gmailStatus?.email ?? null }}
+                        syncEnabled={syncEnabled === true}
+                        onAddTask={() => setShowAddTask(true)} onToggleTask={toggleTask}
+                        customFields={<RelationshipPanel client={client} userId={userId} tasks={clientTasks}
+                          messages={[]} onSaved={loadData} showTimeline={false} />}
+                        identity={<>
+                          <div className="workbench-identity">
+                            <Avatar name={displayName(client)} />
+                            <div><h1>{displayName(client)}</h1><p>{clientStage(client.id)}</p></div>
                           </div>
-                        </div>
-                        <div className="detail-actions contact-quick-actions">
-                          <button aria-label="Message contact" title="Message" onClick={() => openContactInbox(client, "text")} disabled={!client.phone && !client.email}><MessageCircle size={20} /></button>
-                          <a aria-label="Call contact" title="Call" aria-disabled={!client.phone} href={client.phone ? `tel:${encodeURIComponent(client.phone)}` : undefined}><Phone size={20} /></a>
-                          <a aria-label="Video call contact" title="FaceTime" aria-disabled={!client.phone && !client.email} href={client.phone || client.email ? `facetime:${encodeURIComponent(client.phone || client.email!)}` : undefined}><Video size={21} /></a>
-                          <button aria-label="Email contact" title="Email" disabled={!client.email} onClick={() => openContactInbox(client, "email")}><Mail size={20} /></button>
-                        </div>
-                      </header>
-                      <div className="page-body detail-grid">
+                          <button type="button" className="contact-edit-button" aria-label="Edit contact" disabled={editingContact === client.id} onClick={() => setEditingContact(client.id)}>{editingContact === client.id ? "Editing" : "Edit contact"}</button>
+                        </>}
+                        profile={<>
                         <section className="surface details-surface">
                           {editingContact === client.id ? <>
                           <span className="eyebrow">THE DETAILS</span>
@@ -1508,7 +1410,7 @@ function CocoWorkspace({
                                         ) ?? false
                                       }
                                       disabled={
-                                        savingLabels || applyingBulkLabel
+                                        savingLabels || bulkBusy
                                       }
                                       onChange={(event) =>
                                         void updateContactLabels(
@@ -1552,8 +1454,9 @@ function CocoWorkspace({
                           </dl>
                           </> : <>
                           <div className="contact-read-fields">
-                            {client.phone && <a className="contact-info-row" href={`tel:${encodeURIComponent(client.phone)}`}><span><small>mobile</small><strong>{client.phone}</strong></span><Phone size={17} /></a>}
-                            {client.email && <button className="contact-info-row" onClick={() => openContactInbox(client, "email")}><span><small>email</small><strong>{client.email}</strong></span><Mail size={17} /></button>}
+                            {client.phone && <div className="contact-info-row"><span><small>Phone</small><strong>{client.phone}</strong></span></div>}
+                            {client.email && <div className="contact-info-row"><span><small>Email</small><strong>{client.email}</strong></span></div>}
+                            {client.identifiers?.filter(value => value !== macIdentifier(client.phone) && value !== macIdentifier(client.email)).map(value => <div className="contact-info-row" key={value}><span><small>{value.includes("@") ? "Additional email" : "Additional phone"}</small><strong>{value}</strong></span></div>)}
                             {client.address && <div className="contact-info-row"><span><small>address</small><strong>{client.address}</strong></span></div>}
                             <button className="contact-info-row contact-note-row" onClick={() => setEditingContact(client.id)}><span><small>Notes</small><span className={client.notes ? "contact-note-text" : "contact-note-placeholder"}>{client.notes || "Add a note"}</span></span></button>
                             <div className="contact-info-row"><span><small>Lists</small><span>{[...new Set([clientStage(client.id), ...client.contact_labels])].join(" · ")}</span></span></div>
@@ -1595,67 +1498,8 @@ function CocoWorkspace({
                             ) && <p>No past deals added yet.</p>}
                           </div>}
                         </section>
-                        <RelationshipPanel key={`${userId}:${workspaceId}:${client.id}`} client={client} userId={userId} tasks={clientTasks} messages={detailMessages.filter(message => message.client_id === client.id)} onSaved={loadData} />
-                        <details className="contact-crm-extras"><summary>Conversations & tasks</summary>
-                        <div className="detail-right">
-                          <ContactContext client={client} />
-                          <section className="surface">
-                            <div className="surface-header">
-                              <h2>Conversation</h2>
-                            </div>
-                            {clientMessages.length ? (
-                              clientMessages.map((message) => (
-                                <div className="mini-message" key={message.id}>
-                                  <span>
-                                    {message.direction === "incoming"
-                                      ? client.first_name
-                                      : "You"}
-                                  </span>
-                                  <p>{message.body ? <MessageBody body={message.body} showPreview={false} /> : "Attachment"}</p>
-                                  <small>{formatShort(message.sent_at)}</small>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="empty-inline">
-                                No messages yet.
-                              </div>
-                            )}
-                          </section>
-                          <section className="surface">
-                            <div className="surface-header">
-                              <h2>To-do</h2>
-                              <button
-                                className="text-button"
-                                onClick={() => setShowAddTask(true)}
-                              >
-                                Add <Plus size={15} />
-                              </button>
-                            </div>
-                            {clientTasks.length ? (
-                              clientTasks.map((task) => (
-                                <button
-                                  className="task-row"
-                                  key={task.id}
-                                  onClick={() => void toggleTask(task)}
-                                >
-                                  {task.completed_at ? (
-                                    <CheckCircle2 size={20} />
-                                  ) : (
-                                    <Circle size={20} />
-                                  )}
-                                  <span>{task.title}</span>
-                                  <small>{formatShort(task.due_at)}</small>
-                                </button>
-                              ))
-                            ) : (
-                              <div className="empty-inline">
-                                Nothing on the list yet.
-                              </div>
-                            )}
-                          </section>
-                        </div>
-                        </details>
-                      </div>
+                        </>}
+                      />
                     </>
                   );
                 })()
@@ -1671,41 +1515,54 @@ function CocoWorkspace({
             </section>
           </div>
         )}
-        {confirmDelete && (
-          <div className="modal-backdrop">
-            <div
-              className="modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="delete-contacts-title"
-            >
-              <h2 id="delete-contacts-title">
-                Delete {selectedContacts.length} contact
-                {selectedContacts.length === 1 ? "" : "s"}?
-              </h2>
-              <p>
-                This permanently removes the selected contacts and their linked
-                deals, pipeline entries, and message history. Their tasks are
-                kept without a contact.
-              </p>
-              <div className="bulk-contact-actions">
-                <button
-                  disabled={deletingContacts}
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="delete-contacts"
-                  disabled={deletingContacts}
-                  onClick={() => void deleteSelectedContacts()}
-                >
-                  {deletingContacts ? "Deleting…" : "Delete contacts"}
-                </button>
-              </div>
+        <Dialog open={bulkDialog !== null} onOpenChange={open => { if (!open && !bulkBusy) setBulkDialog(null); }}>
+          <DialogContent
+            showCloseButton={!bulkBusy}
+            onCloseAutoFocus={event => {
+              event.preventDefault();
+              const trigger = bulkDialogTrigger.current;
+              if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+              else selectAllContacts.current?.focus();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{bulkDialog === "delete" ? `Delete ${selectedCount} ${selectedCount === 1 ? "contact" : "contacts"}?` : "Add or remove tags"}</DialogTitle>
+              <DialogDescription>{bulkDialog === "delete"
+                ? "This permanently removes these contacts and their linked deals, pipeline entries, and message history. Their tasks are kept without a contact."
+                : `Edit a tag for ${selectedCount} selected ${selectedCount === 1 ? "contact" : "contacts"}. Other tags stay as they are.`}</DialogDescription>
+            </DialogHeader>
+            {bulkDialog === "tags" && <div className="grid gap-3">
+              <label className="grid gap-1 text-sm">
+                Action
+                <select aria-label="Action" className="rounded-md border border-input bg-background p-2" value={tagOperation} disabled={bulkBusy} onChange={event => {
+                  setTagOperation(event.target.value === "remove" ? "remove" : "add");
+                  setTag("");
+                }}>
+                  <option value="add">Add tag</option>
+                  <option value="remove">Remove tag</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm">
+                Tag
+                {tagOperation === "add" ? <>
+                  <input aria-label="Tag" className="rounded-md border border-input bg-background p-2" list="coco-existing-tags" placeholder="Choose or type a tag" value={tag} maxLength={60} disabled={bulkBusy} onChange={event => setTag(event.target.value)} />
+                  <datalist id="coco-existing-tags">{availableLabels.map(label => <option key={label} value={label} />)}</datalist>
+                </> : <select aria-label="Tag" className="rounded-md border border-input bg-background p-2" value={tag} disabled={bulkBusy || !removableTags.length} onChange={event => setTag(event.target.value)}>
+                  <option value="">{removableTags.length ? "Choose a tag" : "Selected contacts have no tags"}</option>
+                  {removableTags.map(label => <option key={label} value={label}>{label}</option>)}
+                </select>}
+              </label>
+            </div>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={bulkBusy} onClick={() => setBulkDialog(null)}>Cancel</Button>
+              {bulkDialog === "delete" ? <Button type="button" variant="destructive" disabled={bulkBusy || !selectedCount} onClick={() => void runBulkAction("delete", { confirmation: "DELETE" })}>
+                {bulkBusy ? "Deleting…" : "Delete contacts"}
+              </Button> : <Button type="button" disabled={bulkBusy || !tag.trim() || !selectedCount || (tagOperation === "remove" && !removableTags.includes(tag))} onClick={() => void runBulkAction("bulk-tags", { tag: tag.trim(), operation: tagOperation })}>
+                {bulkBusy ? "Saving…" : tagOperation === "add" ? "Add tag" : "Remove tag"}
+              </Button>}
             </div>
-          </div>
-        )}
+          </DialogContent>
+        </Dialog>
         {area === "Inbox" && (
           <>
             <div

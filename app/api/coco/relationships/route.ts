@@ -5,7 +5,7 @@ import { crmRequest, requireCrmWorkspace, readCrmBody, privateJson, errorRespons
 export const dynamic = 'force-dynamic';
 async function handle(request: NextRequest, mutation: boolean) {
   try {
-    const { api } = await crmRequest(request, 'mac', mutation);
+    const { api } = await crmRequest(request, 'crm', mutation);
     const input = mutation ? relationshipCommand.parse(await readCrmBody(request, 100000)) : z.object({ workspaceId: z.string().uuid(), contactId: z.string().uuid() }).parse(Object.fromEntries(request.nextUrl.searchParams));
     await requireCrmWorkspace(api, input.workspaceId);
     const { workspaceId, ...payload } = input;

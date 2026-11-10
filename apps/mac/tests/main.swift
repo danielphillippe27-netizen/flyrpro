@@ -14,6 +14,13 @@ for text in ["Hello", "🌹 Café", String(repeating: "long message ", count: 40
 precondition(MacMessageBodyDecoder.decode(Data([1,43,255])) == nil)
 precondition(MacMessageBodyDecoder.decode(archive("hello").dropLast(3)) == nil)
 let path = CommandLine.arguments[1]
+let recentCalls = try MacCallHistory().recent(identifiers: ["+19055550101", "person@example.com"],
+    path: path, now: Date(timeIntervalSinceReferenceDate: 800000000))
+precondition(recentCalls.count == 3 && recentCalls[0].direction == "incoming" && recentCalls[0].durationSeconds == 18)
+precondition(recentCalls[1].kind == "FaceTime audio" && !recentCalls[1].connected)
+precondition(recentCalls[2].kind == "Phone" && recentCalls[2].connected)
+precondition(AppleDate.parse(recentCalls[2].startedAt) == Date(timeIntervalSinceReferenceDate: 799999000))
+print("Passed: call matching, ordering and outcomes; groups, unknown, stale and unsupported calls excluded.")
 let provider = MacMessagesProvider()
 let matched = try provider.historyBatch(after: 0, databasePath: path, allowedIdentifiers: ["+19055550101"])
 precondition(matched.count == 1 && matched[0].guid == "matched-body", "Only the one-to-one match may import")

@@ -26,4 +26,18 @@ insert into chat_message_join values(2,102);
 insert into message values('unknown-body','Must stay local',null,0,'SMS',800000000000000000,3);
 insert into chat_message_join values(3,103);
 """)
+c.executescript("""
+CREATE TABLE ZCALLRECORD(Z_PK INTEGER PRIMARY KEY,ZADDRESS TEXT,ZDATE REAL,ZDURATION REAL,ZCALLTYPE INTEGER,ZSERVICE_PROVIDER TEXT,ZORIGINATED INTEGER,ZUNIQUE_ID TEXT);
+CREATE TABLE Z_6REMOTEPARTICIPANTHANDLES(Z_6REMOTEPARTICIPANTCALLS INTEGER,Z_8REMOTEPARTICIPANTHANDLES INTEGER);
+INSERT INTO ZCALLRECORD VALUES
+  (1,'(905) 555-0101',799999000,45,1,'com.apple.Telephony',1, 'call-1'),
+  (2,'PERSON@example.com',799999100,0,16,'com.apple.FaceTime',1, 'call-2'),
+  (3,'+19055550101',799999200,18,1,'com.apple.Telephony',0, 'call-3'),
+  (4,'+19055550101',799999300,25,8,'com.apple.FaceTime',1, 'call-4'),
+  (5,'+19055550999',799999400,33,1,'com.apple.Telephony',1, 'call-5'),
+  (6,'+19055550101',780000000,70,1,'com.apple.Telephony',1, 'call-6'),
+  (7,'+19055550101',799999500,30,1,'com.thirdparty.example',1, 'call-7'),
+  (8,'+19055550101',800001000,55,1,'com.apple.Telephony',1, 'call-8');
+INSERT INTO Z_6REMOTEPARTICIPANTHANDLES VALUES (1,1),(2,2),(4,1),(4,2);
+""")
 c.commit()

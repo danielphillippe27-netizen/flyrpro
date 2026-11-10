@@ -13,6 +13,8 @@ await db.exec(await fs.readFile('supabase/migrations/20261028072000_coco_ai_task
 await db.exec(await fs.readFile('supabase/migrations/20261028080000_apple_review_save_details.sql','utf8'));
 await db.exec(await fs.readFile('supabase/migrations/20261110021500_coco_incoming_unread.sql','utf8'));
 
+await db.exec(await fs.readFile('supabase/migrations/20261110023000_coco_bulk_contact_tags.sql','utf8'));
+
 await db.exec(`set role authenticated;set request.jwt.claim.sub='${u}'`);
 const run=async(command,payload={})=>(await db.query('select coco_crm_command($1,$2,$3) result',[w,command,JSON.stringify(payload)])).rows[0].result;
 const snapshot=async(offset=0)=>(await db.query('select coco_crm_snapshot($1,$2) result',[w,offset])).rows[0].result;
@@ -49,6 +51,19 @@ await run('delete',{ids:[reviewID],confirmation:'DELETE'});
 let data=await snapshot();assert.equal(data.clients.length,2);assert(data.clients.every(c=>c.id!==other));assert.equal(data.clients[0].stage,'Lead');
 const created=await run('create',{first_name:'Mary Anne',last_name:'Owner',phone:'6475550123',email:'mary@example.test',contact_labels:['Client']});let client=(await snapshot()).clients.find(c=>c.id===created.id);assert.equal(client.first_name,'Mary Anne');assert.deepEqual(client.contact_labels,['Client']);
 await run('bulk-label',{ids:[c,created.id],value:'Friend'});await run('bulk-label',{ids:[c,created.id],value:'Friend'});assert.deepEqual((await snapshot()).clients.find(x=>x.id===c).contact_labels,['Friend']);await run('bulk-stage',{ids:[c,created.id],value:'Active Client'});assert.equal((await snapshot()).clients.find(x=>x.id===c).stage,'Active Client');
+const editTags=(ids,tag,operation)=>db.query('select coco_bulk_contact_tags($1,$2,$3,$4)',[w,ids,tag,operation]);
+const tagsFor=async id=>(await snapshot()).clients.find(client=>client.id===id).contact_labels;
+await editTags([c,created.id],'  Open House  ','add');
+await editTags([c,created.id],'open house','add');
+assert.deepEqual(await tagsFor(c),['Friend','Open House'],'adding a tag preserves other tags and ignores case duplicates');
+await assert.rejects(editTags([c,other],'open house','remove'),{code:'42501'});
+assert.deepEqual(await tagsFor(c),['Friend','Open House'],'mixed ownership leaves the entire batch unchanged');
+await editTags([c,created.id],'open house','remove');
+assert.deepEqual(await tagsFor(c),['Friend']);
+assert(!(await tagsFor(created.id)).includes('Open House'));
+await run('labels',{id:created.id,labels:Array.from({length:20},(_,i)=>'Tag '+i)});
+await assert.rejects(editTags([c,created.id],'At capacity','add'),{code:'23514'});
+assert.deepEqual(await tagsFor(c),['Friend'],'a tag limit failure rolls back the batch');
 await assert.rejects(run('bulk-stage',{ids:[c,other],value:'Warm'}));assert.equal((await snapshot()).clients.find(x=>x.id===c).stage,'Active Client','mixed-owner bulk write is fully rejected');
 let edit={id:client.id,updated_at:client.updated_at,first_name:'Mary Anne',last_name:'Updated',phone:client.phone,email:client.email,address:'1 Test Street',notes:'Test notes',last_contacted_at:'2026-10-27T12:00:00Z',next_follow_up_at:'2026-10-30T09:00:00Z'};
 await run('update',edit);await assert.rejects(run('update',{...edit,notes:'stale overwrite'}));client=(await snapshot()).clients.find(c=>c.id===client.id);assert.equal(client.last_name,'Updated');assert.equal(client.notes,'Test notes');

@@ -823,6 +823,7 @@ export function CampaignDetailMapView({
   initialMapViewMode = 'buildings',
   preferMapbox3D = false,
   preserveProvidedStatuses = false,
+  focusAddressId,
 }: {
   campaignId: string;
   addresses: CampaignAddress[];
@@ -841,6 +842,7 @@ export function CampaignDetailMapView({
   initialMapViewMode?: InitialMapViewMode;
   preferMapbox3D?: boolean;
   preserveProvidedStatuses?: boolean;
+  focusAddressId?: string | null;
 }) {
   const { theme } = useTheme();
   const { preset: mapPreset } = useMapStyle();
@@ -2248,6 +2250,22 @@ export function CampaignDetailMapView({
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
   }, [mapLoaded]);
+
+  const focusedAddress = useRef<string | null>(null);
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !focusAddressId || focusedAddress.current === focusAddressId) return;
+    const address = mapAddresses.find(item => item.id === focusAddressId);
+    const coordinate = address && getAddressCoordinate(address);
+    if (!address || !coordinate) return;
+    focusedAddress.current = focusAddressId;
+    boundsFittedRef.current = true;
+    map.current.flyTo({ center: [coordinate.lon, coordinate.lat], zoom: 18, duration: 600 });
+    setSelectedAddressIdForCard(address.id);
+    setSelectedBuildingId(address.building_id ?? address.gers_id ?? address.id);
+    setLocationCardOpen(true);
+    setSelectedAddressId(address.id);
+    setSelectedAddressText(address.address);
+  }, [focusAddressId, mapLoaded, mapAddresses]);
 
   useEffect(() => {
     if (!map.current || !mapLoaded) return;

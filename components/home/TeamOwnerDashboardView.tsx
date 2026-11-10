@@ -318,6 +318,7 @@ export function TeamOwnerDashboardView() {
               range={range}
               memberIds={memberIds}
               onViewLiveMap={() => handleTabChange('map')}
+              onViewActivity={() => handleTabChange('activity')}
               onMemberClick={(m) => setSelectedMember({ ...m, color: m.color ?? '#3B82F6' })}
             />
           </TabsContent>

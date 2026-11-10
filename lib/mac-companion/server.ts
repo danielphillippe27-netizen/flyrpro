@@ -7,14 +7,14 @@ export const privateJson = (value: unknown, status = 200) => NextResponse.json(v
 export function errorResponse(error: unknown) {
   return privateJson({ error: error instanceof CrmRequestError ? error.message : 'The connection is temporarily unavailable.' }, error instanceof CrmRequestError ? error.status : 503);
 }
-export async function crmRequest(request: NextRequest, feature: 'mac' | 'ai', mutation = false) {
+export async function crmRequest(request: NextRequest, feature: 'mac' | 'ai' | 'crm', mutation = false) {
   const api = await getSupabaseServerClient();
   const { data: { user } } = await api.auth.getUser();
   if (!user) throw new CrmRequestError('Sign in to WolfGrid.', 401);
   const flag = process.env[feature === 'mac' ? 'CRM_MAC_ENABLED' : 'CRM_AI_ENABLED'];
-  if (flag === 'false' || (flag !== 'true' && process.env.NODE_ENV === 'production')) throw new CrmRequestError('This feature is not enabled for the pilot yet.', 503);
+  if (feature !== 'crm' && (flag === 'false' || (flag !== 'true' && process.env.NODE_ENV === 'production'))) throw new CrmRequestError('This feature is not enabled for the pilot yet.', 503);
   const pilot = process.env.CRM_PILOT_USER_IDS?.split(',').map(value => value.trim()).filter(Boolean);
-  if (pilot?.length && !pilot.includes(user.id)) throw new CrmRequestError('This feature is currently available to pilot members.', 403);
+  if (feature !== 'crm' && pilot?.length && !pilot.includes(user.id)) throw new CrmRequestError('This feature is currently available to pilot members.', 403);
   const expectedUser = request.headers.get('x-wolfgrid-user-id');
   if (expectedUser && expectedUser !== user.id) throw new CrmRequestError('Your account changed. Reload this page.', 403);
   if (mutation) {

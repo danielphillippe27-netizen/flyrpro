@@ -54,7 +54,7 @@ type SessionDetail = {
   distance_meters: number;
   doors_hit: number;
   conversations: number;
-  flyers_delivered: number;
+  appointments_count: number | null;
   leads_created: number;
   conversations_per_door: number;
   leads_per_conversation: number;
@@ -394,8 +394,8 @@ function TeamEventFeed({ range, memberIds, typeFilter }: TeamActivityTabProps & 
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border border-border/60 p-4">
-                    <div className="text-sm text-muted-foreground">Flyers delivered</div>
-                    <div className="mt-1 text-lg font-semibold">{selectedSession.flyers_delivered}</div>
+                    <div className="text-sm text-muted-foreground">Appointments</div>
+                    <div className="mt-1 text-lg font-semibold">{selectedSession.appointments_count ?? '—'}</div>
                   </div>
                   <div className="rounded-xl border border-border/60 p-4">
                     <div className="text-sm text-muted-foreground">Leads created</div>

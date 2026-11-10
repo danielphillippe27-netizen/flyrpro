@@ -1,4 +1,4 @@
-# Shared live website · Mac 0.6.1
+# Shared live website · Mac 0.6.3
 
 The installed app loads https://wolfgrid.app/messages and uses the same live deployment as the browser. Web features update with the website. Mac bridge permissions, Apple Contacts review, Messages synchronization and system handoffs remain native app capabilities. The website business inbox remains at /inbox; the private CRM messages inbox is /messages. There is no preview-share cookie or expiring entry link in this build.
 
@@ -35,6 +35,8 @@ Continue with Google/Apple uses the macOS authentication session and returns to 
 Apple Integrations lives at `/settings/integrations/apple`; the old `/settings/mac` entry still works. Saving a reviewed Apple contact automatically authorizes its uniquely matched future messages. Other CRM contacts require a permission choice. Older history always requires choosing a time range. The master sync switch and AI-message permission remain separate.
 
 Native Messages access requires Full Disk Access for this exact signed app. Check Messages access in the toolbar performs a content-free permission/schema check. Polling defaults to five seconds, with selectable slower intervals, metadata change detection, transactional deduplication and acknowledged scan progress.
+
+Mac 0.6.3 shows the latest outgoing call and up to ten incoming or outgoing calls from the last 90 days in the selected contact’s activity. It matches unique CRM phone numbers and emails to the Apple Phone and FaceTime history available on the Mac, including iPhone calls that appear there. The view updates every 30 seconds while open and when returning to the app. Full Disk Access is required. Calls are shown locally unless the user enables call sync for that contact; synced records remain private to the signed-in account and do not change follow-up dates. A call attempt is listed separately from a call with recorded connection time.
 
 Closing the last window pauses by default. The user can explicitly keep the signed-in runtime running in the visible menu-bar app and optionally register normal macOS launch at login. Quit/logout/workspace changes stop work; sleep may pause synchronization. No hidden helper is installed.
 

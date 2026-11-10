@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Activity,
+  ArrowRight,
   CalendarCheck,
   Clock,
   DoorOpen,
-  Flame,
+  Gauge,
   MapPin,
   MessageSquare,
   TimerReset,
@@ -71,6 +73,7 @@ type TeamDashboardTabProps = {
   memberIds: string[];
   onMemberClick?: (member: { user_id: string; display_name: string; color: string }) => void;
   onViewLiveMap?: () => void;
+  onViewActivity?: () => void;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -154,7 +157,7 @@ function KpiCard({ icon: Icon, label, value, helper }: KpiCardProps) {
   );
 }
 
-export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMap }: TeamDashboardTabProps) {
+export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMap, onViewActivity }: TeamDashboardTabProps) {
   const { currentWorkspaceId } = useWorkspace();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -228,8 +231,8 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMa
   const liveMembers = leaderboard
     .filter((member) => member.is_live)
     .sort((left, right) => (right.current_session_duration_seconds ?? 0) - (left.current_session_duration_seconds ?? 0));
-  const recentMembers = [...leaderboard]
-    .filter((member) => !member.is_live)
+  const recentMembers = leaderboard
+    .filter((member) => !member.is_live && member.last_active_at)
     .sort((left, right) => (right.last_active_at ?? '').localeCompare(left.last_active_at ?? ''));
 
   const totals = summary?.totals ?? {
@@ -268,7 +271,15 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMa
   const dailyDoorTarget = effectiveDoorGoal > 0 ? effectiveDoorGoal / 7 : 0;
   const chartMax = Math.max(1, dailyDoorTarget, ...doorsByDay.map((day) => day.doors));
   const targetMarkerPercent = Math.min(100, (dailyDoorTarget / chartMax) * 100);
-  const topRep = leaderboard[0] ?? null;
+  const doorsPerSession = totals.sessions_count > 0 ? totals.doors / totals.sessions_count : null;
+  const previous = summary?.previousTotals;
+  const previousDoorsPerSession = previous && previous.sessions_count > 0
+    ? previous.doors / previous.sessions_count
+    : null;
+  const productivityChange = doorsPerSession != null && previousDoorsPerSession != null
+    ? Number((doorsPerSession - previousDoorsPerSession).toFixed(1))
+    : null;
+  const recordedFieldTime = totals.total_duration_seconds ?? 0;
   const goalProgress = scaledDoorGoal > 0 ? Math.round((totals.doors / scaledDoorGoal) * 100) : null;
   const memberDoorTotal = filteredMembers.reduce((sum, member) => sum + member.doors_knocked, 0);
   const memberConvoTotal = filteredMembers.reduce((sum, member) => sum + member.conversations, 0);
@@ -414,94 +425,107 @@ export function TeamDashboardTab({ range, memberIds, onMemberClick, onViewLiveMa
 
         <div className="space-y-6">
           <Card className={SURFACE_CLASS}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+            <CardHeader className="gap-2 pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Users className="h-4 w-4 text-primary" />
-                  <span>Live activity</span>
+                  <Activity className="size-4 text-primary" aria-hidden="true" />
+                  <span>Field activity</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  {liveMembers.length > 0 && onViewLiveMap ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 gap-1.5 px-2.5"
-                      onClick={onViewLiveMap}
-                    >
-                      <MapPin className="h-3.5 w-3.5" />
-                      <span>Live Map</span>
-                    </Button>
-                  ) : null}
-                  <span className="text-sm text-muted-foreground">{leaderboard.length} total</span>
-                </div>
+                {onViewLiveMap && liveMembers.length > 0 && (
+                  <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onViewLiveMap}>
+                    <MapPin className="size-3.5" aria-hidden="true" />
+                    Live map
+                  </Button>
+                )}
               </div>
-              <CardTitle className="text-2xl font-semibold tracking-tight">{liveMembers.length} reps in the field</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                {liveMembers.length > 0 && <span className="size-2.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />}
+                {liveMembers.length > 0
+                  ? `${liveMembers.length} ${liveMembers.length === 1 ? 'rep' : 'reps'} in the field`
+                  : 'Nobody in the field right now'}
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {liveMembers.length > 0 ? (
-                liveMembers.slice(0, 4).map((member) => (
-                  <div key={member.user_id} className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/10 px-4 py-3">
-                    <div>
-                      <div className="font-medium text-foreground">{member.display_name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Started {formatRelativeTime(member.current_session_started_at ?? null)}
-                      </div>
-                    </div>
-                    <div className="text-right text-sm font-medium text-foreground">
-                      {formatDuration(member.current_session_duration_seconds ?? 0)}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-xl border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-                  Nobody is live right now.
-                </div>
+            <CardContent className="space-y-4">
+              {liveMembers.length > 0 && (
+                <ul className="divide-y divide-border/60 rounded-xl border border-border/60 bg-muted/10">
+                  {liveMembers.slice(0, 4).map((member) => (
+                    <li key={member.user_id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                      <span className="min-w-0 break-words font-medium">{member.display_name}</span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {formatDuration(member.current_session_duration_seconds ?? 0)} in field
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               )}
 
-              {recentMembers.slice(0, 2).map((member) => (
-                <div key={member.user_id} className="flex items-center justify-between gap-3 text-sm">
-                  <div>
-                    <div className="font-medium text-foreground">{member.display_name}</div>
-                    <div className="text-muted-foreground">Last active {formatRelativeTime(member.last_active_at)}</div>
-                  </div>
-                  <div className="text-muted-foreground">{member.sessions_count} sessions</div>
+              {recentMembers.length > 0 ? (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Last active in this period</p>
+                  <ul className="divide-y divide-border/60">
+                    {recentMembers.slice(0, liveMembers.length > 0 ? 2 : 3).map((member) => (
+                      <li key={member.user_id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                        <span className="min-w-0 break-words font-medium">{member.display_name}</span>
+                        <time dateTime={member.last_active_at ?? undefined} className="shrink-0 text-muted-foreground">
+                          {formatRelativeTime(member.last_active_at)}
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              ))}
+              ) : liveMembers.length === 0 && (
+                <p className="text-sm text-muted-foreground">No sessions logged in the selected period.</p>
+              )}
+
+              {onViewActivity && (
+                <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onViewActivity}>
+                  View activity <ArrowRight className="size-3.5" aria-hidden="true" />
+                </Button>
+              )}
             </CardContent>
           </Card>
 
           <Card className={SURFACE_CLASS}>
-            <CardHeader className="pb-3">
+            <CardHeader className="gap-2 pb-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Flame className="h-4 w-4 text-primary" />
-                <span>Rep to chase</span>
+                <Gauge className="size-4 text-primary" aria-hidden="true" />
+                <span>Selected period</span>
               </div>
-              <CardTitle className="text-2xl font-semibold tracking-tight">{topRep ? topRep.display_name : 'No leader yet'}</CardTitle>
+              <CardTitle className="text-2xl font-semibold tracking-tight">Field productivity</CardTitle>
             </CardHeader>
             <CardContent>
-              {topRep ? (
+              {doorsPerSession != null ? (
                 <div className="space-y-3">
                   <div className="rounded-xl border border-border/60 bg-muted/10 px-4 py-3">
-                    <div className="text-xs text-muted-foreground">Best day this range</div>
-                    <div className="mt-1 flex items-end justify-between gap-3">
-                      <div className="text-3xl font-semibold tracking-tight text-foreground">{topRep.best_day_doors ?? 0} doors</div>
-                      <div className="text-sm text-muted-foreground">{formatDateLabel(topRep.best_day_date ?? null)}</div>
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="text-3xl font-semibold tabular-nums tracking-tight">
+                        {doorsPerSession.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                      </span>
+                      <span className="text-sm text-muted-foreground">doors per logged session</span>
                     </div>
+                    {productivityChange != null && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {productivityChange === 0
+                          ? 'Unchanged from the previous period'
+                          : `${productivityChange > 0 ? '+' : ''}${productivityChange.toLocaleString()} doors per session vs. the previous period`}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Convo rate</span>
-                    <span className="font-medium text-foreground">
-                      {formatPercent(topRep.doors_knocked > 0 ? topRep.conversations / topRep.doors_knocked : 0)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Sessions</span>
-                    <span className="font-medium text-foreground">{topRep.sessions_count}</span>
-                  </div>
+                  <dl className="grid grid-cols-2 divide-x divide-border/60 rounded-xl border border-border/60">
+                    <div className="px-4 py-3">
+                      <dt className="text-xs text-muted-foreground">Sessions logged</dt>
+                      <dd className="mt-1 text-lg font-semibold tabular-nums">{totals.sessions_count.toLocaleString()}</dd>
+                    </div>
+                    <div className="px-4 py-3">
+                      <dt className="text-xs text-muted-foreground">Recorded field time</dt>
+                      <dd className="mt-1 text-lg font-semibold tabular-nums">
+                        {recordedFieldTime >= 60 ? formatDuration(recordedFieldTime) : recordedFieldTime > 0 ? '<1m' : '—'}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">A top rep will surface here once sessions are logged.</p>
+                <p className="text-sm text-muted-foreground">Log a session to see productivity for this period.</p>
               )}
             </CardContent>
           </Card>

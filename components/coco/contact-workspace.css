@@ -1,0 +1,104 @@
+.coco-crm .contact-detail-pane:has(.contact-workbench) { display:flex; flex-direction:column; background:var(--background); overflow:hidden; min-width:0; }
+.coco-crm .contact-detail-pane .contact-profile-toolbar.workbench-toolbar { position:static; flex:none; justify-content:flex-start; padding:9px 16px; border-bottom:1px solid var(--border); }
+.coco-crm .contact-workbench { display:grid; grid-template-columns:minmax(215px,1fr) minmax(340px,2.7fr); flex:1; min-height:0; }
+.coco-crm .contact-workbench > * { min-width:0; min-height:0; overflow:auto; padding:18px 16px; }
+.coco-crm .contact-workbench-profile { background:var(--sidebar,var(--card)); }
+.coco-crm .contact-workbench-hub { border-inline-start:1px solid var(--border); }
+.coco-crm .contact-workbench h1 { font-size:18px; font-weight:650; overflow-wrap:anywhere; line-height:1.2; }
+.coco-crm .contact-workbench h2,.coco-crm .contact-workbench summary { font-size:14px; font-weight:650; }
+.coco-crm .contact-workbench summary { cursor:pointer; }
+.coco-crm .contact-workbench summary:focus-visible,.coco-crm .contact-workbench button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.coco-crm .workbench-identity,.coco-crm .contact-workbench-heading { display:flex; align-items:center; gap:9px; }
+.coco-crm .contact-workbench-heading { justify-content:space-between; flex-wrap:wrap; }
+.coco-crm .workbench-identity { margin-bottom:12px; }
+.coco-crm .contact-workbench-profile > details { margin-top:12px; }
+.coco-crm .workbench-identity p,.coco-crm .contact-muted { font-size:12px; color:var(--muted-foreground); }
+.coco-crm .contact-workbench .details-surface { margin-top:12px; }
+.coco-crm .contact-workbench .contact-info-row { padding:9px 0; border:0; border-bottom:1px solid var(--border); border-radius:0; background:transparent; backdrop-filter:none; }
+.coco-crm .contact-workbench .contact-info-row strong { font-size:13px; }
+.coco-crm .contact-workbench form { display:grid; gap:8px; margin-block:12px; }
+.coco-crm .contact-workbench form label { display:grid; gap:4px; font-size:12px; }
+.coco-crm .contact-workbench input:not([type=checkbox]),.coco-crm .contact-workbench textarea,.coco-crm .contact-workbench select { width:100%; min-width:0; border:1px solid var(--border); border-radius:7px; padding:7px; background:var(--background); color:var(--foreground); }
+.coco-crm .contact-workbench button:not(.contact-info-row):not(.task-row) { max-width:100%; justify-self:start; }
+.coco-crm .contact-workbench button:not(.contact-info-row):not(.primary),.coco-crm .contact-workbench-switcher button { color:var(--foreground); background:var(--secondary); border:1px solid var(--border); padding:4px 7px; border-radius:6px; font-size:12px; }
+.coco-crm .contact-workbench button:not(.primary):hover { background:var(--accent); }
+.coco-crm .contact-workbench button.primary { padding:6px 11px; border-radius:7px; background:#e10019; color:white; font-size:12px; }
+.coco-crm .contact-workbench button:disabled { opacity:.5; cursor:default; }
+.coco-crm .contact-workbench-switcher { display:flex; flex-wrap:wrap; gap:4px; margin:10px 0; }
+.coco-crm .contact-workbench .contact-workbench-switcher button[aria-pressed=true] { color:var(--foreground); background:var(--accent); box-shadow:inset 0 -2px #e10019; }
+.coco-crm .contact-workbench-compose { border-bottom:1px solid var(--border); padding-bottom:12px; }
+.coco-crm .contact-workbench-history { padding-top:16px; }
+.coco-crm .contact-timeline { margin:0; padding:0; list-style:none; }
+.coco-crm .contact-timeline li { display:grid; grid-template-columns:17px minmax(0,1fr) auto; align-items:start; gap:8px; border-bottom:1px solid var(--border); padding:12px 0; font-size:13px; }
+.coco-crm .contact-timeline p { white-space:pre-wrap; overflow-wrap:anywhere; margin:3px 0; }
+.coco-crm .contact-timeline time { color:var(--muted-foreground); font-size:11px; white-space:nowrap; }
+.coco-crm .contact-workbench-context > * { padding:12px 0; border-bottom:1px solid var(--border); }
+.coco-crm .contact-workbench-context { margin-top:10px; }
+.coco-crm .contact-workbench-context > :first-child { border-top:1px solid var(--border); }
+.coco-crm .contact-workbench-context summary { margin-bottom:7px; }
+.coco-crm .contact-workbench .contact-task { display:flex; align-items:flex-start; gap:6px; font-size:12px; text-align:left; width:100%; padding:7px 0; }
+.coco-crm .contact-task small { display:block; color:var(--muted-foreground); }
+.coco-crm .contact-workbench-compose > a { text-decoration:underline; text-underline-offset:2px; }
+.coco-crm .contact-workbench .relationship-panel { padding:0; border:0; background:none; }
+.coco-crm .contact-workbench .relationship-field { display:grid; grid-template-columns:minmax(0,1fr); }
+@media(max-width:1250px) {
+ .coco-crm .contacts-workspace:has(.contact-workbench) .contact-workbench { grid-template-columns:minmax(195px,1fr) minmax(295px,2.25fr); }
+ .coco-crm .contact-workbench > * { padding-inline:12px; }
+}
+@media(max-width:930px) {
+ .coco-crm .contact-detail-pane:has(.contact-workbench) { overflow:auto; }
+ .coco-crm .contacts-workspace:has(.contact-workbench) .contact-workbench { display:flex; flex-direction:column; }
+ .coco-crm .contact-workbench > * { overflow:visible; }
+ .coco-crm .contact-workbench-hub { border-inline:0; border-block:1px solid var(--border); }
+}
+@media(max-width:520px) {
+ .coco-crm .contact-timeline li { grid-template-columns:17px minmax(0,1fr); }
+ .coco-crm .contact-timeline time { grid-column:2; }
+}
+.coco-crm .contact-workbench-links { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.coco-crm .contact-workbench-links a { text-decoration:underline; text-underline-offset:2px; }
+.coco-crm .contact-call-settings { padding:7px 0; font-size:12px; }
+.coco-crm .contact-call-settings label { display:flex; align-items:center; gap:6px; }
+
+
+.coco-crm .workbench-identity-header { position:sticky; z-index:2; top:-18px; margin:-18px -16px 0; padding:14px 16px 10px; background:var(--sidebar,var(--card)); border-bottom:1px solid var(--border); }
+@media(max-width:1250px) {
+ .coco-crm .workbench-identity-header { margin-inline:-12px; padding-inline:12px; }
+}
+@media(max-width:930px) {
+ .coco-crm .workbench-identity-header { position:static; }
+}
+
+.coco-crm .contact-email-composer .email-compose-form { width:100%; padding:0; margin:8px 0; gap:6px; }
+.coco-crm .contact-email-composer .email-compose-form textarea { min-height:0; }
+.coco-crm .contact-email-composer h2 { display:none; }
+.coco-crm .contact-email-composer p { font-size:12px; margin:0; }
+.coco-crm .contact-call-outcome { padding:4px 0; }
+.coco-crm .contact-call-outcome label { margin:6px 0; }
+
+.coco-crm .contact-communications-header { display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px 16px; }
+.coco-crm .contact-communications-header .contact-workbench-switcher { margin:7px 0 0; }
+.coco-crm .contact-communications-summary { max-width:100%; margin-inline-start:auto; }
+.coco-crm .contact-communications-summary > p { margin:3px 0 0; font-size:10px; text-align:end; }
+.coco-crm .contact-comms-stats { display:grid; grid-template-columns:repeat(4,minmax(0,auto)); margin:0; }
+.coco-crm .contact-comms-stats > div { min-width:0; padding:0 8px; }
+.coco-crm .contact-comms-stats > div:last-child { padding-inline-end:0; }
+.coco-crm .contact-comms-stats > div + div { border-inline-start:1px solid var(--border); }
+.coco-crm .contact-comms-stats dt { color:var(--muted-foreground); font-size:10px; }
+.coco-crm .contact-comms-stats dd { margin:1px 0 0; color:var(--foreground); font-size:12px; font-weight:650; }
+.coco-crm .contact-comms-stats small,.coco-crm .contact-comms-stats time { color:var(--muted-foreground); font-size:9px; font-weight:500; }
+.coco-crm .contact-recency { display:inline-flex; align-items:center; gap:2px; border-radius:12px; padding:1px 4px; background:var(--secondary); font-size:10px; }
+.coco-crm .contact-recency[data-hot=true] svg { color:#e75f49; }
+.coco-crm .contact-recency[data-hot=false] svg { color:#6198d8; }
+.coco-crm .contact-workbench-compose { padding-bottom:8px; }
+.coco-crm .contact-workbench .contact-quick-text,.coco-crm .contact-email-composer .email-compose-form { margin:6px 0; gap:5px; }
+.coco-crm .contact-workbench .contact-quick-text textarea,.coco-crm .contact-email-composer .email-compose-form textarea { min-height:0; resize:vertical; }
+.coco-crm .contact-compose-actions { display:flex; gap:8px; align-items:flex-start; }
+.coco-crm .contact-compose-actions > .primary { margin-inline-start:auto; flex:none; }
+.coco-crm .contact-workbench-links { align-items:baseline; gap:4px 10px; }
+.coco-crm .contact-thread-preview .contact-activity-content { min-width:0; }
+.coco-crm .contact-thread-preview .contact-activity-content > p { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--muted-foreground); }
+.coco-crm .contact-timeline .contact-thread-preview { padding-block:8px; }
+@media(max-width:560px) {
+ .coco-crm .contact-comms-stats > div { padding-inline:5px; }
+}

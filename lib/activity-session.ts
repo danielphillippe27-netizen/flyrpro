@@ -2,7 +2,7 @@ export const SESSION_METRICS = [
   { id: 'doors', label: 'Doors' },
   { id: 'conversations', label: 'Conversations' },
   { id: 'leads', label: 'Leads' },
-  { id: 'flyers', label: 'Flyers delivered' },
+  { id: 'appointments', label: 'Appointments' },
 ] as const;
 
 export type SessionMetric = (typeof SESSION_METRICS)[number]['id'];
@@ -12,7 +12,7 @@ export function getSessionCounts(payload: Record<string, unknown>) {
     doors: payload.doors_hit ?? payload.doors_knocked,
     conversations: payload.conversations,
     leads: payload.leads_created ?? payload.leads,
-    flyers: payload.flyers_delivered,
+    appointments: payload.appointments_count ?? payload.appointments,
   };
 }
 

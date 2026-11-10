@@ -4904,12 +4904,6 @@
   padding: 8px;
   background: var(--card);
 }
-.coco-crm .coco-record-link {
-  display: inline-flex;
-  font-size: 12px;
-  color: var(--cocoa);
-  margin-top: 12px;
-}
 .coco-crm .contact-detail-pane .detail-grid {
   grid-template-columns: minmax(230px, 1fr) minmax(230px, 1fr);
   padding: 24px;
@@ -5268,3 +5262,48 @@
 .coco-crm .contact-import-options { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 20px; }
 .coco-crm .contact-import-options button { flex:1 1 180px; padding:10px 14px; border:1px solid var(--border); border-radius:10px; }
 .coco-crm .contact-import-options p { flex-basis:100%; margin:0; font-size:13px; }
+
+.coco-crm .contact-selection-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 4px;
+  font-size: 12px;
+}
+.coco-crm .contact-selection-bar label,
+.coco-crm .contact-selection-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coco-crm .contact-selection-bar input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cocoa);
+}
+.coco-crm .contact-selection-bar .deselect-contacts {
+  color: var(--cocoa);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.coco-crm .contact-selection-tools button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--card);
+}
+.coco-crm .contact-selection-tools button:hover:not(:disabled) { background: var(--muted); }
+.coco-crm .contact-selection-tools .delete-contacts,
+.coco-crm .contact-bulk-feedback[role="alert"] { color: var(--destructive); }
+.coco-crm .contact-selection-bar button:disabled { opacity: 0.5; }
+.coco-crm .contact-more-actions,
+.coco-crm .contact-bulk-feedback {
+  margin: 0 4px 8px;
+  color: var(--coco-muted);
+  font-size: 12px;
+}
+.coco-crm .contact-more-actions summary { cursor: pointer; }
