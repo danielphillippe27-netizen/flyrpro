@@ -232,7 +232,7 @@ struct WolfGridWebView: NSViewRepresentable {
         else {
             decisionHandler(.cancel)
             if webView !== runtime && ["https", "mailto", "tel"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }
-            if webView !== runtime && ["facetime", "sms"].contains(url.scheme ?? "") && action.navigationType == .linkActivated && action.sourceFrame.isMainFrame && trusted(action.sourceFrame.request.url) { NSWorkspace.shared.open(url) }
+            if webView !== runtime && ["http", "facetime", "sms"].contains(url.scheme ?? "") && action.navigationType == .linkActivated && action.sourceFrame.isMainFrame && trusted(action.sourceFrame.request.url) { NSWorkspace.shared.open(url) }
         }
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {

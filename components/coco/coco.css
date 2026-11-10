@@ -1105,6 +1105,11 @@
   font-size: 10px;
   margin: 2px 0 25px;
 }
+.coco-crm .thread-day {
+  display: block;
+  margin: 12px 0;
+  font-weight: 600;
+}
 .coco-crm .bubble-wrap {
   display: flex;
   flex-direction: column;
@@ -5034,7 +5039,26 @@
 /* Shared WolfGrid surfaces stay in sync when the app theme changes in place. */
 .coco-crm input, .coco-crm textarea, .coco-crm select { color:var(--foreground); background-color:var(--card); color-scheme:inherit; }
 .coco-crm input::placeholder, .coco-crm textarea::placeholder { color:var(--muted-foreground); }
-.coco-crm .outgoing .bubble { background:var(--primary); border-color:var(--primary); color:var(--primary-foreground); }
+.coco-crm .inbox-shell .outgoing .bubble { background:#0064ce; border-color:#0064ce; color:#fff; }
+.coco-crm .message-body { white-space:pre-wrap; overflow-wrap:anywhere; }
+.coco-crm .message-body a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.coco-crm .message-link-preview {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:8px;
+  padding:8px 10px;
+  border:1px solid currentColor;
+  border-radius:10px;
+  color:inherit;
+  overflow-wrap:anywhere;
+}
+.coco-crm .message-link-preview svg { flex-shrink:0; }
+.coco-crm .message-link-preview span span { display:block; font-size:11px; }
+.coco-crm .message-link-preview:hover strong { text-decoration:underline; }
+.coco-crm .message-body a:focus-visible,
+.coco-crm .message-link-preview:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
+.coco-crm .outgoing .bubble small { color:inherit; }
 .coco-crm .contact-list-row.selected .client-name strong, .coco-crm .contact-list-row.selected .client-name small { color:var(--primary-foreground); }
 .coco-crm .contact-details-editor input:focus, .coco-crm .contact-details-editor textarea:focus { outline-color:var(--ring); }
 

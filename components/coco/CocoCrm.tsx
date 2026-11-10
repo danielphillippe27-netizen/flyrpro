@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Circle,
   Inbox,
+  Link2,
   Loader2,
   Mail,
   MessageCircle,
@@ -91,6 +92,19 @@ const formatTime = (value?: string | null) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "";
+function formatThreadDay(date: Date, today: Date, yesterday: Date, recent: Date) {
+  const day = date.toDateString();
+  if (day === today.toDateString()) return "Today";
+  if (day === yesterday.toDateString()) return "Yesterday";
+  if (date >= recent && date < today) {
+    return new Intl.DateTimeFormat("en-CA", { weekday: "long" }).format(date);
+  }
+  return new Intl.DateTimeFormat("en-CA", {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  }).format(date);
+}
 function Avatar({
   name,
   size = "normal",
@@ -127,6 +141,48 @@ function ContactContext({ client }: { client: Client }) {
     </section>
   );
 }
+function MessageBody({ body, showPreview = true }: { body: string; showPreview?: boolean }) {
+  const parts = [];
+  let offset = 0;
+  let preview: URL | undefined;
+  const target = hasMacBridge() ? undefined : "_blank";
+
+  for (const match of body.matchAll(/https?:\/\/[^\s<>"“”]+/gi)) {
+    let link = match[0].replace(/[.,!?;:'’]+$/, "");
+    // Preserve balanced parentheses in URLs and leave enclosing punctuation in the message.
+    while (link.endsWith(")") && link.split(")").length > link.split("(").length) {
+      link = link.slice(0, -1);
+    }
+    const url = URL.canParse(link) ? new URL(link) : null;
+    if (!url || url.username || url.password) continue;
+    parts.push(body.slice(offset, match.index));
+    parts.push(
+      <a key={match.index} href={url.href} target={target} rel="noopener noreferrer">
+        {link}
+      </a>,
+    );
+    preview ??= url;
+    offset = match.index + link.length;
+  }
+  parts.push(body.slice(offset));
+
+  const isBusinessCard = preview?.hostname === "wolfgrid.app" && preview.pathname.startsWith("/c/");
+  return (
+    <>
+      <span className="message-body">{parts}</span>
+      {showPreview && preview && (
+        <a className="message-link-preview" href={preview.href} target={target} rel="noopener noreferrer">
+          <Link2 size={18} aria-hidden="true" />
+          <span>
+            <strong>{isBusinessCard ? "WolfGrid business card" : preview.hostname}</strong>
+            <span>{isBusinessCard ? preview.hostname : "Open link"}</span>
+          </span>
+        </a>
+      )}
+    </>
+  );
+}
+
 function MessageAttachments({
   messageId,
   attachments,
@@ -162,7 +218,7 @@ function MessageAttachments({
   }
   return (
     <div>
-      {attachments.map((file) => (
+      {attachments.filter((file) => !/\.pluginPayloadAttachment$/i.test(file.fileName)).map((file) => (
         <div key={file.guid}>
           {file.status === "uploaded" ? (
             <button disabled={!!busy} onClick={() => void download(file)}>
@@ -455,6 +511,12 @@ function CocoWorkspace({
   const thread = history.filter(
     (m) => m.client_id === activeConversation?.client_id,
   );
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const recentDay = new Date(today);
+  recentDay.setDate(today.getDate() - 6);
   const filteredContacts = data.clients
     .filter(
       (c) =>
@@ -1400,7 +1462,7 @@ function CocoWorkspace({
                                       ? client.first_name
                                       : "You"}
                                   </span>
-                                  <p>{message.body ?? "Attachment"}</p>
+                                  <p>{message.body ? <MessageBody body={message.body} showPreview={false} /> : "Attachment"}</p>
                                   <small>{formatShort(message.sent_at)}</small>
                                 </div>
                               ))
@@ -1642,42 +1704,48 @@ function CocoWorkspace({
                           <span role="status">{historyError}</span>
                         )}
                       </div>
-                      <div className="thread-date">
-                        {thread.length
-                          ? "Recent conversation"
-                          : "No messages yet. Write your first message below."}
-                      </div>
-                      {thread.map((message) => (
-                        <div
-                          key={message.id}
-                          className={`bubble-wrap ${message.direction}`}
-                        >
-                          <div className="bubble">
-                            {message.direction === "incoming" &&
-                              (activeConversation.participants?.length ?? 0) >
-                                1 && (
-                                <small>
-                                  {message.sender_identifier ||
-                                    "Unknown sender"}
-                                </small>
-                              )}
-                            {message.body || (
-                              <em>
-                                {message.body_status === "unsupported"
-                                  ? "Message text could not be decoded"
-                                  : "Attachment or message event"}
-                              </em>
+                      {!thread.length && <div className="thread-date">No messages yet. Write your first message below.</div>}
+                      {thread.map((message, index) => {
+                        const date = new Date(message.sent_at ?? "");
+                        const previousDate = new Date(thread[index - 1]?.sent_at ?? "");
+                        const startsDay = Number.isFinite(date.getTime()) &&
+                          date.toDateString() !== previousDate.toDateString();
+                        return (
+                          <Fragment key={message.id}>
+                            {startsDay && (
+                              <time className="thread-date thread-day" dateTime={date.toISOString()}>
+                                {formatThreadDay(date, today, yesterday, recentDay)} {formatTime(message.sent_at)}
+                              </time>
                             )}
-                            <MessageAttachments
-                              messageId={message.id}
-                              attachments={message.attachments ?? []}
-                              userId={userId}
-                              workspaceId={workspaceId}
-                            />
-                          </div>
-                          <small>{formatTime(message.sent_at)}</small>
-                        </div>
-                      ))}
+                            <div className={`bubble-wrap ${message.direction}`}>
+                              <div className="bubble">
+                                {message.direction === "incoming" &&
+                                  (activeConversation.participants?.length ?? 0) >
+                                    1 && (
+                                    <small>
+                                      {message.sender_identifier ||
+                                        "Unknown sender"}
+                                    </small>
+                                  )}
+                                {message.body ? <MessageBody body={message.body} /> : (
+                                  <em>
+                                    {message.body_status === "unsupported"
+                                      ? "Message text could not be decoded"
+                                      : "Attachment or message event"}
+                                  </em>
+                                )}
+                                <MessageAttachments
+                                  messageId={message.id}
+                                  attachments={message.attachments ?? []}
+                                  userId={userId}
+                                  workspaceId={workspaceId}
+                                />
+                              </div>
+                              <small>{formatTime(message.sent_at)}</small>
+                            </div>
+                          </Fragment>
+                        );
+                      })}
                     </div>
                     <div className="composer-area">
                       {draft && (
