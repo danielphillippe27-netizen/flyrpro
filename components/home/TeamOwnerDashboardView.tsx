@@ -1,5 +1,8 @@
 'use client';
 
+import { SalesCard } from '@/components/field-sales/SalesCard';
+import { ProSalesReport } from '@/components/field-sales/ProSalesReport';
+import { useFieldSales } from '@/lib/field-sales/client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, BarChart3, MessageSquare, Users } from 'lucide-react';
@@ -101,6 +104,7 @@ export function TeamOwnerDashboardView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { currentWorkspaceId } = useWorkspace();
+  const { data: sales } = useFieldSales({}, true);
   const initialTab = searchParams.get('tab');
   const isSelfServeDemo = searchParams.get('source') === 'self-serve-demo';
   const showDemoLiveMap = isSelfServeDemo && searchParams.get('demoLive') === '1';
@@ -313,7 +317,8 @@ export function TeamOwnerDashboardView() {
               Settings
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="summary">
+          <TabsContent value="summary" className="space-y-4">
+            {!isSelfServeDemo && <SalesCard />}
             <TeamDashboardTab
               range={range}
               memberIds={memberIds}
@@ -327,7 +332,8 @@ export function TeamOwnerDashboardView() {
           <TabsContent value="activity">
             <TeamActivityTab range={range} memberIds={memberIds} />
           </TabsContent>
-          <TabsContent value="reporting">
+          <TabsContent value="reporting" className="space-y-4">
+            {!isSelfServeDemo && sales?.enabled && <ProSalesReport embedded />}
             {canUseAdvancedReporting || isSelfServeDemo ? (
               <TeamReportingTab memberIds={memberIds} demoReport={showDemoReport} />
             ) : (

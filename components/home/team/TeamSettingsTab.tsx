@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkspaceSalesSettings } from '@/components/field-sales/WorkspaceSalesSettings';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { WorkspaceCoverageSettings } from '@/components/settings/WorkspaceCoverageSettings';
 import { Goal, Pencil } from 'lucide-react';
@@ -152,6 +153,7 @@ export function TeamSettingsTab({ range, onMemberClick }: TeamSettingsTabProps) 
   return (
     <div className="space-y-4">
       <WorkspaceCoverageSettings />
+      <WorkspaceSalesSettings key={currentWorkspaceId} />
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

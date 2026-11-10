@@ -39,11 +39,15 @@ if (roofing) {
     CREATE TABLE calendar_events (id uuid PRIMARY KEY, workspace_id uuid, user_id uuid, contact_id uuid, event_type text);
     CREATE TABLE campaign_addresses (id uuid PRIMARY KEY, campaign_id uuid, formatted text);
     INSERT INTO campaign_addresses VALUES ('${id(47)}','${id(20)}','7 Test Street');
+    INSERT INTO sessions(id,workspace_id,user_id,campaign_id,start_time)
+      VALUES ('${id(48)}','${id(10)}','${id(2)}','${id(20)}',now()-interval '10 minutes');
+    UPDATE contacts SET session_id='${id(48)}',created_at=now()-interval '5 minutes' WHERE id='${id(30)}';
+    UPDATE workspaces SET industry='Roofing' WHERE id='${id(10)}';
     UPDATE contacts SET address_id='${id(47)}',address='7 Test Street' WHERE id='${id(30)}';
   `);
   for (const migration of [
     "20261110120000_roofing_appointments.sql","20261110121000_roofing_appointment_reminders.sql",
-    "20261110122000_roofing_sales.sql","20261110123000_roofing_earnings.sql","20261110124000_roofing_entry_and_reporting.sql",
+    "20261110122000_roofing_sales.sql","20261110123000_roofing_earnings.sql","20261110124000_roofing_entry_and_reporting.sql", "20261110125000_workspace_sales_visibility.sql",
   ]) await db.exec(await readFile(resolve(root, "supabase/migrations", migration), "utf8"));
   await db.exec(`
     UPDATE field_sales_settings SET roofing_appointments_enabled=true,roofing_appointment_writes_enabled=true,
@@ -97,7 +101,9 @@ import {SaleRecordPanel} from '${join(root, "components/field-sales/SaleRecordPa
 import {RoofingAppointments} from '${join(root, "components/appointments/RoofingAppointments.tsx")}';
 import {EarningsPage} from '${join(root, "components/field-sales/EarningsPage.tsx")}';
 import {SalesCard} from '${join(root, "components/field-sales/SalesCard.tsx")}';
-createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">Admin</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname === "/appointments" ? <RoofingAppointments workspace="${id(10)}" legacy={<p>Legacy appointments</p>} /> : location.pathname === "/sales/earnings" ? <EarningsPage/> : location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
+import {WorkspaceSalesSettings} from '${join(root, "components/field-sales/WorkspaceSalesSettings.tsx")}';
+import {SessionSales} from '${join(root, "components/field-sales/SessionSales.tsx")}';
+createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">Admin</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname === "/visibility-test" ? <><WorkspaceSalesSettings/><SalesCard/><SessionSales sessionId="${id(48)}"/></> : location.pathname === "/appointments" ? <RoofingAppointments workspace="${id(10)}" legacy={<p>Legacy appointments</p>} /> : location.pathname === "/sales/earnings" ? <EarningsPage/> : location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
 `,
 );
 await build({
@@ -202,6 +208,10 @@ const server = createServer(async (req, res) => {
           result = await db.query("SELECT field_appointment_detail($1,$2) data",[args.p_workspace,args.p_id]);
         else if (roofing && name === "field_appointment_alerts")
           result = await db.query("SELECT field_appointment_alerts($1) data",[args.p_workspace]);
+        else if (roofing && name === "field_sales_workspace_command")
+          result = await db.query("SELECT field_sales_workspace_command($1,$2) data",[args.p_workspace,args.p_enabled??null]);
+        else if (roofing && name === "field_sales_session_summary")
+          result = await db.query("SELECT field_sales_session_summary($1,$2) data",[args.p_workspace,args.p_session]);
         else if (roofing && name === "field_sales_roofing_entry")
           result = await db.query("SELECT field_sales_roofing_entry($1,$2) data",[args.p_workspace,args.p_context??{}]);
         else if (roofing && name === "field_earnings_list")

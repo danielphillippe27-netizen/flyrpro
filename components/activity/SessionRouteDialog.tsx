@@ -1,5 +1,6 @@
 'use client';
 
+import { SessionSales } from '@/components/field-sales/SessionSales';
 import dynamic from 'next/dynamic';
 import { Route } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -11,7 +12,8 @@ export const ActivityRouteMap = dynamic(
 );
 
 type SessionRoute = {
-  path: GeoJSON.LineString;
+  id: string;
+  path: GeoJSON.LineString | null;
   title: string;
   time: string;
   campaignId: string | null;
@@ -41,11 +43,12 @@ export function SessionRouteDialog({
             <DialogHeader className="gap-1.5 px-1 py-1 pr-9 text-left">
               <DialogTitle className="flex items-center gap-2 text-xl">
                 <Route className="size-5 text-primary" aria-hidden="true" />
-                GPS route
+                Session Activity
               </DialogTitle>
               <DialogDescription>{session.title} · {session.time}</DialogDescription>
             </DialogHeader>
-            <div className="h-[clamp(25rem,72dvh,54rem)] sm:h-[clamp(26rem,73dvh,54rem)]">
+            <SessionSales sessionId={session.id} />
+            {session.path ? <div className="h-[clamp(25rem,72dvh,54rem)] sm:h-[clamp(26rem,73dvh,54rem)]">
               <ActivityRouteMap
                 pathGeojson={session.path}
                 className="h-full"
@@ -62,11 +65,14 @@ export function SessionRouteDialog({
                 }
               />
             </div>
+            : <dl className="grid grid-cols-2 gap-3 p-2 sm:grid-cols-4">
+                {session.metrics.map(({ label, value }) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="text-sm font-semibold">{value}</dd></div>)}
+              </dl>}
             <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 px-1 text-xs text-muted-foreground">
-              <div className="flex items-center gap-4">
+              {session.path ? <div className="flex items-center gap-4">
                 <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-green-500" /> Start</span>
                 <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full bg-red-500" /> Finish</span>
-              </div>
+              </div> : <span>No GPS route recorded</span>}
               <SessionFarmLink campaignId={session.campaignId} />
             </div>
           </>

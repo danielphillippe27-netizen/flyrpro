@@ -64,6 +64,21 @@ const dateInput = (date, seconds = false) => new Intl.DateTimeFormat('sv-SE', {
     await page.getByLabel(/Payment time/).fill(dateInput(new Date(Date.now() - 60_000)));
     await runRpc('field_sales_command', 'collect', () => page.getByRole('button', { name: 'Record payment', exact: true }).click());
 
+    await actor(1, '/visibility-test');
+    const salesToggle = page.getByRole('switch', { name: 'Workspace Sales' });
+    const sessionSales = page.getByRole('region', { name: 'Session Sales' });
+    await sessionSales.getByText(/20,000/).waitFor();
+    assert.ok(await salesToggle.isChecked());
+    assert.ok((await sessionSales.innerText()).includes('Appointments closed'));
+    await page.getByRole('heading', { name: 'Team Sales' }).waitFor();
+    await salesToggle.click();
+    await sessionSales.waitFor({ state: 'hidden' });
+    await page.getByRole('heading', { name: 'Team Sales' }).waitFor({ state: 'hidden' });
+    assert.equal(await salesToggle.isChecked(), false);
+    await salesToggle.click();
+    await sessionSales.getByText(/20,000/).waitFor();
+    assert.ok(await salesToggle.isChecked());
+
     await actor(2, '/sales/earnings');
     await page.getByText('Credited', { exact: false }).first().waitFor();
     assert.ok((await page.locator('main').innerText()).includes('100.00'));

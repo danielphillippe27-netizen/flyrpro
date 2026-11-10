@@ -12,7 +12,7 @@ type Report = {
   current_pipeline?: Pipeline;
   outstanding_commission_minor?: string;
   summary: Summary; previous: Summary; change_percent: Record<string,string | null>;
-  metrics: { appointments_scheduled?: number; appointments_no_show?: number; estimates_sent?: number; available: boolean; doors: number | null; conversations: number | null; leads: number | null; appointments: number | null; appointments_completed: number | null; opportunities: number | null; close_rate: string | null; revenue_per_door_minor: string | null };
+  metrics: { appointments_set?: number; appointments_closed?: number; appointments_scheduled?: number; appointments_no_show?: number; estimates_sent?: number; available: boolean; doors: number | null; conversations: number | null; leads: number | null; appointments: number | null; appointments_completed: number | null; opportunities: number | null; close_rate: string | null; revenue_per_door_minor: string | null };
   metric_notes: string; as_of: string; total_records: number; has_more: boolean;
   sales: { id: string; rep_name: string; product: string; status: string; sold_on: string; value_minor?: string; campaign_name?: string }[];
   groups: { id: string | null; name: string; sales: number; sold_value_minor?: string; average_ticket_minor?: string }[];
@@ -69,6 +69,10 @@ function ProSalesReportContent({embedded,initialScope}:{embedded:boolean;initial
       <p className="text-sm text-muted-foreground">Workspace approved commissions awaiting payment</p>
       <p className="text-2xl font-semibold">{money(d.outstanding_commission_minor, d.currency)}</p>
     </Link>}
+    <section className="grid grid-cols-2 gap-3" aria-label="Appointment performance">
+      <div className="rounded-xl border p-3"><p>Appointments set</p><strong>{d.metrics.appointments_set ?? "—"}</strong></div>
+      <div className="rounded-xl border p-3"><p>Appointments closed</p><strong>{d.metrics.appointments_closed ?? "—"}</strong></div>
+    </section>
     {d.metrics.available && d.metrics.appointments_scheduled !== undefined && <section className="grid gap-3 sm:grid-cols-3" aria-label="Appointments and estimates">
       <div className="rounded-xl border p-3"><p>Scheduled visits</p><strong>{d.metrics.appointments_scheduled}</strong></div>
       <div className="rounded-xl border p-3"><p>No-shows</p><strong>{d.metrics.appointments_no_show}</strong></div>

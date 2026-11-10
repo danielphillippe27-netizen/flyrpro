@@ -1,5 +1,6 @@
 'use client';
 
+import { SalesCard } from '@/components/field-sales/SalesCard';
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { HomeDashboardView } from '@/components/home/HomeDashboardView';
@@ -43,6 +44,9 @@ export function HomePageClient({ accessLevel }: HomePageClientProps) {
         <MemberDashboardView />
       ) : (
         <HomeDashboardView />
+      )}
+      {!showSelfServeTeamDemo && !isWorkspaceManager && resolvedAccessLevel !== 'team_leader' && resolvedAccessLevel !== 'solo_owner' && (
+        <div className="mx-auto max-w-7xl px-4 pb-6"><SalesCard /></div>
       )}
     </div>
   );

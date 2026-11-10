@@ -92,7 +92,7 @@ export const salesChanged = "wolfgrid:field-sales-changed";
 export function useFieldSales<T = SalesData>(
   filter: SalesFilter = {},
   bootstrap = false,
-  resource?: "field_sales_workbench" | "field_sales_report" | "field_sales_drilldown" | "field_sales_leaderboard" | "field_sales_target_list" | "field_sales_home" | "field_sales_commission_home" | "field_sales_entry",
+  resource?: "field_sales_workbench" | "field_sales_report" | "field_sales_drilldown" | "field_sales_leaderboard" | "field_sales_target_list" | "field_sales_home" | "field_sales_commission_home" | "field_sales_entry" | "field_sales_workspace_command" | "field_sales_session_summary",
   reportFilter?: Record<string, string | number>,
   resourceSelector?: string,
 ) {
@@ -151,6 +151,8 @@ export function useFieldSales<T = SalesData>(
             ? { p_workspace: currentWorkspaceId, ...(resource === "field_sales_entry" ? {p_context: JSON.parse(reportFilterJSON)} : {p_filter: JSON.parse(reportFilterJSON)}),
                 ...(resource === "field_sales_drilldown" ? {p_kind: resourceSelector} : {}),
                 ...(resource === "field_sales_leaderboard" ? {p_metric: resourceSelector ?? null} : {}) }
+            : resource === "field_sales_session_summary"
+            ? { p_workspace: currentWorkspaceId, p_session: resourceSelector }
             : bootstrap || resource
             ? { p_workspace: currentWorkspaceId }
             : {
