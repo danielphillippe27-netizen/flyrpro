@@ -1,6 +1,7 @@
 // Local-only browser harness: real components and migrated PostgreSQL, synthetic identities.
 // PGLITE_MODULE=... ESBUILD_MODULE=... node scripts/field-sales-validation.mjs
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,26 +10,60 @@ import { createRequire } from "node:module";
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const require = createRequire(join(root, "package.json"));
 const { build } = await import(process.env.ESBUILD_MODULE ?? "esbuild");
-const { createSalesFixture } =
-  await import("../../WolfGrid-IOS/supabase/tests/field_sales_fixture.mjs");
+const fixturePath = process.env.SALES_FIXTURE ?? "../../WolfGrid-IOS/supabase/tests/field_sales_fixture.mjs";
+const { createSalesFixture } = await import(fixturePath);
+const roofing = process.env.ROOFING_SALES === "1";
+const pro = roofing || process.env.PRO_SALES === "1";
 const { db, id } = await createSalesFixture();
-if (process.env.PRO_SALES === "1") {
+if (pro) {
   for (const migration of ["20260916120000_pro_sales_foundation.sql","20260916121000_pro_sales_records.sql","20260916121500_pro_sales_activity.sql","20260916122000_pro_sales_reporting.sql","20260916123000_pro_sales_leaderboards.sql","20260916124000_pro_sales_goals.sql","20260916125000_pro_sales_goal_compatibility.sql","20260916126000_pro_sales_home.sql","20260916127000_pro_sales_entry.sql","20260916128000_pro_sales_pipeline.sql","20260916129000_pro_sales_report_pipeline.sql","20260916130000_pro_sales_commission_home.sql","20260917120000_appointment_sales_v1.sql","20260917121000_appointment_sale_uniqueness.sql"]) {
-    await db.exec(await readFile(resolve(root,"../WolfGrid-IOS/supabase/migrations",migration),"utf8"));
+    await db.exec(await readFile(resolve(root,"supabase/migrations",migration),"utf8"));
   }
 }
 await db.exec(
   `INSERT INTO field_sales_settings(workspace_id,enabled,currency,timezone) VALUES('${id(10)}',true,'CAD','America/Toronto');`,
 );
-if (process.env.PRO_SALES === "1") {
+if (pro) {
   await db.exec(`INSERT INTO contact_activities(id,contact_id,type,timestamp,status) VALUES
     ('${id(40)}','${id(30)}','meeting',now()-interval '2 hours','completed'),
     ('${id(41)}','${id(31)}','meeting',now()-interval '1 hour','completed');`);
 }
+if (roofing) {
+  await db.exec(`
+    CREATE ROLE service_role;
+    CREATE FUNCTION can_view_campaign(campaign uuid, actor uuid) RETURNS boolean LANGUAGE sql AS $$
+      SELECT EXISTS (SELECT 1 FROM campaigns c JOIN workspace_members m ON m.workspace_id=c.workspace_id
+        WHERE c.id=campaign AND m.user_id=actor)
+    $$;
+    ALTER TABLE contacts ADD COLUMN appointment_at timestamptz, ADD COLUMN address_id uuid, ADD COLUMN address text, ADD COLUMN phone text;
+    CREATE TABLE calendar_events (id uuid PRIMARY KEY, workspace_id uuid, user_id uuid, contact_id uuid, event_type text);
+    CREATE TABLE campaign_addresses (id uuid PRIMARY KEY, campaign_id uuid, formatted text);
+    INSERT INTO campaign_addresses VALUES ('${id(47)}','${id(20)}','7 Test Street');
+    UPDATE contacts SET address_id='${id(47)}',address='7 Test Street' WHERE id='${id(30)}';
+  `);
+  for (const migration of [
+    "20261110120000_roofing_appointments.sql","20261110121000_roofing_appointment_reminders.sql",
+    "20261110122000_roofing_sales.sql","20261110123000_roofing_earnings.sql","20261110124000_roofing_entry_and_reporting.sql",
+  ]) await db.exec(await readFile(resolve(root, "supabase/migrations", migration), "utf8"));
+  await db.exec(`
+    UPDATE field_sales_settings SET roofing_appointments_enabled=true,roofing_appointment_writes_enabled=true,
+      roofing_sales_enabled=true,roofing_sale_writes_enabled=true,
+      roofing_earnings_enabled=true,roofing_earnings_writes_enabled=true;
+    SET ROLE authenticated;
+    SET request.jwt.claim.sub='${id(1)}';
+    SELECT field_earnings_command('${id(10)}','publish_plan',
+     jsonb_build_object('request_id','${id(101)}','title','Inspection fee','role','setter',
+      'effective_on',(now() AT TIME ZONE 'America/Toronto')::date,'rules','[{"kind":"held_fee","amount_minor":"10000"}]'::jsonb));
+    SELECT field_earnings_command('${id(10)}','publish_plan',
+     jsonb_build_object('request_id','${id(102)}','title','Cash commission','role','closer',
+      'effective_on',(now() AT TIME ZONE 'America/Toronto')::date,'rules','[{"kind":"cash_percent","rate_bps":500}]'::jsonb));
+    RESET ROLE;
+  `);
+}
 const dir = await mkdtemp(join(tmpdir(), "wolfgrid-sales-browser-"));
 await writeFile(
   join(dir, "workspace.ts"),
-  `export function useWorkspace(){return {currentWorkspaceId:'${id(10)}'}}`,
+  `export function useWorkspace(){return {currentWorkspaceId:'${id(10)}',membershipsByWorkspaceId:{'${id(10)}':({'1':'owner','2':'member','3':'admin'})[localStorage.getItem('actor')||'1']}}}`,
 );
 await writeFile(
   join(dir, "navigation.ts"),
@@ -59,8 +94,10 @@ import {ProSalesLeaderboard} from '${join(root, "components/field-sales/ProSales
 import {SalesGoals} from '${join(root, "components/field-sales/SalesGoals.tsx")}';
 import {ProSalesReport} from '${join(root, "components/field-sales/ProSalesReport.tsx")}';
 import {SaleRecordPanel} from '${join(root, "components/field-sales/SaleRecordPanel.tsx")}';
+import {RoofingAppointments} from '${join(root, "components/appointments/RoofingAppointments.tsx")}';
+import {EarningsPage} from '${join(root, "components/field-sales/EarningsPage.tsx")}';
 import {SalesCard} from '${join(root, "components/field-sales/SalesCard.tsx")}';
-createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">Admin</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
+createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">Admin</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname === "/appointments" ? <RoofingAppointments workspace="${id(10)}" legacy={<p>Legacy appointments</p>} /> : location.pathname === "/sales/earnings" ? <EarningsPage/> : location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
 `,
 );
 await build({
@@ -69,6 +106,7 @@ await build({
   outfile: join(dir, "bundle.js"),
   jsx: "automatic",
   platform: "browser",
+  nodePaths: [join(root, "node_modules")],
   define: { "process.env.NODE_ENV": '"development"' },
   plugins: [
     {
@@ -82,12 +120,12 @@ await build({
             "next/link": "link.tsx",
           }[args.path];
           if (stub) return { path: join(dir, stub) };
-          if (args.path.startsWith("@/"))
-            return {
-              path:
-                join(root, args.path.slice(2)) +
-                (args.path.endsWith("client") ? ".ts" : ".tsx"),
-            };
+          if (args.path.startsWith("@/")) {
+            const target = join(root, args.path.slice(2));
+            for (const extension of [".ts", ".tsx"]) {
+              if (existsSync(target + extension)) return { path: target + extension };
+            }
+          }
           if (
             args.path === "react" ||
             args.path.startsWith("react/") ||
@@ -153,6 +191,23 @@ const server = createServer(async (req, res) => {
         else if (name === "field_sales_record") result = await db.query("SELECT field_sales_record($1,$2) data",[args.p_workspace,args.p_sale]);
         else if (name === "field_sales_workbench") result = await db.query("SELECT field_sales_workbench($1) data",[args.p_workspace]);
         else if (name === "field_sales_pipeline_command") result = await db.query("SELECT field_sales_pipeline_command($1,$2,$3) data",[args.p_workspace,args.p_action,args.p_data]);
+        else if (roofing && name === "field_appointment_list")
+          result = await db.query("SELECT field_appointment_list($1,$2,$3,$4,$5,$6,$7) data",
+            [args.p_workspace,args.p_start??null,args.p_end??null,args.p_contact??null,args.p_team??false,args.p_after_start??null,args.p_after_id??null]);
+        else if (roofing && name === "field_appointment_options")
+          result = await db.query("SELECT field_appointment_options($1,$2,$3) data",[args.p_workspace,args.p_search??"",args.p_address??null]);
+        else if (roofing && name === "field_appointment_command")
+          result = await db.query("SELECT field_appointment_command($1,$2,$3) data",[args.p_workspace,args.p_action,args.p_data]);
+        else if (roofing && name === "field_appointment_detail")
+          result = await db.query("SELECT field_appointment_detail($1,$2) data",[args.p_workspace,args.p_id]);
+        else if (roofing && name === "field_appointment_alerts")
+          result = await db.query("SELECT field_appointment_alerts($1) data",[args.p_workspace]);
+        else if (roofing && name === "field_sales_roofing_entry")
+          result = await db.query("SELECT field_sales_roofing_entry($1,$2) data",[args.p_workspace,args.p_context??{}]);
+        else if (roofing && name === "field_earnings_list")
+          result = await db.query("SELECT field_earnings_list($1,$2) data",[args.p_workspace,args.p_filter??{}]);
+        else if (roofing && name === "field_earnings_command")
+          result = await db.query("SELECT field_earnings_command($1,$2,$3) data",[args.p_workspace,args.p_action,args.p_data]);
         else if (name === "field_sales_history") result = await db.query("SELECT field_sales_history($1,$2) data",[args.p_workspace,args.p_sale]);
         else throw new Error("Unknown RPC");
         res.setHeader("Content-Type", "application/json");

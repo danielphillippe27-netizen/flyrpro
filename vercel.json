@@ -28,6 +28,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/appointment-reminders",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/card-notifications",
       "schedule": "* * * * *"
     },

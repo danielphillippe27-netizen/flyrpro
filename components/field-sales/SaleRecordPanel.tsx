@@ -3,10 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { appointmentRpc, type AppointmentOptions } from "@/lib/field-sales/appointments";
 import { useWorkspace } from "@/lib/workspace-context";
 import { minorUnits, money, salesCommand, salesChanged } from "@/lib/field-sales/client";
 
 type SaleRecord = {
+  sale_source?: string;
+  duplicate_review?: boolean;
+  proof_reference?: string;
   id: string; version: number; currency: string; status: string; sold_on: string;
   rep_name_snapshot: string; campaign_name_snapshot?: string; team_name_snapshot?: string;
   product: string; notes: string; value_minor?: string; completed_value_minor?: string;
@@ -79,10 +83,15 @@ export function SaleRecordPanel({ saleId }: { saleId: string }) {
         <section className="space-y-4 rounded-2xl border p-5"><h2 className="font-semibold">Attribution</h2>
           <p className="text-sm text-muted-foreground">{s.attribution_method.replaceAll("_", " ")} · {s.attribution_confidence} evidence</p>
           {s.credits.map(c => <div key={c.user_id} className="flex justify-between gap-3 border-t pt-3"><div><p>{c.rep_name}</p><p className="text-sm capitalize text-muted-foreground">{c.role.replaceAll("_", " ")}{c.team_name ? ` · ${c.team_name}` : ""}</p></div><div className="text-right"><p>{c.basis_points / 100}% credit</p>{c.credited_value_minor !== undefined && <p className="text-sm">{money(c.credited_value_minor, s.currency)}</p>}</div></div>)}
+          {s.can_attribute && s.sale_source && s.sale_source !== "legacy" &&
+           ["pending","verified"].includes(s.status) ? <CreditEditor key={s.version} workspace={currentWorkspaceId} sale={s} /> : null}
           <p className="text-xs text-muted-foreground">Credit shares divide one contract. Company sold value counts it once.</p>
         </section>
-        <section className="space-y-4 rounded-2xl border p-5"><h2 className="font-semibold">Job details</h2><dl className="grid grid-cols-2 gap-3 text-sm"><dt>Product / service</dt><dd>{s.product || "Not specified"}</dd><dt>Fulfillment</dt><dd className="capitalize">{s.fulfillment_status.replaceAll("_", " ")}</dd><dt>Expected completion</dt><dd>{s.expected_completion_on || "Not scheduled"}</dd></dl>{s.notes && <p className="whitespace-pre-wrap text-sm">{s.notes}</p>}</section>
+        <section className="space-y-4 rounded-2xl border p-5"><h2 className="font-semibold">Job details</h2><dl className="grid grid-cols-2 gap-3 text-sm"><dt>Product / service</dt><dd>{s.product || "Not specified"}</dd><dt>Fulfillment</dt><dd className="capitalize">{s.fulfillment_status.replaceAll("_", " ")}</dd><dt>Expected completion</dt><dd>{s.expected_completion_on || "Not scheduled"}</dd>
+          {s.proof_reference ? <><dt>Proof reference</dt><dd>{s.proof_reference}</dd></> : null}</dl>{s.notes && <p className="whitespace-pre-wrap text-sm">{s.notes}</p>}</section>
       </div>
+      {s.sale_source && s.sale_source !== "legacy" ?
+        <Link className="text-sm underline" href={`/sales/earnings?sale=${s.id}`}>View related earnings</Link> : null}
       <SaleActionForm key={`${currentWorkspaceId}:${s.id}:${s.version}`} workspace={currentWorkspaceId} sale={s} />
       <section className="space-y-3"><h2 className="text-lg font-semibold">Property timeline</h2><ol className="space-y-3 border-l pl-5">{s.timeline.map((entry, i) => <li key={`${entry.kind}:${entry.id}:${i}`}><p className="capitalize">{entry.kind.replaceAll("_", " ")} <span className="text-sm text-muted-foreground">· {dateText(entry.at)}</span></p>{entry.note && <p className="text-sm text-muted-foreground">{entry.note}</p>}</li>)}</ol></section>
       {s.payments.length > 0 && <section className="space-y-3"><h2 className="text-lg font-semibold">Payment ledger</h2>{s.payments.map(p => <div key={p.id} className="flex justify-between rounded-xl border p-4"><div><p className="capitalize">{p.kind}</p><p className="text-sm text-muted-foreground">{dateText(p.occurred_at)}{p.note ? ` · ${p.note}` : ""}</p></div><p className="font-medium tabular-nums">{money(p.amount_minor, s.currency)}</p></div>)}</section>}
@@ -102,15 +111,18 @@ function SaleActionForm({ workspace, sale }: { workspace: string; sale: SaleReco
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
+  const [receipt, setReceipt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const request = useRef<{ fingerprint: string; id: string } | null>(null);
   if (!actions.length) return null;
   const payment = ["collect", "refund_payment", "chargeback_payment"].includes(action);
+  const reversal = sale.sale_source && sale.sale_source !== "legacy" && payment && action !== "collect";
+  const reasonRequired = ["cancel", "reject"].includes(action) || (action === "verify" && sale.duplicate_review);
   return <form className="space-y-4 rounded-2xl border p-5" onSubmit={async e => {
     e.preventDefault(); setBusy(true); setError("");
     try {
-      const payload = { id: sale.id, version: sale.version, reason, ...(payment ? { amount_minor: minorUnits(amount, sale.currency), occurred_at: new Date(date).toISOString(), note: reason } : {}), ...(action === "complete" ? { completed_on: date } : {}) };
+      const payload = { id: sale.id, version: sale.version, reason, ...(payment ? { amount_minor: minorUnits(amount, sale.currency), occurred_at: new Date(date).toISOString(), note: reason, reverses_payment_id: reversal ? receipt : undefined } : {}), ...(action === "complete" ? { completed_on: date } : {}) };
       const fingerprint = JSON.stringify({ action, payload });
       if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
       await salesCommand(workspace, action, { ...payload, request_id: request.current.id });
@@ -118,12 +130,82 @@ function SaleActionForm({ workspace, sale }: { workspace: string; sale: SaleReco
     finally { setBusy(false); }
   }}>
     <h2 className="font-semibold">Update sale</h2>
-    <div className="grid gap-4 sm:grid-cols-2"><label className={label}>Action<select className={field} value={action} onChange={e => { setAction(e.target.value); setDate(""); setError(""); }}>{actions.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
+    <div className="grid gap-4 sm:grid-cols-2"><label className={label}>Action<select aria-label="Sale action" className={field} value={action} onChange={e => { setAction(e.target.value); setDate(""); setError(""); }}>{actions.map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select></label>
       {payment && <label className={label}>Amount ({sale.currency})<input className={field} inputMode="decimal" required value={amount} onChange={e => setAmount(e.target.value)} /></label>}
       {(payment || action === "complete") && <label className={label}>{payment ? "Payment time (your device timezone)" : "Completion date"}<input className={field} type={payment ? "datetime-local" : "date"} required value={date} onChange={e => setDate(e.target.value)} /></label>}
-      <label className={label}>{["cancel", "reject"].includes(action) ? "Reason" : "Note (optional)"}<input className={field} required={["cancel", "reject"].includes(action)} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} /></label>
+      {reversal && <label className={label}>Original receipt<select className={field} required value={receipt}
+        onChange={e => setReceipt(e.target.value)}>
+        <option value="">Choose receipt</option>
+        {sale.payments.filter(p => p.kind === "collection").map(p =>
+          <option key={p.id} value={p.id}>{money(p.amount_minor, sale.currency)} · {dateText(p.occurred_at)}</option>)}
+      </select></label>}
+      <label className={label}>{reasonRequired ? "Reason" : "Note (optional)"}<input className={field} required={reasonRequired} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} /></label>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <button disabled={busy} className="rounded-xl bg-primary px-5 py-2.5 text-primary-foreground disabled:opacity-50">{busy ? "Saving…" : actions.find(([value]) => value === action)?.[1]}</button>
   </form>;
+}
+
+function CreditEditor({ workspace, sale }: { workspace: string; sale: SaleRecord }) {
+  const [reps, setReps] = useState<AppointmentOptions["representatives"]>([]);
+  const [selected, setSelected] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [rows, setRows] = useState(() => sale.credits.map(credit => ({
+    user_id: credit.user_id, name: credit.rep_name, role: credit.role, percentage: String(credit.basis_points / 100),
+  })));
+  const request = useRef<{ fingerprint: string; id: string } | null>(null);
+  async function loadRoster() {
+    try {
+      setReps((await appointmentRpc<AppointmentOptions>("field_appointment_options", { p_workspace: workspace })).representatives);
+    } catch {
+      setError("Representative list could not be loaded.");
+    }
+  }
+  return <details className="space-y-2">
+    <summary className="cursor-pointer text-sm" onClick={() => { if (!reps.length) void loadRoster(); }}>Correct credit allocation</summary>
+    <form className="space-y-2" onSubmit={async event => {
+      event.preventDefault();
+      setBusy(true);
+      setError("");
+      try {
+        const credits = rows.map(row => {
+          if (!/^\d+(\.\d{1,2})?$/.test(row.percentage)) throw new Error("Enter percentages with up to two decimal places.");
+          const [whole, fraction = ""] = row.percentage.split(".");
+          return { user_id: row.user_id, role: row.role, basis_points: Number(BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"))) };
+        });
+        if (credits.reduce((total, row) => total + row.basis_points, 0) !== 10000) throw new Error("Credit must total exactly 100%.");
+        const data = { id: sale.id, version: sale.version, reason, credits };
+        const fingerprint = JSON.stringify(data);
+        if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
+        await salesCommand(workspace, "attribution", { ...data, request_id: request.current.id });
+      } catch (failure) { setError((failure as Error).message); }
+      finally { setBusy(false); }
+    }}>
+      {rows.map(row => <label key={row.user_id} className={label}>{row.name} · {row.role.replaceAll("_", " ")} (%)
+        <input className={field} value={row.percentage} inputMode="decimal" required maxLength={7}
+          onChange={event => setRows(current => current.map(item => item.user_id === row.user_id ?
+            { ...item, percentage: event.target.value } : item))} />
+        {row.role === "contributor" ? <button type="button" className="text-left underline"
+          onClick={() => setRows(current => current.filter(item => item.user_id !== row.user_id))}>Remove contributor</button> : null}
+      </label>)}
+      {reps.some(rep => !rows.some(row => row.user_id === rep.id)) ? <label className={label}>Add contributor
+        <select className={field} value={selected} onChange={event => {
+          const rep = reps.find(rep => rep.id === event.target.value);
+          if (!rep) return;
+          setSelected("");
+          setRows(current => [...current, { user_id: rep.id, name: rep.name, role: "contributor", percentage: "0" }]);
+        }}>
+          <option value="">Choose representative</option>
+          {reps.filter(rep => !rows.some(row => row.user_id === rep.id)).map(rep => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
+        </select>
+      </label> : null}
+      <label className={label}>Correction reason<input className={field} value={reason} required maxLength={1000}
+        onChange={event => setReason(event.target.value)} /></label>
+      <p className="text-xs text-muted-foreground">Use a separate earnings adjustment for a compensation correction.</p>
+      {error ? <p role="alert" className="text-destructive">{error}</p> : null}
+      <button className="rounded-lg border px-3 py-2" disabled={busy}>Save credit allocation</button>
+    </form>
+  </details>;
 }

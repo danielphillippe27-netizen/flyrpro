@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { appointmentRpc, type AppointmentOptions } from "@/lib/field-sales/appointments";
 import {
   useFieldSales,
   salesCommand,
@@ -16,6 +17,9 @@ type Stage = {
   probability: number;
 };
 type Opportunity = {
+  id?: string;
+  user_id?: string;
+  job_label?: string;
   contact_id: string;
   contact_name: string;
   stage_key: string;
@@ -37,6 +41,8 @@ type Task = {
 };
 type Workbench = {
   enabled: boolean;
+  pipeline_version?: number;
+  roofing_can_write?: boolean;
   needs_setup?: boolean;
   user_id: string;
   role: string;
@@ -152,6 +158,7 @@ function WorkbenchContent() {
       <div className="flex gap-3">
         <button
           className={button}
+          disabled={d.pipeline_version === 3 && !d.roofing_can_write}
           onClick={() => {
             setEditing(null);
             setCreating(true);
@@ -170,12 +177,13 @@ function WorkbenchContent() {
       )}
       {(creating || editing) && (
         <OpportunityForm
-          key={editing?.contact_id ?? "new"}
+          key={editing?.id ?? editing?.contact_id ?? "new"}
+          workspace={workspaceId ?? ""}
           d={d}
           initial={editing}
           busy={busy}
           save={async (data) => {
-            if (await command("opportunity", data)) {
+            if (await command(d.pipeline_version === 3 ? "deal" : "opportunity", data)) {
               setCreating(false);
               setEditing(null);
             }
@@ -210,9 +218,9 @@ function WorkbenchContent() {
                 .map((o) => (
                   <article
                     className="rounded-lg bg-muted p-3 space-y-2"
-                    key={o.contact_id}
+                    key={o.id ?? o.contact_id}
                   >
-                    <strong>{o.contact_name}</strong>
+                    <strong>{o.job_label ?? o.contact_name}</strong>{o.job_label ? <p className="text-sm">{o.contact_name}</p> : null}
                     {o.stalled && <p className="text-xs">Unchanged for 72 hours</p>}
                     {o.loss_reason && <p className="text-sm">Lost: {o.loss_reason.replaceAll("_"," ")}{o.loss_note ? ` · ${o.loss_note}` : ""}</p>}
                     <p>
@@ -225,6 +233,7 @@ function WorkbenchContent() {
                     )}
                     <button
                       className={button}
+                      disabled={d.pipeline_version === 3 && !d.roofing_can_write}
                       onClick={() => {
                         setCreating(false);
                         setEditing(o);
@@ -232,7 +241,10 @@ function WorkbenchContent() {
                     >
                       Edit
                     </button>
-                    {stage.kind !== "lost" && <p className="text-xs text-muted-foreground">Create or complete an appointment before recording a sale.</p>}
+                    {stage.kind === "open" && d.pipeline_version === 3 && d.roofing_can_write && o.id ?
+                      <Link className="ml-2 text-sm underline" href={`/sales?opportunity=${o.id}&lead=${o.contact_id}`}>Record sale</Link>
+                      : stage.kind !== "lost" && d.pipeline_version !== 3 ?
+                        <p className="text-xs text-muted-foreground">Create or complete an appointment before recording a sale.</p> : null}
                   </article>
                 ))}
             </section>
@@ -326,12 +338,14 @@ function WorkbenchContent() {
 }
 function OpportunityForm({
   d,
+  workspace,
   initial,
   busy,
   save,
   close,
 }: {
   d: Workbench;
+  workspace: string;
   initial: Opportunity | null;
   busy: boolean;
   save: (data: Record<string, unknown>) => Promise<void>;
@@ -351,6 +365,20 @@ function OpportunityForm({
   const [lossReason,setLossReason] = useState(initial?.loss_reason ?? "");
   const [lossNote,setLossNote] = useState(initial?.loss_note ?? "");
   const [error, setError] = useState("");
+  const [job, setJob] = useState(initial?.job_label ?? "");
+  const [owner, setOwner] = useState(initial?.user_id ?? "");
+  const [reps, setReps] = useState<AppointmentOptions["representatives"]>([]);
+  const roofing = d.pipeline_version === 3;
+  const dealId = useRef(initial?.id);
+  const request = useRef<{ fingerprint: string; id: string } | null>(null);
+  useEffect(() => {
+    if (!roofing || d.scope !== "workspace") return;
+    let active = true;
+    appointmentRpc<AppointmentOptions>("field_appointment_options", { p_workspace: workspace })
+      .then(options => { if (active) setReps(options.representatives); })
+      .catch(() => { if (active) setReps([]); });
+    return () => { active = false; };
+  }, [d.scope, roofing, workspace]);
   return (
     <form
       className="rounded-xl border p-4 space-y-3"
@@ -358,25 +386,38 @@ function OpportunityForm({
         e.preventDefault();
         try {
           setError("");
-          await save({
+          const data = {
             contact_id: contact,
             stage_key: stage,
-            expected_value_minor: amount
-              ? Number(amount) === 0
-                ? "0"
-                : minorUnits(amount, d.currency)
+            expected_value_minor: d.money_visible === false ? undefined : amount
+              ? Number(amount) === 0 ? "0" : minorUnits(amount, d.currency)
               : null,
             expected_close: date || null,
             notes,
             version: initial?.version,
             loss_reason: lossReason || null, loss_note: lossNote,
-          });
+          };
+          if (!roofing) { await save(data); return; }
+          dealId.current ??= crypto.randomUUID();
+          const payload = { ...data, id: dealId.current, job_label: job, owner_id: owner || undefined };
+          const fingerprint = JSON.stringify(payload);
+          if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
+          await save({ ...payload, request_id: request.current.id });
         } catch (e) {
           setError((e as Error).message);
         }
       }}
     >
       <h2>Opportunity · Beta</h2>
+      {roofing ? <label>Job or service
+        <input className={input} required maxLength={150} value={job} onChange={e => setJob(e.target.value)} />
+      </label> : null}
+      {roofing && reps.length > 1 ? <label>Assigned representative
+        <select className={input} value={owner} onChange={e => setOwner(e.target.value)}>
+          <option value="">Me</option>
+          {reps.map(rep => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
+        </select>
+      </label> : null}
       <label>
         Lead
         <select

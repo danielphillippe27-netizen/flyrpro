@@ -35,7 +35,7 @@ export function SalesDashboard({
       </p>
     );
   if (leaderboardOnly && scope.data.pro_sales_version) return <ProSalesLeaderboard/>;
-  if (scope.data.pro_sales_version && scope.data.currency && scope.data.timezone && !scope.data.needs_setup) return <ProSalesDashboard key={`${scope.workspaceId}:${scope.data.user_id}`} workspace={scope.workspaceId!} settings={scope.data.role === "owner" || scope.data.role === "admin" ? <SalesSettings d={scope.data} workspace={scope.workspaceId!} /> : undefined} />;
+  if (scope.data.pro_sales_version && scope.data.currency && scope.data.timezone && !scope.data.needs_setup) return <ProSalesDashboard key={`${scope.workspaceId}:${scope.data.user_id}`} workspace={scope.workspaceId!} showEarnings={scope.data.roofing_earnings_enabled === true} settings={scope.data.role === "owner" || scope.data.role === "admin" ? <SalesSettings d={scope.data} workspace={scope.workspaceId!} /> : undefined} />;
   return (
     <SalesDashboardContent
       key={`${scope.workspaceId}:${scope.data.user_id}`}
@@ -493,6 +493,7 @@ function SalesSettings({ d, workspace }: { d: SalesData; workspace: string }) {
   const [currency, setCurrency] = useState(d.currency ?? "");
   const [timezone, setTimezone] = useState(d.timezone ?? "");
   const [visible, setVisible] = useState(d.team_revenue_visible);
+  const [required, setRequired] = useState(d.settings?.roofing_required_sale_fields ?? []);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   return (
@@ -507,6 +508,7 @@ function SalesSettings({ d, workspace }: { d: SalesData; workspace: string }) {
             currency,
             timezone,
             team_revenue_visible: visible,
+            ...(d.settings?.roofing_sales_enabled ? { roofing_required_sale_fields: required } : {}),
           });
         } catch (e) {
           setError((e as Error).message);
@@ -550,6 +552,16 @@ function SalesSettings({ d, workspace }: { d: SalesData; workspace: string }) {
         />
         Show revenue and contract values to teammates
       </label>
+      {d.settings?.roofing_sales_enabled ? <fieldset className="space-y-2">
+        <legend>Required sale details</legend>
+        {Object.entries({ product: "Service", job_identifier: "Job reference", proof_reference: "Proof reference" }).map(([key, title]) =>
+          <label key={key} className="flex gap-2">
+            <input type="checkbox" checked={required.includes(key)} onChange={event => {
+              const checked = event.target.checked;
+              setRequired(current => checked ? [...current, key] : current.filter(item => item !== key));
+            }} />{title}
+          </label>)}
+      </fieldset> : null}
       {error && <p role="alert">{error}</p>}
       <button className={button} disabled={busy}>
         Save settings

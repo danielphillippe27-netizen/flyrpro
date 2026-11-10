@@ -1,5 +1,10 @@
 'use client';
 
+import Link from 'next/link';
+import { useWorkspace } from '@/lib/workspace-context';
+import { useRoofingSaleEnabled } from '@/components/field-sales/RoofingSaleEntry';
+import { BookingButton } from '@/components/appointments/RoofingAppointments';
+
 import type { WorkspaceCoverageSnapshot } from '@/components/campaigns/WorkspaceCoverageSummary';
 import { useState, type ReactNode } from 'react';
 import { useBuildingData } from '@/lib/hooks/useBuildingData';
@@ -58,6 +63,8 @@ export function LocationCard({
     qrStatus,
     addressLinked,
   } = useBuildingData(gersId, campaignId, preferredAddressId);
+  const { currentWorkspaceId } = useWorkspace();
+  const saleGate = useRoofingSaleEnabled(currentWorkspaceId);
   const [manualAddress, setManualAddress] = useState('');
   const [newContactNotes, setNewContactNotes] = useState('');
 
@@ -310,6 +317,19 @@ export function LocationCard({
                     />
                   </div>
                 )}
+
+                {address?.id ? <BookingButton key={address.id} context={{
+                  contact: residents.length === 1 ? { id: residents[0].id, name: residents[0].full_name } : undefined,
+                  contacts: residents.map(resident => ({ id: resident.id, name: resident.full_name })),
+                  campaignId, addressId: address.id, propertyLabel: address.formatted,
+                }} /> : null}
+
+                {saleGate?.canWrite && address?.id ? <div className="flex flex-wrap gap-2">
+                  {residents.length === 1 ? <Button variant="outline" size="sm" asChild>
+                    <Link href={`/leads/${residents[0].id}`}>Follow up</Link>
+                  </Button> : null}
+                  <Button size="sm" asChild><Link href={`/sales?source=door&property=${address.id}${residents.length === 1 ? `&lead=${residents[0].id}` : ""}`}>Record sale</Link></Button>
+                </div> : null}
 
                 {/* Resident Notes */}
                 {residents.length > 0 && residents.some((r) => r.notes) && (

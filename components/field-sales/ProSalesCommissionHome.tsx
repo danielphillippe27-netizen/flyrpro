@@ -42,8 +42,8 @@ export function ProSalesCommissionHome() {
   return <section className="space-y-5 rounded-2xl border bg-card p-5 sm:p-6">
     <header className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-semibold">Commission</h2><p className="text-sm text-muted-foreground">{data.week_start} – {data.through}</p></div><Link className="text-sm underline" href="/sales/goals">Commission goals →</Link></header>
     <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-      <Metric label="Gross commission this week" value={amount(data.weekly_commission_minor, data.weekly_missing)} />
-      <Metric label="Earned today" value={amount(data.daily_commission_minor, data.daily_missing)} />
+      <Metric label="Estimated commission this week" value={amount(data.weekly_commission_minor, data.weekly_missing)} />
+      <Metric label="Estimated today" value={amount(data.daily_commission_minor, data.daily_missing)} />
       <Metric label="Verified sales this week" value={String(data.weekly_sales ?? 0)} />
     </div>
     {visible && data.weekly_target_minor !== undefined && <div className="space-y-2"><div className="flex justify-between text-sm"><span>Weekly commission goal</span><span className="tabular-nums">{money(data.weekly_target_minor, data.currency)}</span></div><progress aria-label="Weekly commission goal progress" className="h-2 w-full" max={100} value={progress} /></div>}

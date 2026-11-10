@@ -2,10 +2,18 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { minorUnits, money, salesCommand, useFieldSales } from "@/lib/field-sales/client";
+import { RoofingSaleEntry, useRoofingSaleEnabled } from "./RoofingSaleEntry";
 export type SaleEntryContext = Record<string, string>;
 type Entry = { capabilities?: Record<string, boolean>; enabled: boolean; needs_setup?: boolean; currency: string; today: string; verification_required: boolean; can_override_duplicate: boolean; has_more_appointments: boolean; appointment_options: { id: string; contact_id: string; name: string; address?: string; scheduled_at: string; note?: string }[]; selected?: { id: string; name: string; address?: string; rep_id: string; appointment_id: string; appointment_at: string; appointment_note?: string }; duplicates: { id: string; product: string; status: string; sold_on: string }[] };
 const input = "w-full rounded-xl border bg-background px-3 py-2";
 export function MarkAsSold({ workspace, initial = {}, close, saved }: { workspace: string; initial?: SaleEntryContext; close: () => void; saved: (id: string) => void }) {
+  const gate = useRoofingSaleEnabled(workspace);
+  if (!gate) return <p role="status">Loading sale entry… <button onClick={close}>Close</button></p>;
+  const props = { workspace, initial, close, saved };
+  return gate.enabled ? <RoofingSaleEntry {...props} /> : <LegacyMarkAsSold {...props} />;
+}
+
+function LegacyMarkAsSold({ workspace, initial = {}, close, saved }: { workspace: string; initial?: SaleEntryContext; close: () => void; saved: (id: string) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [context, setContext] = useState(initial);
   const [search, setSearch] = useState("");

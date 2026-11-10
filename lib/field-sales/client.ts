@@ -25,8 +25,10 @@ export type Sale = {
 export type SalesData = {
   enabled: boolean;
   pro_sales_version?: number;
+  roofing_earnings_enabled?: boolean;
   capabilities?: Record<string, boolean>;
   verification_required?: boolean;
+  settings?: { roofing_sales_enabled?: boolean; roofing_required_sale_fields?: string[] };
   needs_setup?: boolean;
   role: string;
   user_id: string;
@@ -232,7 +234,7 @@ export async function salesCommand(
   const { data: result, error } = await createClient().rpc(resource, {
     p_workspace: workspace,
     p_action: action,
-    p_data: data,
+    p_data: resource === "field_sales_command" ? { ...data, client_contract_version: 2 } : data,
   });
   if (error) throw new Error(error.message);
   window.dispatchEvent(new Event(salesChanged));
