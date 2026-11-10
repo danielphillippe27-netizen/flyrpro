@@ -104,17 +104,29 @@ async function main() {
     off: (event: string, listener: () => void) => listeners.get(event)?.delete(listener),
     once: (event: string, listener: () => void) => { const once = () => { listeners.get(event)?.delete(once); listener(); }; map.on(event, once); },
   };
-  const storm = { key: 'iem:hail:2026-10-13:TX', title: 'TX hail reports', hazard: 'hail', source: 'iem', sourceId: 'test', start: range.start.toISOString(), end: range.end.toISOString(), reportCount: 1, maxHailMM: 50.8, features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [-101, 35] }, properties: { kind: 'report', hailMM: 50.8 } }] };
+  const storm = { key: 'iem:hail:2026-10-21:AZ', title: 'TX hail reports', hazard: 'hail', source: 'iem', sourceId: 'test', start: range.start.toISOString(), end: range.end.toISOString(), reportCount: 1, maxHailMM: 50.8, features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [-101, 35] }, properties: { kind: 'report', hailMM: 50.8 } }] };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: string) => ({ ok: true, json: async () => url.includes('/zones?') ? { zones: [{ id: 'zone', minimum_mm: 25.4, geometry: { type: 'Polygon', coordinates: [[[-102,34],[-100,34],[-100,36],[-102,36],[-102,34]]] } }] } : { events: [storm] } })) as typeof fetch;
+  globalThis.fetch = (async (url: string) => ({ ok: true, json: async () => url.includes('/zones?') ? { zones: [{ id: 'zone', minimum_mm: 25.4, estimation_method: 'WolfGrid zones derived from NOAA MRMS 24-hour maximum estimated hail size', geometry: { type: 'Polygon', coordinates: [[[-101.1,34.9],[-100.9,34.9],[-100.9,35.1],[-101.1,35.1],[-101.1,34.9]]] } }] } : { events: [storm] } })) as typeof fetch;
+  let savedZoneId: string | undefined;
   const stormRoot = createRoot(document.getElementById('root')!);
-  await act(async () => { stormRoot.render(<StormDiscoveryPanel map={map as never} workspaceId="test" onSelect={() => {}} onTerritory={() => {}} onSaveZone={async () => {}} />); });
-  await click('TX hail reportshail · 2.00″ hail1 reported observations · Reports only');
+  await act(async () => { stormRoot.render(<StormDiscoveryPanel allAreasByDefault map={map as never} workspaceId="test" onSelect={() => {}} onTerritory={() => {}} onSaveZone={async (_name, _boundary, context) => { savedZoneId = context.zoneId; }} />); });
+  await click('TX hail reportshail · 2.00″ hail1 reported observations');
   assert.equal(sources.has('wolfgrid-historical-severity'), false);
   styleReady = true;
   await act(async () => { for (const listener of [...(listeners.get('idle') ?? [])]) listener(); });
   assert.ok(sources.has('wolfgrid-historical-severity'), 'Historical shading must retry when the fitted map becomes ready');
-  assert.ok(layers.has('wolfgrid-historical-severity-fill'));
+  assert.ok(layers.has('wolfgrid-historical-severity-raster'), 'Archived hail opens directly on the smooth raster');
+  assert.ok(document.body.textContent?.includes('Tap a shaded hail zone'));
+  assert.ok(![...document.querySelectorAll('button')].some(button => button.textContent === 'Select hail zone'),
+    'Archived zones are selected directly on the map, without opening the rolling provider selector');
+  await act(async () => {
+    for (const listener of listeners.get('click') ?? []) {
+      (listener as (event: { lngLat: { lng: number; lat: number } }) => void)({ lngLat: { lng: -101, lat: 35 } });
+    }
+  });
+  assert.ok(document.body.textContent?.includes('Estimated hail: 1.00″+'));
+  await click('Create storm territory');
+  assert.equal(savedZoneId, 'zone');
   await act(async () => { stormRoot.unmount(); });
   // Weather timeline ticks rerender the parent every 400 ms, creating a new
   // location callback. That must not tear down the selected event's map layers.

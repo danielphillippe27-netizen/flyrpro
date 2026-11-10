@@ -8,6 +8,7 @@ export const stormGeometrySchema = z.union([stormTerritoryPolygonSchema, z.objec
   try {if(kinks(geometry).features.length)ctx.addIssue({code:'custom',message:'Crossing boundary.'});}catch{ctx.addIssue({code:'custom',message:'Invalid geometry.'});}
 });
 export const HAIL_THRESHOLDS = [25.4,44.45,63.5] as const;
+export const MRMS_HAIL_ZONE_METHOD = 'WolfGrid zones derived from NOAA MRMS 24-hour maximum estimated hail size';
 export function effectiveStormArea(boundary:StormGeometry,zone:StormGeometry|null,includeOutside=false):StormGeometry|null{
   if(includeOutside)return boundary;
   if(!zone)return null;

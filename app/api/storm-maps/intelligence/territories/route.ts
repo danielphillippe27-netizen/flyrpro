@@ -2,7 +2,7 @@ import { archivedWindZone } from '@/lib/storm-maps/intelligence/wind-zone';
 import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 import { stormContext } from '@/lib/storm-maps/intelligence/access';
-import { containedStormArea, effectiveStormArea } from '@/lib/storm-maps/intelligence/geometry';
+import { containedStormArea, effectiveStormArea, MRMS_HAIL_ZONE_METHOD } from '@/lib/storm-maps/intelligence/geometry';
 import { stormTerritorySchema, normalizeStormDrawingContext } from '@/lib/storm-maps/intelligence/storm-territories';
 export async function GET(request: NextRequest) {
   const c = await stormContext(request); if ('response' in c) return c.response;
@@ -36,8 +36,10 @@ export async function POST(request: NextRequest) {
   let zoneFields = {};
   if(parsed.data.context.evidenceKind==='hail-size'){
     const {data:flags}=await c.admin.from('storm_intelligence_rollout').select('geometry_enabled').eq('workspace_id',c.workspaceId).maybeSingle();
-    if(!flags?.geometry_enabled||!parsed.data.context.zoneId)return NextResponse.json({error:'Validated severity geometry is not enabled for this workspace.'},{status:409});
-    const {data:zone,error:zoneError}=await c.admin.from('storm_severity_zones').select('id,event_key,minimum_mm,geometry').eq('id',parsed.data.context.zoneId).eq('event_key',parsed.data.context.event.key).eq('validated',true).eq('license_verified',true).maybeSingle();
+    if(!parsed.data.context.zoneId)return NextResponse.json({error:'Select a hail severity zone first.'},{status:409});
+    const query=c.admin.from('storm_severity_zones').select('id,event_key,minimum_mm,geometry').eq('id',parsed.data.context.zoneId).eq('event_key',parsed.data.context.event.key).eq('validated',true).eq('license_verified',true);
+    if(!flags?.geometry_enabled)query.eq('estimation_method',MRMS_HAIL_ZONE_METHOD);
+    const {data:zone,error:zoneError}=await query.maybeSingle();
     if(zoneError||!zone)return NextResponse.json({error:'The selected severity zone is unavailable. Reload the storm.'},{status:409});
     if(!containedStormArea(parsed.data.boundary,zone.geometry))return NextResponse.json({error:'The territory must remain inside the selected severity zone.'},{status:400});
     parsed.data.context.minimumHailMM=Number(zone.minimum_mm);

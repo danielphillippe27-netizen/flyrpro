@@ -5,8 +5,9 @@ import { useCallback,useEffect,useRef,useState } from 'react';
 import { booleanPointInPolygon, point } from '@turf/turf';
 import type mapboxgl from 'mapbox-gl';
 import { eventBounds,referenceOf,type StormEvent,type StormCampaignContext,type StormHazard } from '@/lib/storm-maps/intelligence/model';
+import { mrmsHailOverlay } from '@/lib/storm-maps/intelligence/mrms-hail-overlay';
 import { mergeStormEvents } from '@/lib/storm-maps/intelligence/history';
-import { HAIL_THRESHOLDS,type StormGeometry } from '@/lib/storm-maps/intelligence/geometry';
+import { HAIL_THRESHOLDS, MRMS_HAIL_ZONE_METHOD, stormGeometrySchema, type StormGeometry } from '@/lib/storm-maps/intelligence/geometry';
 import { TornadoAreaSelector } from '../TornadoAreaSelector';
 import { StormEventMap } from './StormEventMap';
 import { StormLocationSearch } from '../StormLocationSearch';
@@ -20,9 +21,12 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
  const [showFilters,setShowFilters] = useState(false);
  const [period,setPeriod]=useState(allAreasByDefault?'7':'30'),[from,setFrom]=useState(()=>daysAgo(allAreasByDefault?6:29)),[to,setTo]=useState(()=>daysAgo(0)),[hazard,setHazard]=useState<StormHazard>('hail'),[minimum,setMinimum]=useState(allAreasByDefault?0:25.4);
  const [events,setEvents]=useState<StormEvent[]>([]),[selected,setSelected]=useState<StormEvent|null>(null),[cursor,setCursor]=useState<string|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const [zones,setZones]=useState<Zone[]>([]),[reason,setReason]=useState('Historical geometry unavailable.'),[counts,setCounts]=useState<Array<{minimumMM:number;count:number}>|null>(null);
+ const [zones,setZones]=useState<Zone[]>([]),[zoneStatus,setZoneStatus]=useState<'loading'|'ready'|'error'>('loading'),[reason,setReason]=useState(''),[counts,setCounts]=useState<Array<{minimumMM:number;count:number}>|null>(null);
  const [area,setArea]=useState(allAreasByDefault?'all':'map'),[areaChanged,setAreaChanged]=useState(false),[windMinimum,setWindMinimum]=useState(0);
  const [picked,setPicked]=useState<{zone:Zone;geometry:StormGeometry}|null>(null),[territoryName,setTerritoryName]=useState('Storm territory'),[saving,setSaving]=useState(false),[saveError,setSaveError]=useState('');
+ const [zoneSelectionError,setZoneSelectionError]=useState('');
+ const mrmsZones=zones.some(zone=>zone.estimation_method===MRMS_HAIL_ZONE_METHOD);
+ const hailOverlay=mrmsZones&&minimum===0?mrmsHailOverlay(selected?.key):undefined;
  const abortRef=useRef<AbortController|null>(null),searchBounds=useRef<number[]>([]);
  const select=useCallback((event:StormEvent|null)=>{setSelected(event);onSelect(event);if(event){onSelected?.();const b=eventBounds(event);if(b)map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:80,maxZoom:12,retainPadding:false});}},[map,onSelect,onSelected]);
  const search=useCallback(async(next:string|null=null)=>{
@@ -35,16 +39,51 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
  useEffect(()=>{const moved=()=>setAreaChanged(true);map.on('moveend',moved);return()=>{map.off('moveend',moved);};},[map]);
  useEffect(()=>{void search();return()=>abortRef.current?.abort();},[search]);
  useEffect(()=>{
-  setZones([]);setCounts(null);setPicked(null);setReason('Historical geometry unavailable.');if(!selected)return;
+  setZones([]);setCounts(null);setPicked(null);setZoneStatus('loading');setReason('');setZoneSelectionError('');if(!selected)return;
   const abort=new AbortController();
-  void fetch(`/api/storm-maps/intelligence/zones?workspaceId=${encodeURIComponent(workspaceId)}&eventKey=${encodeURIComponent(selected.key)}`,{signal:abort.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error);if(!abort.signal.aborted){setZones(d.zones??[]);setReason(d.reason??'');}}).catch(e=>{if(!abort.signal.aborted)setReason(e instanceof Error?e.message:'Geometry unavailable.');});
+  void fetch(`/api/storm-maps/intelligence/zones?workspaceId=${encodeURIComponent(workspaceId)}&eventKey=${encodeURIComponent(selected.key)}`,{signal:abort.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.error);if(!abort.signal.aborted){setZones(d.zones??[]);setZoneStatus('ready');}}).catch(()=>{if(!abort.signal.aborted)setZoneStatus('error');});
   return()=>abort.abort();
  },[selected,workspaceId]);
- useEffect(()=>{
-  const source='wolfgrid-historical-severity',fill=source+'-fill',line=source+'-line';
-  const clear=()=>{try{if(!map.getStyle())return;for(const id of [line,fill])if(map.getLayer(id))map.removeLayer(id);if(map.getSource(source))map.removeSource(source);}catch{/* map disposed */}};
-  const show=()=>{if(!zones.length||territoryDisplay){clear();return;}if(!map.isStyleLoaded()){map.once('idle',show);return;}clear();map.addSource(source,{type:'geojson',data:{type:'FeatureCollection',features:zones.filter(z=>z.minimum_mm>=minimum).map(z=>({type:'Feature',properties:{minimum:z.minimum_mm,id:z.id},geometry:z.geometry}))}});map.addLayer({id:fill,type:'fill',source,paint:{'fill-color':['step',['get','minimum'],'#facc15',44.45,'#fb923c',63.5,'#dc2626',76.2,'#7f1d1d'],'fill-opacity':0.3}});map.addLayer({id:line,type:'line',source,paint:{'line-color':'#111111','line-width':1}});};show();map.on('style.load',show);return()=>{map.off('idle',show);map.off('style.load',show);clear();};
- },[map,zones,minimum,territoryDisplay]);
+ useEffect(() => {
+  const source = 'wolfgrid-historical-severity';
+  const fill = source + '-fill', line = source + '-line', raster = source + '-raster';
+  const clear = () => {
+   try {
+    if (!map.getStyle()) return;
+    for (const id of [raster, line, fill]) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource(source)) map.removeSource(source);
+   } catch { /* map disposed */ }
+  };
+  const show = () => {
+   if (!zones.length || territoryDisplay) { clear(); return; }
+   if (!map.isStyleLoaded()) { map.once('idle', show); return; }
+   clear();
+   const attribution = mrmsZones ? 'Hail estimates derived from NOAA MRMS' : undefined;
+   if (hailOverlay) {
+    map.addSource(source, { type: 'image', ...hailOverlay });
+    const beneath = map.getStyle()?.layers.find(layer => layer.type === 'symbol' || layer.id === 'storm-intelligence-points')?.id;
+    map.addLayer({
+     id: raster, type: 'raster', source,
+     paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0 },
+    }, beneath);
+    return;
+   }
+   map.addSource(source, {
+    type: 'geojson', attribution,
+    data: { type: 'FeatureCollection', features: zones.filter(zone => zone.minimum_mm >= minimum).map(zone => ({
+     type: 'Feature', properties: { minimum: zone.minimum_mm, id: zone.id }, geometry: zone.geometry,
+    })) },
+   });
+   map.addLayer({ id: fill, type: 'fill', source, paint: {
+    'fill-color': ['step', ['get', 'minimum'], '#7dd3fc', 25.4, '#facc15', 44.45, '#fb923c', 63.5, '#dc2626', 76.2, '#7f1d1d'],
+    'fill-opacity': 0.3,
+   } });
+   map.addLayer({ id: line, type: 'line', source, paint: { 'line-color': '#111111', 'line-width': 1 } });
+  };
+  show();
+  map.on('style.load', show);
+  return () => { map.off('idle', show); map.off('style.load', show); clear(); };
+ }, [map, zones, minimum, territoryDisplay, mrmsZones, hailOverlay]);
  useEffect(()=>{
   if(territoryDisplay)return;
   const choose=(event:mapboxgl.MapMouseEvent)=>{
@@ -52,7 +91,16 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
    const zone=zones.filter(zone=>zone.minimum_mm>=minimum&&booleanPointInPolygon(location,zone.geometry)).sort((a,b)=>b.minimum_mm-a.minimum_mm)[0];
    if(!zone)return;
    const geometry=zone.geometry.type==='MultiPolygon'?zone.geometry.coordinates.map(coordinates=>({type:'Polygon' as const,coordinates})).find(part=>booleanPointInPolygon(location,part)):zone.geometry;
-   if(geometry){setPicked({zone,geometry});setSaveError('');setTerritoryName(selected?.title??'Storm territory');}
+   if(!geometry)return;
+   if(!stormGeometrySchema.safeParse(geometry).success){
+    setPicked(null);
+    setZoneSelectionError('This hail zone exceeds the territory size or boundary limits. Select another zone or draw a smaller territory.');
+    return;
+   }
+   setZoneSelectionError('');
+   setPicked({zone,geometry});
+   setSaveError('');
+   setTerritoryName(selected?.title??'Storm territory');
   };
   map.on('click',choose);return()=>{map.off('click',choose);};
  },[map,zones,minimum,selected,territoryDisplay]);
@@ -68,6 +116,7 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
   return()=>{clearTimeout(timer);abort.abort();};
  },[picked,selected,workspaceId]);
  const detail=browseOnly?null:selected;
+ const recentHailMap=detail?.hazard==='hail'&&Date.parse(detail.start)>=Date.now()-7*86400000;
  const qualifying=events.filter(e=>hazard==='hail'?minimum===0||(e.maxHailMM??-1)>=minimum:hazard==='wind'?windMinimum===0||(e.maxWindKPH??-1)>=windMinimum:true).sort((a,b)=>Date.parse(b.start)-Date.parse(a.start));
  return <div className="space-y-3">
  {savedHistory&&<p className="text-xs text-muted-foreground">{archiveStartsAt?`Saved history begins ${archiveStartsAt.slice(0,10)} UTC. Browse back to our earliest recorded storm.`:'Browse all saved storms for this country, back to the earliest recording.'}</p>}
@@ -85,9 +134,12 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
  {!simple&&(!isMobile||detail||showFilters)&&hazard==='hail'&&<label className="block text-xs">{zones.length?'Hail size':'Hail size'}<select aria-label="Hail severity threshold" className={input} value={minimum} onChange={e=>{setPicked(null);setMinimum(Number(e.target.value));}}><option value={0}>All sizes</option>{HAIL_THRESHOLDS.map(v=><option key={v} value={v}>{(v/25.4).toFixed(2)}″+ / {v} mm+</option>)}</select></label>}
  {!simple&&(!isMobile||detail||showFilters)&&hazard==='wind'&&<label className="block text-xs">Minimum reported wind<select aria-label="Wind severity threshold" className={input} value={windMinimum} onChange={e=>setWindMinimum(Number(e.target.value))}><option value={0}>All reported speeds</option><option value={93}>93 km/h+ · 58 mph+</option><option value={120}>120 km/h+ · 75 mph+</option><option value={160}>160 km/h+ · 100 mph+</option></select></label>}
  {error&&<p role="alert" className="text-xs text-amber-200">{error}</p>}
- {!detail&&<><p className="text-xs font-semibold">{savedHistory?'Historic storms':'Recent storms'} · {qualifying.length}</p>{qualifying.map(event=><button type="button" key={event.key} onClick={()=>select(event)} className="block w-full rounded-md px-2 py-3 text-left text-xs hover:bg-muted">{event.title}<span className="mt-1 block text-foreground">{event.hazard}{event.maxHailMM!=null?` · ${(event.maxHailMM/25.4).toFixed(2)}″ hail`:event.maxWindKPH!=null?` · ${event.maxWindKPH.toFixed(0)} km/h wind`:event.category?` · ${event.category}`:''}</span><span className="mt-1 block text-muted-foreground">{event.key.startsWith('xweather:au:hail:')?'Modeled hail detection':`${event.reportCount} reported observations`}{allAreasByDefault && event.hazard==='hail' ? Date.parse(event.start)>=Date.now()-7*86400000 ? ' · Hail map available for supported coverage' : ' · Outside hail map archive' : ' · Reports only'}</span></button>)}{busy&&<p role="status" className="text-xs">Loading historical storms…</p>}{!busy&&!qualifying.length&&!error&&<p className="text-xs">{savedHistory?'No saved storms are available for this country and storm type yet. This does not establish no storms.':'No reports returned for this interval. This does not establish no storms.'}</p>}{cursor&&<><p className="text-[11px] text-amber-200">{savedHistory?'More saved storms are available. Load older storms to keep going back through the archive.':'Partial results. Older dates in your selected range have not been queried.'}</p><button type="button" disabled={busy} onClick={()=>void search(cursor)} className="w-full rounded-lg border border-white/20 py-2 text-xs">Load older storms</button></>}</>}
- {detail?.hazard==='hail'&&Date.parse(detail.start)<Date.now()-7*86400000&&<p role="status" className="text-xs text-amber-200">Full weather shading is outside the provider’s seven-day archive. Available historical zones and reports are shown for this storm.</p>}
- {detail&&detail.hazard!=='hurricane'&&detail.hazard!=='tornado'&&<><p className="rounded-lg bg-amber-200/10 p-3 text-xs text-amber-200">{zones.length?'Select a hail zone on the map.':'Select a hail zone to outline it and count addresses.'}</p>{counts?<div className="space-y-2"><p className="text-xs font-semibold">Address Pins Exposed</p>{counts.filter(c=>!picked||c.minimumMM>=picked.zone.minimum_mm).map(c=><p key={c.minimumMM} className="text-xs">{(c.minimumMM/25.4).toFixed(2)}″+: {c.count.toLocaleString()}</p>)}</div>:null}{zones.length>0&&<p className="text-xs">Click a severity zone to outline its connected area. Disconnected areas stay separate.</p>}{picked&&!counts&&<p className="text-xs text-muted-foreground">Address count unavailable. {reason}</p>}{picked&&<div className="space-y-2 rounded-lg border border-border p-3"><p className="text-sm font-semibold">Estimated hail: {(picked.zone.minimum_mm/25.4).toFixed(2)}″+ / {picked.zone.minimum_mm} mm+</p><p className="text-xs">Source resolution: {picked.zone.source_resolution_m} m · {picked.zone.estimation_method}</p><p className="text-xs text-muted-foreground">Boundary follows the selected threshold and includes stronger hail. Estimates do not confirm damage.</p><label className="block text-xs">Territory name<input aria-label="Selected zone territory name" className={input} value={territoryName} maxLength={160} onChange={event=>setTerritoryName(event.target.value)} /></label>{saveError&&<p role="alert" className="text-xs text-amber-200">{saveError}</p>}<button type="button" disabled={saving||!territoryName.trim()} onClick={async()=>{if(!detail)return;setSaving(true);setSaveError('');try{await onSaveZone(territoryName.trim(),picked.geometry,{version:2,event:referenceOf(detail),zoneId:picked.zone.id,selectedAt:new Date().toISOString(),minimumHailMM:picked.zone.minimum_mm,selection:'intensity-zone',evidenceKind:'hail-size'});setPicked(null);}catch(error){setSaveError(error instanceof Error?error.message:'Could not save territory.');}finally{setSaving(false);}}} className="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground">{saving?'Saving…':'Create storm territory'}</button></div>}<button type="button" onClick={onTerritory} className="w-full rounded-lg bg-cyan-200 py-3 text-sm font-semibold text-slate-950">Select hail zone</button></>}
+ {!detail&&<><p className="text-xs font-semibold">{savedHistory?'Historic storms':'Recent storms'} · {qualifying.length}</p>{qualifying.map(event=><button type="button" key={event.key} onClick={()=>select(event)} className="block w-full rounded-md px-2 py-3 text-left text-xs hover:bg-muted">{event.title}<span className="mt-1 block text-foreground">{event.hazard}{event.maxHailMM!=null?` · ${(event.maxHailMM/25.4).toFixed(2)}″ hail`:event.maxWindKPH!=null?` · ${event.maxWindKPH.toFixed(0)} km/h wind`:event.category?` · ${event.category}`:''}</span><span className="mt-1 block text-muted-foreground">{event.key.startsWith('xweather:au:hail:')?'Modeled hail detection':`${event.reportCount} reported observations`}{allAreasByDefault && event.hazard==='hail' ? Date.parse(event.start)>=Date.now()-7*86400000 ? ' · Hail map available for supported coverage' : '' : ' · Reports only'}</span></button>)}{busy&&<p role="status" className="text-xs">Loading historical storms…</p>}{!busy&&!qualifying.length&&!error&&<p className="text-xs">{savedHistory?'No saved storms are available for this country and storm type yet. This does not establish no storms.':'No reports returned for this interval. This does not establish no storms.'}</p>}{cursor&&<><p className="text-[11px] text-amber-200">{savedHistory?'More saved storms are available. Load older storms to keep going back through the archive.':'Partial results. Older dates in your selected range have not been queried.'}</p><button type="button" disabled={busy} onClick={()=>void search(cursor)} className="w-full rounded-lg border border-white/20 py-2 text-xs">Load older storms</button></>}</>}
+ {detail?.hazard==='hail'&&<>
+ {mrmsZones&&<p className="text-xs text-muted-foreground">Daily maximum hail size estimates derived from NOAA MRMS near the reported hail locations.</p>}
+ {zones.length>0&&<p className="text-xs">Tap a shaded hail zone on the map to select it.{hailOverlay && ' Selectable zones start at 0.5 in.'}</p>}
+ {zoneSelectionError&&<p role="status" className="text-xs text-amber-200">{zoneSelectionError}</p>}
+ {!zones.length&&!recentHailMap&&<p role="status" className="text-xs text-amber-200">{zoneStatus==='loading'?'Checking for archived hail zones…':zoneStatus==='error'?'Could not load archived hail zones. Reopen this storm to retry.':'Hail reports only. No archived hail zones are available for this storm.'}</p>}{counts?<div className="space-y-2"><p className="text-xs font-semibold">Address Pins Exposed</p>{counts.filter(c=>!picked||c.minimumMM>=picked.zone.minimum_mm).map(c=><p key={c.minimumMM} className="text-xs">{(c.minimumMM/25.4).toFixed(2)}″+: {c.count.toLocaleString()}</p>)}</div>:null}{zones.length>0&&<p className="text-xs">Click a severity zone to outline its connected area. Disconnected areas stay separate.</p>}{picked&&!counts&&<p className="text-xs text-muted-foreground">Address count unavailable. {reason}</p>}{picked&&<div className="space-y-2 rounded-lg border border-border p-3"><p className="text-sm font-semibold">Estimated hail: {(picked.zone.minimum_mm/25.4).toFixed(2)}″+ / {picked.zone.minimum_mm} mm+</p><p className="text-xs">Source resolution: {picked.zone.source_resolution_m} m · {picked.zone.estimation_method}</p><p className="text-xs text-muted-foreground">Boundary follows the selected threshold and includes stronger hail. Estimates do not confirm damage.</p><label className="block text-xs">Territory name<input aria-label="Selected zone territory name" className={input} value={territoryName} maxLength={160} onChange={event=>setTerritoryName(event.target.value)} /></label>{saveError&&<p role="alert" className="text-xs text-amber-200">{saveError}</p>}<button type="button" disabled={saving||!territoryName.trim()} onClick={async()=>{if(!detail)return;setSaving(true);setSaveError('');try{await onSaveZone(territoryName.trim(),picked.geometry,{version:2,event:referenceOf(detail),zoneId:picked.zone.id,selectedAt:new Date().toISOString(),minimumHailMM:picked.zone.minimum_mm,selection:'intensity-zone',evidenceKind:'hail-size'});setPicked(null);}catch(error){setSaveError(error instanceof Error?error.message:'Could not save territory.');}finally{setSaving(false);}}} className="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground">{saving?'Saving…':'Create storm territory'}</button></div>}{recentHailMap&&<button type="button" onClick={onTerritory} className="w-full rounded-lg bg-cyan-200 py-3 text-sm font-semibold text-slate-950">Select hail zone</button>}</>}
  {detail?.hazard==='tornado'&&<TornadoAreaSelector map={map} event={detail} workspaceId={workspaceId} onSave={onSaveZone}/>}
  {detail?.hazard==='hurricane'&&<><p className="text-xs">Historical advisory wind areas: blue 34 kt+, orange 50 kt+, red 64 kt+. Amber cones show forecast uncertainty. Hover over a position for intensity and time.</p>{Date.parse(detail.end)<Date.now()-7*86400000&&<p className="text-xs text-amber-200">Satellite and wind animation are outside the provider’s recent map archive. Historical track and available advisory wind areas remain visible.</p>}<button type="button" onClick={onTerritory} className="w-full rounded-lg bg-cyan-200 py-3 text-sm font-semibold text-slate-950">Select hurricane wind area</button></>}
  <p className="text-[10px] text-muted-foreground">Weather estimates do not confirm damage.</p>
