@@ -14,13 +14,13 @@ const VISITED_STATUSES = new Set([
   'follow_up',
   'appointment_set',
   'callback_requested',
-  'do_not_knock',
   'future_seller',
   'hot_lead',
 ]);
 
 const CONTACTED_STATUSES = new Set([
-  'talked',
+  'talked', 'appointment', 'future_seller', 'hot_lead',
+  'lead', 'interested', 'follow_up', 'appointment_set', 'callback_requested',
 ]);
 
 const LEAD_STATUSES = new Set(['lead', 'interested', 'hot_lead']);
@@ -90,7 +90,7 @@ export function isVisitedCampaignAddress(address: Pick<CampaignAddress, 'address
 
 export function isContactedCampaignAddress(address: Pick<CampaignAddress, 'address_status' | 'visited'>): boolean {
   const status = normalizeStatus(address.address_status);
-  if (status) return CONTACTED_STATUSES.has(status) || VISITED_STATUSES.has(status);
+  if (status) return CONTACTED_STATUSES.has(status);
   return Boolean(address.visited);
 }
 

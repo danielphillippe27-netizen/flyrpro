@@ -584,7 +584,7 @@ export class CampaignsService {
     const totalAddresses = stats?.addresses || 0;
     const visitedCount = stats?.visited || 0;
     const scannedCount = stats?.scanned || 0;
-    const contactedCount = stats?.contacted || stats?.buildings || 0;
+    const contactedCount = stats?.contacted ?? 0;
     const progressPct = totalAddresses > 0
       ? Math.round((visitedCount / totalAddresses) * 100)
       : 0;

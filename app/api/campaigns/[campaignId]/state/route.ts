@@ -1,3 +1,4 @@
+import { recordFieldOutcome } from '@/lib/services/FieldOutcomeService';
 import { requestSupabase } from '@/app/api/_utils/request-supabase';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -24,6 +25,10 @@ type AddressStatusUpdatePayload = {
   campaign_id?: string;
   farmId?: string | null;
   farm_id?: string | null;
+  farmTouchId?: string | null;
+  farm_touch_id?: string | null;
+  mutationId?: string;
+  baseRevisions?: Record<string, number>;
   addressIds?: string[];
   address_ids?: string[];
   buildingId?: string | null;
@@ -64,22 +69,6 @@ function persistedStatus(rawStatus: string | undefined) {
   const status = String(rawStatus ?? '').trim();
   if (!status) return null;
   return status === 'untouched' ? 'none' : status;
-}
-
-function isVisitedStatus(status: string) {
-  return [
-    'delivered',
-    'talked',
-    'lead',
-    'interested',
-    'appointment',
-    'follow_up',
-    'appointment_set',
-    'callback_requested',
-    'do_not_knock',
-    'future_seller',
-    'hot_lead',
-  ].includes(status);
 }
 
 function nullableString(value: unknown) {
@@ -309,81 +298,31 @@ export async function POST(
   const sessionId = nullableString(body.sessionId ?? body.session_id);
   const sessionTargetId = nullableString(body.sessionTargetId ?? body.session_target_id ?? body.buildingId ?? body.building_id);
   const sessionEventType = nullableString(body.sessionEventType ?? body.session_event_type);
-  const farmId = nullableString(body.farmId ?? body.farm_id);
+  let farmId = nullableString(body.farmId ?? body.farm_id);
+  let farmTouchId = nullableString(body.farmTouchId ?? body.farm_touch_id);
+  if (sessionId) {
+    const { data: session, error } = await supabase.from('sessions')
+      .select('farm_id,farm_touch_id').eq('id', sessionId).eq('campaign_id', campaignId).eq('user_id', requestUser.id).single();
+    if (error) return NextResponse.json({ error: 'Session access denied' }, { status: 403 });
+    farmId ??= session.farm_id;
+    farmTouchId ??= session.farm_touch_id;
+  }
 
-  const changed: Array<{
-    address_id: string;
-    status: string;
-    updated_at: string;
-    notes: string | null;
-    last_touch_at: string;
-  }> = [];
-
-  for (const addressId of addressIds) {
-    const rpcParams: Record<string, unknown> = {
-      p_campaign_id: campaignId,
-      p_campaign_address_id: addressId,
-      p_address_id: addressId,
-      p_status: status,
-      p_notes: notes,
-      p_occurred_at: occurredAt,
-    };
-    if (sessionId) rpcParams.p_session_id = sessionId;
-    if (sessionTargetId) rpcParams.p_session_target_id = sessionTargetId;
-    if (sessionEventType) rpcParams.p_session_event_type = sessionEventType;
-    if (typeof body.latitude === 'number') rpcParams.p_lat = body.latitude;
-    if (typeof body.longitude === 'number') rpcParams.p_lon = body.longitude;
-
-    const outcomeResult = await supabase.rpc('record_campaign_address_outcome', rpcParams);
-    if (outcomeResult.error || outcomeResult.data?.applied === false) {
-      const code = outcomeResult.data?.error_code;
-      return NextResponse.json({
-        error: code === 'WORKSPACE_HOME_ALREADY_VISITED'
-          ? 'This home was already visited in another team campaign. Ask your manager to override it.'
-          : 'Address status was not saved',
-        error_code: code ?? outcomeResult.error?.code,
-        changed,
-      }, { status: outcomeResult.data?.applied === false ? 409 : 500 });
-    }
-
-    changed.push({
-      address_id: addressId,
-      status,
-      updated_at: occurredAt,
-      notes: notes || null,
-      last_touch_at: occurredAt,
+  try {
+    await recordFieldOutcome(supabase, {
+      campaignId, addressIds, status, notes, occurredAt, farmId, farmTouchId,
+      sessionId, sessionTargetId, sessionEventType,
+      latitude: body.latitude ?? undefined, longitude: body.longitude ?? undefined,
+      mutationId: body.mutationId, baseRevisions: body.baseRevisions,
     });
+  } catch (error) {
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Address status was not saved', changed: [],
+    }, { status: 409 });
   }
-
-  if (farmId) {
-    const { data: farmRows, error: farmRowsError } = await supabase
-      .from('farm_addresses')
-      .select('id, campaign_address_id, visited_count')
-      .eq('farm_id', farmId)
-      .in('campaign_address_id', addressIds);
-
-    if (!farmRowsError) {
-      for (const row of (farmRows ?? []) as Array<{ id: string; visited_count?: number | null }>) {
-        const updates: Record<string, unknown> = {
-          last_outcome_status: status,
-        };
-        if (isVisitedStatus(status)) {
-          updates.last_visited_at = occurredAt;
-          updates.visited_count = Math.max(0, Number(row.visited_count ?? 0) || 0) + 1;
-        }
-        const { error: farmUpdateError } = await supabase
-          .from('farm_addresses')
-          .update(updates)
-          .eq('id', row.id)
-          .eq('farm_id', farmId);
-        if (farmUpdateError) {
-          console.warn('[api/campaigns/state] farm address outcome update failed', farmUpdateError);
-        }
-      }
-    } else {
-      console.warn('[api/campaigns/state] farm address lookup failed', farmRowsError);
-    }
-  }
+  const changed = addressIds.map(addressId => ({
+    address_id: addressId, status, updated_at: occurredAt, notes: notes || null, last_touch_at: occurredAt,
+  }));
 
   return NextResponse.json({
     campaign_id: campaignId,

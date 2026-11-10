@@ -267,7 +267,7 @@ function MainLayoutShell({
           >
             <div
               className={cn(
-                'flex flex-col min-w-0 min-h-0',
+                'main-route-content flex flex-col min-w-0 min-h-0',
                 pathname?.startsWith('/storms') ||
                 pathname?.startsWith('/farms') ||
                 pathname?.startsWith('/campaigns') ||

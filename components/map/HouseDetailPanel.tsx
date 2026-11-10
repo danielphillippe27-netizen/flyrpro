@@ -1,5 +1,6 @@
 'use client';
 
+import { recordFieldOutcome } from '@/lib/services/FieldOutcomeService';
 import { useState, useEffect } from 'react';
 import {
   Sheet,
@@ -236,25 +237,9 @@ export function HouseDetailPanel({
       const occurredAt = new Date().toISOString();
       const addressIds = linkedAddresses.map((address) => address.address_id);
 
-      if (addressIds.length === 1) {
-        const { error } = await supabase.rpc('record_campaign_address_outcome', {
-          p_campaign_id: campaignId,
-          p_campaign_address_id: addressIds[0],
-          p_status: outcomeStatus,
-          p_notes: newNotes || '',
-          p_occurred_at: occurredAt,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.rpc('record_campaign_target_outcome', {
-          p_campaign_id: campaignId,
-          p_campaign_address_ids: addressIds,
-          p_status: outcomeStatus,
-          p_notes: newNotes || '',
-          p_occurred_at: occurredAt,
-        });
-        if (error) throw error;
-      }
+      await recordFieldOutcome(supabase, {
+        campaignId, addressIds, status: outcomeStatus, notes: newNotes, occurredAt,
+      });
 
       setNewNotes('');
       onUpdate();

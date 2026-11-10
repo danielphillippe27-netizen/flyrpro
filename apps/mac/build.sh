@@ -17,8 +17,8 @@ cat > "$output/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>app.wolfgrid.mac.preview</string>
 <key>CFBundleExecutable</key><string>WolfGridMac</string><key>CFBundleName</key><string>WolfGrid</string><key>CFBundleDisplayName</key><string>WolfGrid</string>
-<key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>0.6.1</string><key>CFBundleVersion</key><string>22</string>
-<key>LSMinimumSystemVersion</key><string>15.0</string><key>NSAppleEventsUsageDescription</key><string>Review each CRM recipient, message and attachment before allowing WolfGrid to send through Apple Messages.</string>
+<key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>0.6.2</string><key>CFBundleVersion</key><string>23</string>
+<key>LSMinimumSystemVersion</key><string>15.0</string><key>NSAppleEventsUsageDescription</key><string>Allow WolfGrid to send through Apple Messages when you press Send in a CRM conversation.</string>
 <key>NSContactsUsageDescription</key><string>Choose people to review and add to your WolfGrid CRM.</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>app.wolfgrid.mac.oauth</string><key>CFBundleURLSchemes</key><array><string>wolfgrid-mac</string></array></dict></array>
 <key>NSCalendarsFullAccessUsageDescription</key><string>Choose a calendar and review CRM appointments before saving. Unrelated personal events are not imported.</string>

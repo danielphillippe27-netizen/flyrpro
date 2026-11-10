@@ -1,0 +1,17 @@
+{
+  "databaseAssertionsPassed": 42,
+  "webServiceAssertionsPassed": 24,
+  "farmCycleAssertionsPassed": 20,
+  "farmCountingAssertionsPassed": 4,
+  "iosPassed": 27,
+  "iosFailed": 0,
+  "iosSkipped": 3,
+  "changedFileTypeErrors": 0,
+  "repositoryTypeErrors": 46,
+  "lintErrors": 0,
+  "lintWarnings": 2,
+  "productionMigrationApplied": true,
+  "deployed": false,
+  "phoneInstalled": false,
+  "productionRepairs": 0
+}

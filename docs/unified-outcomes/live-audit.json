@@ -1,0 +1,18 @@
+{
+  "auditedAt": "2026-11-07T12:47:34.916Z",
+  "readOnly": true,
+  "transport": "Supabase REST",
+  "snapshot": "Paginated reads; concurrent changes can affect counts.",
+  "farms": 31,
+  "farmsWithoutCampaign": 8,
+  "farmHomes": 64686,
+  "homesWithoutCampaignAddress": 2412,
+  "ambiguousAddressLinks": 465,
+  "farmSessions": 22,
+  "farmSessionsMissingTouch": 0,
+  "linkedCampaignSessionsWithoutFarmContext": 1,
+  "outcomes": 137,
+  "doNotKnockOutcomes": 2,
+  "touchTotalsDifferingFromVisitOutcomes": 11,
+  "repairsApplied": 0
+}

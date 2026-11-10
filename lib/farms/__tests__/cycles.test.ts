@@ -40,3 +40,12 @@ assert.equal(cycleMapStatus(undefined, undefined, 'do_not_knock'), 'do_not_knock
 assert.equal(cycleMapStatus(undefined, outcome('a', 'old', 'a'), 'talked'), 'none', 'Old visits do not mark homes visited this cycle');
 assert.equal(cycleMapStatus(outcome('m', 'monday', 'a'), undefined, null), 'talked');
 console.log('20 farm cycle assertions passed');
+
+const exclusions = buildFarmDashboardAnalytics({ ...args, touchOutcomes: [
+  outcome('old', 'old', 'b'), outcome('dnk', 'monday', 'a', 'do_not_knock'), outcome('reset', 'wednesday', 'b', 'none'),
+] });
+assert.equal(exclusions.currentCycleVisits, 0, 'Exclusions and reset homes do not count as visits');
+assert.equal(exclusions.currentCycleCoverageCount, 0, 'Exclusions and resets do not count as round coverage');
+assert.equal(exclusions.totalVisits, 1, 'Prior round visit remains in history');
+assert.equal(exclusions.outcomeBreakdown.wrongFit, 1, 'Do Not Knock remains visible in outcome reporting');
+console.log('4 farm outcome counting assertions passed');

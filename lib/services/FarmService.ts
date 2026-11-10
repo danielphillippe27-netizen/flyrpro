@@ -1,3 +1,4 @@
+import { recordFieldOutcome } from '@/lib/services/FieldOutcomeService';
 import { createClient } from '@/lib/supabase/client';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
 import type { FarmActivitySession } from '@/lib/farms/session-totals';
@@ -571,17 +572,25 @@ export class FarmTouchOutcomeService {
       throw new Error(`Unsupported farm address outcome: ${payload.status}`);
     }
 
-    const { data, error } = await this.client.rpc('record_farm_address_outcome', {
-      p_farm_id: payload.farmId,
-      p_farm_touch_id: payload.farmTouchId,
-      p_farm_address_id: payload.farmAddressId ?? null,
-      p_campaign_address_id: payload.campaignAddressId ?? null,
-      p_status: payload.status,
-      p_notes: payload.notes?.trim() || null,
-      p_occurred_at: payload.occurredAt ?? new Date().toISOString(),
+    // Resolve only an explicit saved link. Address text/building IDs are not unique homes.
+    let query = this.client.from('farm_addresses').select('campaign_address_id')
+      .eq('farm_id', payload.farmId);
+    if (payload.farmAddressId) query = query.eq('id', payload.farmAddressId);
+    else if (payload.campaignAddressId) query = query.eq('campaign_address_id', payload.campaignAddressId);
+    else throw new Error('Link this farm home to its campaign address before saving.');
+    const [{ data: address, error: addressError }, { data: farm, error: farmError }] = await Promise.all([
+      query.single(),
+      this.client.from('farms').select('linked_campaign_id').eq('id', payload.farmId).single(),
+    ]);
+    if (addressError || farmError) throw new Error(formatError(addressError ?? farmError));
+    if (!address?.campaign_address_id || !farm?.linked_campaign_id ||
+        (payload.campaignAddressId && address.campaign_address_id !== payload.campaignAddressId)) {
+      throw new Error('The farm home link needs review before this outcome can be saved.');
+    }
+    return recordFieldOutcome(this.client, {
+      campaignId: farm.linked_campaign_id, addressIds: [address.campaign_address_id],
+      farmId: payload.farmId, farmTouchId: payload.farmTouchId,
+      status: payload.status, notes: payload.notes, occurredAt: payload.occurredAt,
     });
-
-    if (error) throw new Error(formatError(error));
-    return data;
   }
 }

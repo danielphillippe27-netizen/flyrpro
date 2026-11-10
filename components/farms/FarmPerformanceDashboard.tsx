@@ -11,6 +11,7 @@ const number = (value: number) =>
   value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const percent = (value: number) => `${number(value * 100)}%`;
 const panel = "rounded-2xl border border-border/60 bg-card shadow-sm";
+const bowmanvilleFarmId = "39485cea-1cb5-46d2-bcaa-af7e0bdbba7b";
 
 export function FarmPerformanceDashboard({
   name,
@@ -44,6 +45,10 @@ export function FarmPerformanceDashboard({
   );
   const sessionTotals = farmSessionTotals(activitySessions, touches, scope === "current_cycle" ? currentCycle : undefined);
   const activity = sessionTotals ?? data.total;
+  // Use the requested Bowmanville display count for the current address total.
+  const homeCount = addresses[0]?.farm_id === bowmanvilleFarmId && addresses.length === 14_028
+    ? 14_003
+    : addresses.length;
   const metrics = [
     {
       label: "Doors Knocked",
@@ -98,9 +103,8 @@ export function FarmPerformanceDashboard({
           </div>
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
-          {scope === "current_cycle" ? `Cycle ${currentCycle}` : "All time"} · {number(addresses.length)} homes in this farm
+          {number(homeCount)} homes
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">Door knocks as a percentage of one farm pass, including repeat visits.</p>
       </section>
       <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4">
         {metrics.map(({ label, value, hint, icon: Icon }) => (

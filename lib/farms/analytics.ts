@@ -1,3 +1,4 @@
+import { outcomeCountsAsVisit } from '@/lib/services/FieldOutcomeService';
 import type {
   Contact,
   FinanceEntry,
@@ -184,7 +185,7 @@ export function buildFarmDashboardAnalytics({
 }: BuildFarmDashboardAnalyticsArgs): FarmDashboardAnalytics {
   const touchesPerInterval = getTouchCountPerInterval(farm);
   const interval = getTouchInterval(farm);
-  const nonNoneOutcomes = touchOutcomes.filter((outcome) => outcome.status !== 'none');
+  const nonNoneOutcomes = touchOutcomes.filter((outcome) => outcomeCountsAsVisit(outcome.status));
   const resolvedTouches = resolveFarmTouchesWithCycles(touches, touchesPerInterval).sort(
     (left, right) => toTimestamp(right.effectiveDate) - toTimestamp(left.effectiveDate)
   );

@@ -1,0 +1,43 @@
+ok 1 - One operation saves campaign and farm
+ok 2 - Campaign status persisted
+ok 3 - Farm status persisted
+ok 4 - Farm touch credited
+ok 5 - Exact retry replays
+ok 6 - Retry creates no duplicate event
+ok 7 - Receipt cannot be reused for another round
+ok 8 - Stale campaign edit rejected
+ok 9 - Rejected edit does not alter farm
+ok 10 - Missing unit link blocks entire save
+ok 11 - Missing link leaves campaign revision unchanged
+ok 12 - Farm failure aborts campaign and farm transaction
+ok 13 - Campaign rolled back
+ok 14 - Underlying receipt rolled back
+ok 15 - Status upgrade accepted
+ok 16 - Status upgrade does not double-count session target
+ok 17 - Status-only edit preserves notes
+ok 18 - Do Not Knock saved
+ok 19 - Do Not Knock retracts session credit
+ok 20 - Do Not Knock is not campaign visited
+ok 21 - Do Not Knock excludes farm coverage
+ok 22 - Exclusion remains visible
+ok 23 - Server campaign stats exclude Do Not Knock
+ok 24 - Server campaign stats do not invent contacts from buildings
+ok 25 - Second round has independent history
+ok 26 - Both rounds retained
+ok 27 - Reset current round
+ok 28 - Reset preserves prior round
+ok 29 - Delayed legacy write cannot overwrite newer farm history
+ok 30 - Session cannot be credited to another round
+ok 31 - Other account denied
+ok 32 - Receipts are not directly accessible
+ok 33 - Ordinary campaign still works through shared operation
+ok 34 - Ordinary campaign does not invent farm history
+ok 35 - New round edit
+ok 36 - Revision-checked edits in the same second are valid
+ok 37 - Rapid changes do not duplicate farm history
+ok 38 - Cannot bypass revision checks through private helper
+ok 39 - Bulk target saves both homes atomically
+ok 40 - Bulk farm coverage counts each home once
+ok 41 - One stale bulk home rejects the whole target
+ok 42 - Rejected bulk reset leaves farm totals intact
+42 unified field-outcome PostgreSQL checks passed

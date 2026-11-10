@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   CheckCircle2,
   Circle,
   Inbox,
@@ -19,9 +18,11 @@ import {
   Video,
   Plus,
   Search,
+  RefreshCw,
   Send,
   Settings2,
   Sparkles,
+  SquarePen,
   Users,
   X,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import {
   macApi,
   type MacStatus,
 } from "@/lib/mac-companion/client";
+import { macIdentifier } from "@/lib/mac-companion/identifiers";
 import { cocoApi, loadCoco } from "@/lib/coco/client";
 import {
   contactLabels,
@@ -52,7 +54,7 @@ import { EmailComposer } from "./EmailComposer";
 import { GmailClientImport } from "./GmailClientImport";
 import { AppleContactsReview } from "./AppleContactsReview";
 import { ContactListImport } from "./ContactListImport";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import "./coco.css";
 const replyTemplates = [
@@ -62,6 +64,12 @@ const replyTemplates = [
   { title: "Thank you", body: "Thanks, {first_name}! I appreciate your time. Let me know if you have any questions." },
 ];
 type Area = "Inbox" | "Clients";
+type SubmittedMessage = Message & { startedAt: number; attachmentNames: string[] };
+type HistoryPermission = {
+  history_range: "future" | "30d" | "90d" | "all";
+  import_after: string | null;
+  identifiers: string[];
+};
 type GmailStatus = {
   connected: boolean;
   configured: boolean;
@@ -92,6 +100,7 @@ const formatTime = (value?: string | null) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "";
+
 function formatThreadDay(date: Date, today: Date, yesterday: Date, recent: Date) {
   const day = date.toDateString();
   if (day === today.toDateString()) return "Today";
@@ -119,6 +128,66 @@ function Avatar({
     >
       {initials(name)}
     </span>
+  );
+}
+function ConversationContactCard({
+  client,
+  connection,
+  onOpenClient,
+  onEmail,
+}: {
+  client: Client;
+  connection: string;
+  onOpenClient: () => void;
+  onEmail: () => void;
+}) {
+  const name = displayName(client);
+  const primaryIdentifiers = new Set([macIdentifier(client.phone), macIdentifier(client.email)]);
+  const otherIdentifiers = client.identifiers?.filter((identifier) => !primaryIdentifiers.has(identifier));
+  const details = [
+    ["Phone", client.phone && <a className="underline underline-offset-2" href={`tel:${encodeURIComponent(client.phone)}`}>{client.phone}</a>],
+    ["Email", client.email && (
+      <DialogClose asChild>
+        <button type="button" className="text-left underline underline-offset-2" onClick={onEmail}>{client.email}</button>
+      </DialogClose>
+    )],
+    ["Other phone numbers or emails", otherIdentifiers?.join("\n")],
+    ["Address", client.address?.trim() || "No address saved"],
+    ["Notes", client.notes],
+    ["Lists", [...new Set([client.stage || "Lead", ...(client.contact_labels ?? [])])].join(" · ")],
+    ["Last contacted", client.last_contacted_at && new Date(client.last_contacted_at).toLocaleString()],
+    ["Next follow-up", client.next_follow_up_at && new Date(client.next_follow_up_at).toLocaleString()],
+    ["Appointment", client.appointment_at && new Date(client.appointment_at).toLocaleString()],
+  ] as const;
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button type="button" className="messages-contact-identity" aria-label={`Contact card for ${name}`}>
+          <Avatar name={name} />
+          <span className="messages-contact-name">{name} <ArrowRight size={11} /></span>
+        </button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{name}</DialogTitle>
+          <DialogDescription>{connection}</DialogDescription>
+        </DialogHeader>
+        <dl className="divide-y rounded-lg border">
+          {details.map(([label, value]) => value && (
+            <div key={label} className="px-4 py-2.5">
+              <dt className="text-xs text-muted-foreground">{label}</dt>
+              <dd className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <DialogClose asChild>
+          <button type="button" className="justify-self-start rounded-md border px-3 py-2 text-sm hover:bg-accent" onClick={onOpenClient}>
+            Open full contact
+          </button>
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }
 function ContactContext({ client }: { client: Client }) {
@@ -324,17 +393,16 @@ function CocoWorkspace({
     [showGmailImport, setShowGmailImport] = useState(false),
     [showAppleImport, setShowAppleImport] = useState(false),
     [showListImport, setShowListImport] = useState(false);
-  const [draftSources, setDraftSources] = useState<
-    { id: string; label: string; href: string; excerpt: string }[]
-  >([]);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const [recipientSearch, setRecipientSearch] = useState("");
   const [composer, setComposer] = useState(""),
-    [draft, setDraft] = useState(""),
-    [aiBusy, setAiBusy] = useState(false),
     [attachmentNames, setAttachmentNames] = useState<string[]>([]),
     [deviceOnline, setDeviceOnline] = useState(false),
+    [syncEnabled, setSyncEnabled] = useState<boolean | null>(null),
+    [lastMacCheck, setLastMacCheck] = useState<string | null>(null),
+    [refreshingInbox, setRefreshingInbox] = useState(false),
     [gmailStatus, setGmailStatus] = useState<GmailStatus | null>(null),
-    [includeGmail, setIncludeGmail] = useState(false),
     [integrationBusy, setIntegrationBusy] = useState(false);
   const [history, setHistory] = useState<Message[]>([]),
     [detailMessages, setDetailMessages] = useState<Message[]>([]),
@@ -342,6 +410,13 @@ function CocoWorkspace({
     [historyError, setHistoryError] = useState(""),
     [loadingHistory, setLoadingHistory] = useState(false),
     [sending, setSending] = useState(false);
+  const [submittedMessages, setSubmittedMessages] = useState<SubmittedMessage[]>([]);
+  const [historyPermission, setHistoryPermission] = useState<{ id: string; value: HistoryPermission } | null>(null);
+  const [historyReview, setHistoryReview] = useState<{ id: string; name: string; permission: HistoryPermission } | null>(null);
+  const [savingHistoryRange, setSavingHistoryRange] = useState(false);
+  const [historyReviewError, setHistoryReviewError] = useState("");
+  const refreshOpenThread = useRef<(() => Promise<void>) | null>(null);
+  const hasPagedHistory = useRef(false);
   const messageScroll = useRef<HTMLDivElement>(null),
     scrollConversation = useRef<string | undefined>(undefined),
     stickToLatest = useRef(true),
@@ -385,6 +460,9 @@ function CocoWorkspace({
       }).then(async (r) => (r.ok ? await r.json() : null)),
     ]);
     if (!alive.current) return;
+    setSyncEnabled(state.preferences?.sync_enabled ?? false);
+    const latestCheck = state.devices.find((device) => device.status === "connected")?.last_seen_at;
+    if (latestCheck) setLastMacCheck(latestCheck);
     setDeviceOnline(
       hasMacBridge() || state.devices.some(
         (d) =>
@@ -394,6 +472,7 @@ function CocoWorkspace({
     );
 
     if (gmail) setGmailStatus(gmail);
+    return state.preferences?.sync_enabled ?? false;
   }, [userId, workspaceId]);
   useEffect(() => {
     void loadData().catch((e) => {
@@ -447,7 +526,6 @@ function CocoWorkspace({
     setSelectedConversation(client.id);
     setSearch("");
     setComposer("");
-    setDraft("");
     void clearAttachments();
     setArea("Inbox");
   }
@@ -486,11 +564,28 @@ function CocoWorkspace({
     (inboxContact
       ? sortedConversations.find((c) => c.client_id === inboxContact.id)
       : sortedConversations[0]);
+  const conversationContact = activeConversation && clientsById[activeConversation.client_id];
   const activeContactRef = useRef<string | undefined>(undefined);
   activeContactRef.current = activeConversation?.client_id;
-  const latestByConversation = new Map(
-    sortedConversations.map((c) => [c.id, { body: c.preview }]),
-  );
+  const latestSubmittedByContact = new Map(submittedMessages.map((message) => [message.client_id, message]));
+  function selectConversation(conversation: Conversation) {
+    setInboxContact(null);
+    setEmailClient(conversation.channel === "email" ? clientsById[conversation.client_id] ?? null : null);
+    setSelectedConversation(conversation.id);
+    if (activeConversation?.id !== conversation.id) {
+      setComposer("");
+      void clearAttachments();
+    }
+  }
+  const recipientQuery = recipientSearch.trim().toLowerCase();
+  const recipientDigits = recipientQuery.replace(/\D/g, "");
+  const matchingRecipients = showContactPicker
+    ? data.clients.filter((client) => (client.phone || client.email) &&
+        (`${displayName(client)} ${client.email ?? ""}`.toLowerCase().includes(recipientQuery) ||
+          (/^[\d\s+().-]+$/.test(recipientQuery) && recipientDigits &&
+            client.phone?.replace(/\D/g, "").includes(recipientDigits))))
+        .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+    : [];
   useEffect(() => {
     if (
       !selectedConversation &&
@@ -501,16 +596,27 @@ function CocoWorkspace({
   }, [selectedConversation, sortedConversations]);
   useEffect(() => {
     setComposer("");
-    setDraft("");
-    setDraftSources([]);
-    setIncludeGmail(false);
     setAttachmentNames([]);
     sendAttempt.current = undefined;
     setShowTemplates(false);
   }, [activeConversation?.client_id]);
-  const thread = history.filter(
+  const thread: (Message | SubmittedMessage)[] = history.filter(
     (m) => m.client_id === activeConversation?.client_id,
   );
+  const syncedOutgoing = thread.filter((m) => m.direction === "outgoing");
+  for (const submitted of submittedMessages) {
+    if (submitted.client_id !== activeConversation?.client_id) continue;
+    const match = syncedOutgoing.findIndex((m) => {
+      const timestamp = Date.parse(m.sent_at ?? "");
+      return m.body === submitted.body && timestamp >= submitted.startedAt - 2000 &&
+        timestamp <= Date.parse(submitted.created_at) + 120_000;
+    });
+    if (match >= 0) syncedOutgoing.splice(match, 1);
+    else thread.push(submitted);
+  }
+  thread.sort((a, b) => (a.sent_at ?? a.created_at).localeCompare(b.sent_at ?? b.created_at));
+  const activeHistoryPermission =
+    historyPermission?.id === activeConversation?.client_id ? historyPermission?.value : null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const yesterday = new Date(today);
@@ -539,9 +645,11 @@ function CocoWorkspace({
           "client_id" | "conversation_id" | "attachments"
         > & { attachments?: MessageAttachment[]; has_attachments?: boolean })[];
         more: boolean;
+        permission?: HistoryPermission | null;
       }>(q, undefined, abort.current.signal, userId);
       return {
         more: result.more,
+        permission: result.permission ?? null,
         messages: result.messages
           .map((m) => ({
             ...m,
@@ -576,12 +684,27 @@ function CocoWorkspace({
     setHistory([]);
     setHistoryError("");
     setHistoryMore(false);
+    setHistoryPermission(null);
+    hasPagedHistory.current = false;
+    const refresh = async () => {
+      const result = await historyPage(id);
+      if (!active) return;
+      setHistoryPermission(result.permission ? { id, value: result.permission } : null);
+      setHistoryError("");
+      if (!hasPagedHistory.current) setHistoryMore(result.more);
+      setHistory((current) => {
+        const merged = new Map(current.map((message) => [message.id, message]));
+        result.messages.forEach((message) => merged.set(message.id, message));
+        return [...merged.values()].sort((a, b) =>
+          (a.sent_at ?? a.created_at).localeCompare(b.sent_at ?? b.created_at),
+        );
+      });
+    };
+    refreshOpenThread.current = refresh;
     const load = async () => {
       try {
-        const result = await historyPage(id);
+        await refresh();
         if (active) {
-          setHistory(result.messages);
-          setHistoryMore(result.more);
           await cocoApi(
             userId,
             workspaceId,
@@ -606,26 +729,60 @@ function CocoWorkspace({
     void load();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible")
-        void historyPage(id)
-          .then((r) => {
-            if (active)
-              setHistory((current) => {
-                const merged = new Map(current.map((m) => [m.id, m]));
-                r.messages.forEach((m) => merged.set(m.id, m));
-                return [...merged.values()].sort((a, b) =>
-                  (a.sent_at ?? a.created_at).localeCompare(
-                    b.sent_at ?? b.created_at,
-                  ),
-                );
-              });
-          })
-          .catch(() => {});
+        void refresh().catch(() => {});
     }, 10000);
     return () => {
       active = false;
+      refreshOpenThread.current = null;
       clearInterval(timer);
     };
   }, [activeConversation?.client_id, area, userId, workspaceId, historyPage]); // History is paged independently from the contact list.
+  async function refreshInbox() {
+    if (refreshingInbox) return;
+    setRefreshingInbox(true);
+    setError("");
+    setNotice("");
+    try {
+      const connections = loadConnections();
+      const sync = connections.then(async (enabled) => {
+        if (!hasMacBridge() || !enabled) return false;
+        await macNative("sync-now");
+        return true;
+      });
+      const results = await Promise.allSettled([
+        sync,
+        loadData(),
+        refreshOpenThread.current?.(),
+      ]);
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+      setNotice(results[0].status === "fulfilled" && results[0].value
+        ? "Mac sync requested. New messages will appear as they sync."
+        : "Conversations refreshed.");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRefreshingInbox(false);
+    }
+  }
+  async function approveRecentHistory() {
+    if (!historyReview || savingHistoryRange) return;
+    setSavingHistoryRange(true);
+    setHistoryReviewError("");
+    try {
+      await macApi("", {
+        action: "contact-permission", workspaceId, contactId: historyReview.id,
+        enabled: true, identifiers: historyReview.permission.identifiers, history: "30d",
+      }, abort.current.signal, userId);
+      setHistoryReview(null);
+      if (hasMacBridge() && syncEnabled) await refreshInbox();
+      else setNotice("History permission saved. Open WolfGrid on your Mac with Messages sync enabled to import it.");
+    } catch (e) {
+      setHistoryReviewError((e as Error).message);
+    } finally {
+      setSavingHistoryRange(false);
+    }
+  }
   useEffect(() => {
     if (!selectedClient) return;
     let active = true;
@@ -657,6 +814,7 @@ function CocoWorkspace({
       const contactId = activeConversation.client_id;
       const result = await historyPage(contactId, history[0]);
       if (activeContactRef.current !== contactId) return;
+      hasPagedHistory.current = true;
       stickToLatest.current = false;
       setHistory((current) => [
         ...result.messages,
@@ -832,42 +990,6 @@ function CocoWorkspace({
       setSavingNew(false);
     }
   }
-  async function aiReply(instruction?: string) {
-    if (!activeConversation || aiBusy) return;
-    const contactId = activeConversation.client_id;
-    setAiBusy(true);
-    try {
-      const response = await fetch("/api/crm-ai", {
-        method: "POST",
-        credentials: "include",
-        signal: abort.current.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-wolfgrid-user-id": userId,
-        },
-        body: JSON.stringify({
-          workspaceId,
-          contactId: activeConversation.client_id,
-          mode: "draft",
-          question:
-            instruction ??
-            "Draft a natural reply matching this conversation. Do not invent prior conversation details.",
-          draftText: draft || composer,
-          includeGmail,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw Error(result.error);
-      if (activeContactRef.current === contactId) {
-        setDraft(result.draft ?? result.answer);
-        setDraftSources(result.sources ?? []);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setAiBusy(false);
-    }
-  }
   const completeGmail = useCallback(
     async (ticket: string) => {
       const response = await fetch("/api/coco/gmail/complete", {
@@ -958,7 +1080,7 @@ function CocoWorkspace({
     }
   }
   async function sendMessage() {
-    if (!activeConversation || sending) return;
+    if (!activeConversation || sending || !composer.trim()) return;
     const client = clientsById[activeConversation.client_id];
     if (!client?.phone && !client?.email) {
       setNotice("Add a phone number first.");
@@ -971,6 +1093,10 @@ function CocoWorkspace({
     const signature = JSON.stringify([client.id, composer, attachmentNames]);
     if (sendAttempt.current?.signature !== signature)
       sendAttempt.current = { signature, id: crypto.randomUUID() };
+    const requestId = sendAttempt.current.id;
+    const startedAt = Date.now();
+    setError("");
+    setNotice("");
     setSending(true);
     try {
       const result = await macNative<{ accepted: boolean }>("message-send", {
@@ -978,14 +1104,22 @@ function CocoWorkspace({
         workspaceId,
         contactId: client.id,
         body: composer,
-        requestId: sendAttempt.current!.id,
+        requestId,
       });
-      if (result.accepted && activeContactRef.current === client.id) {
-        setNotice(
-          "Apple Messages accepted the request. Delivery is not confirmed.",
-        );
-        setComposer("");
-        setAttachmentNames([]);
+      if (result.accepted) {
+        const timestamp = new Date().toISOString();
+        setSubmittedMessages((current) => [...current, {
+          id: `submitted:${requestId}`, client_id: client.id, conversation_id: activeConversation.id,
+          direction: "outgoing", body: composer, body_status: "plain", sent_at: timestamp,
+          created_at: timestamp, attachments: [], attachmentNames, startedAt,
+        }]);
+        if (activeContactRef.current === client.id) {
+          stickToLatest.current = true;
+          setComposer("");
+          setAttachmentNames([]);
+          sendAttempt.current = undefined;
+        }
+        if (syncEnabled) void macNative("sync-now").catch(() => {});
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1563,14 +1697,82 @@ function CocoWorkspace({
               className={`inbox-shell ${selectedConversation ? "show-thread" : ""}`}
             >
               <div className="conversation-list">
-                <label className="search-field">
-                  <Search size={17} />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search conversations"
-                  />
-                </label>
+                <div className="conversation-toolbar">
+                  <div className="conversation-search-row">
+                    <label className="search-field">
+                      <Search size={17} />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search conversations"
+                      />
+                    </label>
+                    <Dialog open={showContactPicker} onOpenChange={(open) => {
+                      if (open) setRecipientSearch("");
+                      setShowContactPicker(open);
+                    }}>
+                      <DialogTrigger asChild>
+                        <button type="button" className="new-conversation-button" aria-label="New conversation" title="New conversation">
+                          <SquarePen size={19} aria-hidden="true" />
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>New conversation</DialogTitle>
+                          <DialogDescription>Choose a contact to open their conversation.</DialogDescription>
+                        </DialogHeader>
+                        <input
+                          className="rounded-lg border bg-background px-3 py-2 text-base"
+                          aria-label="Find a recipient"
+                          placeholder="Search by name, phone or email"
+                          value={recipientSearch}
+                          onChange={(e) => setRecipientSearch(e.target.value)}
+                        />
+                        <ul className="max-h-[min(45dvh,24rem)] overflow-y-auto">
+                          {matchingRecipients.map((client) => (
+                            <li key={client.id}>
+                              <button type="button" className="grid w-full gap-1 rounded-lg px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent"
+                                onClick={() => {
+                                  const conversation = sortedConversations.find((c) => c.client_id === client.id);
+                                  if (!conversation) return;
+                                  selectConversation(conversation);
+                                  setSearch("");
+                                  setShowContactPicker(false);
+                                }}>
+                                <span className="font-medium">{displayName(client)}</span>
+                                <span className="truncate text-sm text-muted-foreground">{client.phone || client.email}</span>
+                              </button>
+                            </li>
+                          ))}
+                          {matchingRecipients.length === 0 && (
+                            <li className="px-3 py-2 text-sm text-muted-foreground">
+                              {recipientQuery ? "No matching contacts." : "Add a phone number or email to a contact first."}
+                            </li>
+                          )}
+                        </ul>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                  <div className="conversation-sync">
+                    <span>
+                      {syncEnabled && lastMacCheck && Date.now() - Date.parse(lastMacCheck) < 70_000 && (
+                        <span className="conversation-recent-dot" role="img" aria-label="Mac checked recently" />
+                      )}
+                      Last updated {lastMacCheck ? (
+                        <time dateTime={lastMacCheck} title={new Date(lastMacCheck).toLocaleString()}>
+                          {new Date(lastMacCheck).toDateString() === new Date().toDateString()
+                            ? formatTime(lastMacCheck)
+                            : formatShort(lastMacCheck)}
+                        </time>
+                      ) : "—"}
+                      {syncEnabled === false && " · Sync paused"}
+                    </span>
+                    <button type="button" aria-label="Refresh conversations" title="Refresh conversations"
+                      disabled={refreshingInbox} onClick={() => void refreshInbox()}>
+                      {refreshingInbox ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                    </button>
+                  </div>
+                </div>
                 <div className="conversation-scroll">
                   {sortedConversations
                     .filter((conversation) =>
@@ -1579,7 +1781,11 @@ function CocoWorkspace({
                         .includes(search.toLowerCase()),
                     )
                     .map((conversation) => {
-                      const last = latestByConversation.get(conversation.id);
+                      const submitted = latestSubmittedByContact.get(conversation.client_id);
+                      const showSubmitted = submitted && (!conversation.last_message_at ||
+                        Date.parse(submitted.created_at) > Date.parse(conversation.last_message_at) + 2000);
+                      const lastAt = showSubmitted ? submitted.sent_at : conversation.last_message_at;
+                      const recent = lastAt && Date.now() - Date.parse(lastAt) < 86_400_000;
                       const unread =
                         conversation.last_message_at &&
                         (!conversation.last_read_at ||
@@ -1589,34 +1795,19 @@ function CocoWorkspace({
                         <button
                           key={conversation.id}
                           className={`conversation-row ${activeConversation?.id === conversation.id ? "selected" : ""}`}
-                          onClick={() => {
-                            setInboxContact(null);
-                            setEmailClient(
-                              conversation.channel === "email"
-                                ? (clientsById[conversation.client_id ?? ""] ??
-                                    null)
-                                : null,
-                            );
-                            setSelectedConversation(conversation.id);
-                            setDraft("");
-                            setComposer("");
-                            void clearAttachments();
-                            setIncludeGmail(false);
-                          }}
+                          onClick={() => selectConversation(conversation)}
                         >
                           <Avatar name={conversationName(conversation)} />
                           <span className="conversation-preview">
                             <span>
                               <strong>{conversationName(conversation)}</strong>
-                              <time>
-                                {formatShort(conversation.last_message_at)}
+                              <time dateTime={lastAt ?? undefined}>
+                                {recent && <span className="conversation-recent-dot" role="img" aria-label="Active in the last 24 hours" />}
+                                {recent ? formatTime(lastAt) : formatShort(lastAt)}
                               </time>
                             </span>
                             <small>
-                              {last?.body ??
-                                (conversation.id.startsWith("new:")
-                                  ? "Start a conversation"
-                                  : "Attachment")}
+                              {(showSubmitted ? submitted.body : conversation.preview) ?? "Attachment"}
                             </small>
                           </span>
                           {unread && <span className="unread-dot" />}
@@ -1661,23 +1852,16 @@ function CocoWorkspace({
                       >
                         <ArrowLeft size={20} />
                       </button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="messages-contact-identity" aria-label={`Conversation details for ${conversationName(activeConversation)}`}>
-                            <Avatar name={conversationName(activeConversation)} />
-                            <span className="messages-contact-name">{conversationName(activeConversation)} <ArrowRight size={11} /></span>
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="center">
-                          {activeConversation.client_id && <DropdownMenuItem onSelect={() => openClient(activeConversation.client_id!)}>View contact</DropdownMenuItem>}
-                          {clientsById[activeConversation.client_id ?? ""]?.email && <DropdownMenuItem onSelect={() => openContactInbox(clientsById[activeConversation.client_id!], "email")}>Email contact</DropdownMenuItem>}
-                          <div className="px-2 py-1.5 text-xs text-muted-foreground">{activeConversation.channel.toUpperCase()} · {deviceOnline ? "Mac connected" : "Mac offline"}</div>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <a className="messages-phone-call" aria-label="Call conversation contact" title="Call" aria-disabled={!clientsById[activeConversation.client_id ?? ""]?.phone} href={(() => {
-                        const phone = clientsById[activeConversation.client_id ?? ""]?.phone;
-                        return phone ? `tel:${encodeURIComponent(phone)}` : undefined;
-                      })()}><Phone size={19} /></a>
+                      {conversationContact && (
+                        <ConversationContactCard
+                          key={conversationContact.id}
+                          client={conversationContact}
+                          connection={`${activeConversation.channel.toUpperCase()} · ${deviceOnline ? "Mac connected" : "Mac offline"}`}
+                          onOpenClient={() => openClient(conversationContact.id)}
+                          onEmail={() => openContactInbox(conversationContact, "email")}
+                        />
+                      )}
+                      <a className="messages-phone-call" aria-label="Call conversation contact" title="Call" aria-disabled={!conversationContact?.phone} href={conversationContact?.phone ? `tel:${encodeURIComponent(conversationContact.phone)}` : undefined}><Phone size={19} /></a>
                     </div>
                     <div
                       className="thread-messages"
@@ -1704,7 +1888,22 @@ function CocoWorkspace({
                           <span role="status">{historyError}</span>
                         )}
                       </div>
-                      {!thread.length && <div className="thread-date">No messages yet. Write your first message below.</div>}
+                      {!thread.length && <div className="thread-date">
+                        {activeHistoryPermission?.history_range === "future"
+                            ? <>
+                                <p>Only new messages are synced{activeHistoryPermission.import_after
+                                  ? ` since ${new Date(activeHistoryPermission.import_after).toLocaleString()}`
+                                  : ""}.</p>
+                                <button type="button" className="conversation-history-button"
+                                  onClick={() => {
+                                    setHistoryReviewError("");
+                                    setHistoryReview({ id: activeConversation.client_id, name: conversationName(activeConversation), permission: activeHistoryPermission });
+                                  }}>
+                                  Import recent history
+                                </button>
+                              </>
+                            : "No synced messages yet."}
+                      </div>}
                       {thread.map((message, index) => {
                         const date = new Date(message.sent_at ?? "");
                         const previousDate = new Date(thread[index - 1]?.sent_at ?? "");
@@ -1740,97 +1939,27 @@ function CocoWorkspace({
                                   userId={userId}
                                   workspaceId={workspaceId}
                                 />
+                                {"attachmentNames" in message && message.attachmentNames.map((name, index) => (
+                                  <small className="submitted-attachment" key={index}>{name}</small>
+                                ))}
                               </div>
-                              <small>{formatTime(message.sent_at)}</small>
+                              <small>
+                                {formatTime(message.sent_at)}
+                                {"startedAt" in message && " · Submitted to Messages"}
+                              </small>
                             </div>
                           </Fragment>
                         );
                       })}
                     </div>
                     <div className="composer-area">
-                      {draft && (
-                        <div className="draft-card">
-                          <div>
-                            <Sparkles size={17} />
-                            <strong>Suggested reply</strong>
-                            <button
-                              onClick={() => setDraft("")}
-                              aria-label="Discard draft"
-                            >
-                              <X size={15} />
-                            </button>
-                          </div>
-                          <p className="composer-note">
-                            Based on a bounded selection of your records and
-                            consented messages.
-                          </p>
-                          {draftSources.map((source) => (
-                            <details key={source.id}>
-                              <summary>
-                                <a href={source.href}>{source.label}</a>
-                              </summary>
-                              <p>{source.excerpt}</p>
-                            </details>
-                          ))}
-                          <textarea
-                            aria-label="Edit AI suggestion"
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                          />
-                          <div className="draft-actions">
-                            <button
-                              onClick={() => void aiReply("Make it shorter")}
-                            >
-                              Shorter
-                            </button>
-                            <button
-                              onClick={() => void aiReply("Make it warmer")}
-                            >
-                              Warmer
-                            </button>
-                            <button
-                              onClick={() =>
-                                void aiReply("Make it more professional")
-                              }
-                            >
-                              Professional
-                            </button>
-                            <button onClick={() => void aiReply()}>
-                              Try again
-                            </button>
-                            <button
-                              className="draft-use"
-                              onClick={() => {
-                                setComposer(draft);
-                                setDraft("");
-                              }}
-                            >
-                              Use <Check size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {gmailStatus?.connected &&
-                        clientsById[activeConversation.client_id ?? ""]
-                          ?.email && (
-                          <label className="gmail-context-toggle">
-                            <input
-                              type="checkbox"
-                              checked={includeGmail}
-                              onChange={(event) =>
-                                setIncludeGmail(event.target.checked)
-                              }
-                            />{" "}
-                            Send up to five recent emails for this client to the
-                            AI provider for this draft
-                          </label>
-                        )}
                       {attachmentNames.length > 0 && (
                         <div className="pending-attachments">
                           <span>{attachmentNames.join(", ")}</span>
                           <button
                             className="clear-attachments"
                             aria-label="Remove attachments"
+                            disabled={sending}
                             onClick={() => void clearAttachments()}
                           >
                             <X size={16} />
@@ -1840,7 +1969,7 @@ function CocoWorkspace({
                       <div className="composer">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <button className="attachment-button" aria-label="Add to message" title="Templates and attachments">
+                            <button className="attachment-button" aria-label="Add to message" title="Templates and attachments" disabled={sending}>
                               <Plus size={20} />
                             </button>
                           </DropdownMenuTrigger>
@@ -1853,18 +1982,9 @@ function CocoWorkspace({
                           aria-label="Message draft"
                           placeholder="Write a message…"
                           value={composer}
+                          readOnly={sending}
                           onChange={(e) => setComposer(e.target.value)}
                         />
-                        <button
-                          className="sparkle-button"
-                          aria-label="Draft with AI"
-                          title="Draft with AI"
-                          disabled={aiBusy}
-                          onClick={() => void aiReply()}
-                        >
-                          <Sparkles size={19} />
-                          <span>{aiBusy ? "Drafting…" : "AI reply"}</span>
-                        </button>
                         <button
                           className="send-button"
                           data-recipient={
@@ -1873,17 +1993,15 @@ function CocoWorkspace({
                           }
                           aria-label="Send message"
                           disabled={sending || !composer.trim()}
-                          title="Review and send with Apple Messages"
+                          title="Send with Apple Messages"
                           onClick={() => void sendMessage()}
                         >
                           <Send size={17} />
                         </button>
                       </div>
-                      <p className="composer-note">
-                        {deviceOnline
-                          ? "Review every message before sending."
-                          : "Your Mac is offline. Drafts stay in this session until you reconnect."}
-                      </p>
+                      {!deviceOnline && (
+                        <p className="composer-note">Your Mac is offline. Drafts stay in this session until you reconnect.</p>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -2042,6 +2160,22 @@ function CocoWorkspace({
             onClose={() => setShowGmailImport(false)}
             onImported={loadData}
           />
+        )}
+        {historyReview && (
+          <Dialog open onOpenChange={(open) => { if (!open && !savingHistoryRange) setHistoryReview(null); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Import recent messages with {historyReview.name}?</DialogTitle>
+                <DialogDescription>
+                  WolfGrid will sync available one-to-one messages from the last 30 days and new messages going forward. This only changes history access for {historyReview.name}.
+                </DialogDescription>
+              </DialogHeader>
+              {historyReviewError && <p role="alert">{historyReviewError}</p>}
+              <button type="button" className="conversation-history-button" disabled={savingHistoryRange} onClick={() => void approveRecentHistory()}>
+                {savingHistoryRange ? "Saving…" : "Import last 30 days"}
+              </button>
+            </DialogContent>
+          </Dialog>
         )}
         {showAppleImport && (
           <AppleContactsReview

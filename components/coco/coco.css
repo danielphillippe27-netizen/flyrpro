@@ -5039,6 +5039,8 @@
 /* Shared WolfGrid surfaces stay in sync when the app theme changes in place. */
 .coco-crm input, .coco-crm textarea, .coco-crm select { color:var(--foreground); background-color:var(--card); color-scheme:inherit; }
 .coco-crm input::placeholder, .coco-crm textarea::placeholder { color:var(--muted-foreground); }
+.coco-crm .inbox-shell .incoming .bubble { background:#e9e9eb; border-color:#e9e9eb; color:#1c1c1e; }
+.dark .coco-crm .inbox-shell .incoming .bubble { background:#3b3b3d; border-color:#3b3b3d; color:#e1e1e1; }
 .coco-crm .inbox-shell .outgoing .bubble { background:#0064ce; border-color:#0064ce; color:#fff; }
 .coco-crm .message-body { white-space:pre-wrap; overflow-wrap:anywhere; }
 .coco-crm .message-body a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
@@ -5067,10 +5069,41 @@
 .coco-crm .all-contacts-list[aria-pressed=true] { background:var(--card); color:var(--text); }
 
 /* Messages-style independent panes and floating controls, using WolfGrid's theme. */
-.coco-crm .inbox-shell, .coco-crm .inbox-shell.show-thread { min-height:0; }
+.main-route-content:has(> .coco-crm > .main-content > .inbox-shell) {
+  height: 100%;
+}
+.main-route-content > .coco-crm:has(> .main-content > .inbox-shell),
+.main-route-content > .coco-crm > .main-content:has(> .inbox-shell) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.coco-crm .main-content:has(> .inbox-shell) > .mac-titlebar {
+  flex-shrink: 0;
+}
+.coco-crm .inbox-shell, .coco-crm .inbox-shell.show-thread {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
+}
 .coco-crm .inbox-shell .conversation-list,.coco-crm .inbox-shell.show-thread .conversation-list { position:relative; min-height:0; padding:0; background:var(--secondary); overflow:hidden; }
-.coco-crm .conversation-list .search-field { position:absolute; top:12px; left:10px; right:10px; z-index:3; width:auto; height:36px; margin:0; border-radius:20px; background:color-mix(in srgb,var(--card) 85%,transparent); backdrop-filter:blur(16px); }
-.coco-crm .conversation-scroll { flex:1; min-height:0; max-width:none; overflow-y:auto; overscroll-behavior:contain; padding:60px 8px 12px; scroll-padding-top:60px; }
+.coco-crm .conversation-toolbar { flex-shrink:0; padding:12px 10px 0; }
+.coco-crm .conversation-search-row { display:flex; align-items:center; gap:8px; }
+.coco-crm .conversation-search-row .search-field { min-width:0; flex:1; }
+.coco-crm .new-conversation-button { display:grid; place-items:center; flex:0 0 36px; height:36px; padding:0; border:1px solid var(--border); border-radius:50%; background:var(--card); color:var(--foreground); cursor:pointer; }
+.coco-crm .new-conversation-button:hover { background:var(--accent); }
+.coco-crm .conversation-list .search-field { width:100%; max-width:none; height:36px; margin:0; border-radius:20px; background:color-mix(in srgb,var(--card) 85%,transparent); }
+.coco-crm .conversation-sync { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:32px; margin-top:5px; padding-left:6px; color:var(--muted-foreground); font-size:11px; }
+.coco-crm .conversation-sync button { display:grid; place-items:center; width:32px; height:32px; flex-shrink:0; border:1px solid var(--border); border-radius:50%; background:var(--card); color:var(--foreground); }
+.coco-crm .conversation-sync button:disabled { opacity:.55; }
+.coco-crm .conversation-recent-dot { display:inline-block; width:7px; height:7px; margin-right:5px; border-radius:50%; background:#25b760; vertical-align:1px; }
+.coco-crm .conversation-row.selected .conversation-recent-dot { background:#86efac; box-shadow:0 0 0 1px #14532d; }
+.conversation-history-button { margin-top:6px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--foreground); }
+.conversation-history-button:focus-visible,.coco-crm .conversation-sync button:focus-visible,.coco-crm .new-conversation-button:focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+.coco-crm .conversation-scroll { flex:1; min-height:0; max-width:none; overflow-y:auto; overscroll-behavior:contain; padding:12px 8px; }
 .coco-crm .conversation-row { position:relative; min-height:72px; margin:0; padding:10px; border:0; border-radius:8px; background:transparent; gap:12px; }
 .coco-crm .conversation-row::after { content:""; position:absolute; left:58px; right:8px; bottom:0; height:1px; background:var(--border); }
 .coco-crm .conversation-row .avatar { width:36px; height:36px; flex:0 0 36px; background:var(--card); color:var(--foreground); border:1px solid var(--border); }
@@ -5086,6 +5119,7 @@
 .coco-crm .thread-panel .composer-area { flex-shrink:0; padding:10px 16px 6px; background:transparent; border:0; }
 .coco-crm .composer { border-radius:22px; background:var(--card); }
 .coco-crm .bubble { font-size:13px; line-height:1.45; border-radius:18px; }
+.coco-crm .bubble .submitted-attachment { display:block; color:inherit; overflow-wrap:anywhere; }
 .coco-crm .contacts-lists { min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 @media(min-width:761px) {
  .coco-crm .inbox-shell,.coco-crm .inbox-shell.show-thread { grid-template-columns:clamp(250px,26vw,340px) minmax(0,1fr); }

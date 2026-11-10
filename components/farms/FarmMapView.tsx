@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { CampaignDetailMapView, type MapPointOverlay } from '@/components/campaigns/CampaignDetailMapView';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { outcomeCountsAsVisit } from '@/lib/services/FieldOutcomeService';
 import { cycleMapStatus } from '@/lib/farms/cycles';
 import { FarmTouchOutcomeService } from '@/lib/services/FarmService';
 import type {
@@ -17,16 +18,6 @@ import type {
 } from '@/types/database';
 
 type MapLayerScope = 'all_time' | 'cycle';
-const VISITED_OUTCOME_STATUSES = new Set<FarmAddressOutcomeStatus>([
-  'no_answer',
-  'delivered',
-  'talked',
-  'appointment',
-  'do_not_knock',
-  'future_seller',
-  'hot_lead',
-]);
-
 const MAP_OUTCOME_ACTIONS: Array<{ status: FarmAddressOutcomeStatus; label: string }> = [
   { status: 'delivered', label: 'Attempted' },
   { status: 'no_answer', label: 'Attempted' },
@@ -109,9 +100,9 @@ export function FarmMapView({
         const isVisited =
           layerScope === 'all_time'
             ? (scopedOutcome
-                ? VISITED_OUTCOME_STATUSES.has(scopedOutcome.status)
+                ? outcomeCountsAsVisit(scopedOutcome.status)
                 : visitedAllTime)
-            : Boolean(scopedOutcome && VISITED_OUTCOME_STATUSES.has(scopedOutcome.status));
+            : Boolean(scopedOutcome && outcomeCountsAsVisit(scopedOutcome.status));
         const scopedStatus = layerScope === 'cycle'
           ? cycleMapStatus(scopedOutcome, latestOutcomeByAddress.get(address.id), address.last_outcome_status)
           : scopedOutcome?.status ?? address.last_outcome_status ?? (isVisited ? 'delivered' : 'none');

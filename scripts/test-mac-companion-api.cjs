@@ -27,5 +27,22 @@ const {build}=require('esbuild');
  calls=[];
 
  assert.equal((await post(valid)).status,200);assert.equal(calls.length,1);assert.equal(calls[0].name,'import_mac_contact_messages');
+ const filters=[];
+ const permission={history_range:'future',import_after:'2026-11-10T01:15:03Z',identifiers:['+19055550101']};
+ global.macTestApi.from=(table)=>({
+  select(){return this},
+  eq(column,value){filters.push([table,column,value]);return this},
+  order(){return this},
+  range:async()=>({data:[],error:null}),
+  limit:async()=>({data:[],error:null}),
+  in:async()=>({data:[],error:null}),
+  maybeSingle:async()=>({data:table==='mac_message_permissions'?permission:{id:valid.contactId},error:null}),
+ });
+ const history=await route.GET(new NextRequest(`https://wolfgrid.app/api/mac-companion?workspaceId=${valid.workspaceId}&contactId=${valid.contactId}`,{headers:{'x-wolfgrid-user-id':'owner'}}));
+ assert.equal(history.status,200);
+ assert.deepEqual((await history.json()).permission,permission);
+ assert.deepEqual(filters.filter(([table])=>table==='mac_message_permissions').map(([,column,value])=>[column,value]),[
+  ['user_id','owner'],['workspace_id',valid.workspaceId],['contact_id',valid.contactId],['enabled',true],
+ ]);
  console.log('PASS: real API handler rejects unauthenticated/cross-origin/malformed/oversized/group/local-path requests before database writes; valid batch invokes transactional RPC.');
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,5 +1,6 @@
 'use client';
 
+import { recordFieldOutcome } from '@/lib/services/FieldOutcomeService';
 import type { AddressCardEngagement } from '@/lib/cards/campaign-engagement';
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -58,17 +59,9 @@ export function RecipientsTable({ recipients, campaignId, onRefresh, cardActivit
   const handleMarkSent = async (recipientId: string) => {
     setLoading(recipientId);
     try {
-      const { error } = await supabase.rpc('record_campaign_address_outcome', {
-        p_campaign_id: campaignId,
-        p_campaign_address_id: recipientId,
-        p_status: 'no_answer',
-        p_notes: '',
-        p_occurred_at: new Date().toISOString(),
+      await recordFieldOutcome(supabase, {
+        campaignId, addressIds: [recipientId], status: 'no_answer',
       });
-
-      if (error) {
-        throw error;
-      }
       if (onRefresh) {
         await onRefresh();
       } else {

@@ -354,7 +354,12 @@ struct WolfGridWebView: NSViewRepresentable {
                     else if action == "message-attachments" {
                         guard let id = input["contactId"] as? String, UUID(uuidString: id) != nil else { throw CocoNativeError(message: "Choose a CRM conversation first.") }
                         result = cocoMessages.choose(contactID: id, scope: session)
-                    } else { result = try await cocoMessages.send(input: input, view: view, current: { self.session == startedSession }) }
+                    } else {
+                        let page = view.url
+                        result = try await cocoMessages.send(input: input, view: view, current: {
+                            self.session == startedSession && self.generation == started && view.url == page && self.trusted(view.url)
+                        })
+                    }
                 case "contacts-review":
                     guard !fromRuntime, let user = input["userId"] as? String, let workspace = input["workspaceId"] as? String,
                           session == user + ":" + workspace, let view = message.webView, let parent = view.window,

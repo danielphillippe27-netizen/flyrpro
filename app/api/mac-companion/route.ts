@@ -46,14 +46,15 @@ export async function GET(request: NextRequest) {
       const before=params.get('before'),beforeId=params.get('beforeId');if(before){z.string().datetime().parse(before);uuid.parse(beforeId);}const beforeNull=params.get('beforeNull')==='true';if(beforeNull)uuid.parse(beforeId);
       const contact = await api.from('contacts').select('id').eq('id', contactId).eq('user_id', user.id).eq('workspace_id', ws).maybeSingle();
       if (contact.error || !contact.data) throw new CrmRequestError('Contact unavailable.', 404);
-      const [history, state] = await Promise.all([
+      const [history, state, permission] = await Promise.all([
         (() => { let query = api.from('mac_contact_messages').select('id,external_id,direction,body,body_status,service,sent_at,has_attachments,attachment_manifest').eq('user_id', user.id).eq('contact_id', contactId); if (messageId) query = query.eq('id', messageId);if(before)query=query.or(`sent_at.lt.${before},and(sent_at.eq.${before},id.lt.${beforeId}),sent_at.is.null`);if(beforeNull)query=query.is('sent_at',null).lt('id',beforeId!);return query.order('sent_at', { ascending: false, nullsFirst: false }).order('id',{ascending:false}).range(offset, offset + 99); })(),
         api.from('mac_contact_sync').select('last_sync_at').eq('user_id', user.id).eq('contact_id', contactId).order('last_sync_at', { ascending: false, nullsFirst: false }).limit(1),
+        api.from('mac_message_permissions').select('history_range,import_after,identifiers').eq('user_id', user.id).eq('workspace_id', ws).eq('contact_id', contactId).eq('enabled', true).maybeSingle(),
       ]);
-      if (history.error || state.error) throw new CrmRequestError('Private history is unavailable.', 503);
+      if (history.error || state.error || permission.error) throw new CrmRequestError('Private history is unavailable.', 503);
       const files=await api.from('crm_message_attachments').select('message_guid,guid,file_name,mime_type,byte_count,status').eq('user_id',user.id).eq('workspace_id',ws).eq('contact_id',contactId).in('message_guid',(history.data??[]).map((m: {external_id?:string})=>m.external_id).filter((v):v is string=>typeof v==='string'));
       const messages=(history.data??[]).map(m=>({...m,attachments:[...(Array.isArray(m.attachment_manifest)?m.attachment_manifest:[]).filter((f:{guid:string})=>!(files.data??[]).some(saved=>saved.message_guid===m.external_id&&saved.guid===f.guid)),...(files.data??[]).filter(f=>f.message_guid===m.external_id).map(f=>({guid:f.guid,fileName:f.file_name,mimeType:f.mime_type,byteCount:f.byte_count,status:f.status}))]}));
-      return privateJson({ messages, more: history.data.length === 100, lastSyncAt: state.data[0]?.last_sync_at ?? null });
+      return privateJson({ messages, more: history.data.length === 100, lastSyncAt: state.data[0]?.last_sync_at ?? null, permission: permission.data });
     }
     const [pref, devices] = await Promise.all([
       api.from('mac_crm_preferences').select('sync_enabled,ai_messages_enabled,revision,sync_consent_at,ai_consent_at,poll_interval_seconds,attachment_sync_enabled').eq('user_id', user.id).eq('workspace_id', ws).maybeSingle(),
