@@ -21,7 +21,7 @@ const navItems = [
   { href: '/campaigns', label: 'Campaign', icon: Target },
   { href: '/farms', label: 'Farm', icon: FarmIcon },
   { href: '/activity', label: 'Activity', icon: Activity },
-  { href: '/leads', label: 'Leads', icon: Users },
+  { href: '/leads', label: 'Contacts', icon: Users },
   { href: '/appointments', label: 'Appointments', icon: Clock },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays },
   { href: '/stats', label: 'Performance', icon: Gauge },
