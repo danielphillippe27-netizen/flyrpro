@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ReportMetricCard as MetricCard } from '@/components/ui/report-metric-card';
 import {
   Table,
   TableBody,
@@ -268,30 +269,6 @@ function sourceLabel(source: ReportResponse['source']): string {
   if (source === 'member_aggregate') return 'Selected members';
   if (source === 'member_aggregate_fallback') return 'Member snapshot fallback';
   return 'No snapshot';
-}
-
-type MetricCardProps = {
-  icon: typeof DoorOpen;
-  label: string;
-  value: string;
-  helper: string;
-};
-
-function MetricCard({ icon: Icon, label, value, helper }: MetricCardProps) {
-  return (
-    <Card className={SURFACE_CLASS}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Icon className="h-4 w-4 text-primary" />
-          <span>{label}</span>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-3xl font-semibold tracking-tight text-foreground">{value}</div>
-        <p className="mt-1 truncate text-xs text-muted-foreground">{helper}</p>
-      </CardContent>
-    </Card>
-  );
 }
 
 function buildCsv(report: ReportResponse): string {

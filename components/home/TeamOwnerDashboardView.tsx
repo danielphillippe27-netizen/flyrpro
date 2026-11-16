@@ -318,7 +318,7 @@ export function TeamOwnerDashboardView() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="summary" className="space-y-4">
-            {!isSelfServeDemo && <SalesCard />}
+            {!isSelfServeDemo && <SalesCard range={range} />}
             <TeamDashboardTab
               range={range}
               memberIds={memberIds}
@@ -334,7 +334,7 @@ export function TeamOwnerDashboardView() {
             <TeamActivityTab range={range} memberIds={memberIds} />
           </TabsContent>
           <TabsContent value="reporting" className="space-y-4">
-            {!isSelfServeDemo && sales?.enabled && <ProSalesReport embedded />}
+            {!isSelfServeDemo && sales?.enabled && <ProSalesReport embedded fullWidth />}
             {canUseAdvancedReporting || isSelfServeDemo ? (
               <TeamReportingTab memberIds={memberIds} demoReport={showDemoReport} />
             ) : (

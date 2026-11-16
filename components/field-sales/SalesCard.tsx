@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
+import type { TeamControlsRange } from "@/components/home/team/TeamControlsBar";
 import { ProSalesHome } from "./ProSalesHome";
 import { useFieldSales, money } from "@/lib/field-sales/client";
-export function SalesCard() {
+export function SalesCard({ range }: { range?: TeamControlsRange }) {
   const scope = useFieldSales({}, true);
   if (!scope.data?.enabled) return null;
-  if (scope.data.pro_sales_version) return <ProSalesHome key={`${scope.workspaceId}:${scope.data.user_id}`} />;
+  if (scope.data.pro_sales_version) return <ProSalesHome range={range} key={`${scope.workspaceId}:${scope.data.user_id}`} />;
   return (
     <SalesCardContent key={`${scope.workspaceId}:${scope.data.user_id}`} />
   );
