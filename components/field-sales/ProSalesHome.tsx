@@ -25,12 +25,12 @@ export function ProSalesHome({ compact = false, range }: { compact?: boolean; ra
       <Metric label="Appointments set" value={String(d.activity.appointments_set ?? "—")} />
       <Metric label="Appointments closed" value={String(d.activity.appointments_closed ?? "—")} />
     </div>}
-    {!compact && <>
-    {!range && <div className="grid grid-cols-2 gap-4">
+    {!compact && !range && <>
+    <div className="grid grid-cols-2 gap-4">
       <Metric label="Sales today" value={String(d.daily.sales)} />
       <Metric label="Close rate" value={d.activity.close_rate === null ? "—" : `${d.activity.close_rate}%`} />
-    </div>}
-    {!range && manager && <div className="grid grid-cols-2 gap-4 sm:grid-cols-4"><Metric label="Sales this month" value={String(d.monthly.sales)} /><Metric label="Sold this month" value={money(d.monthly.sold_value_minor, d.currency)} /><Metric label="Completed this month" value={money(d.monthly.completed_value_minor, d.currency)} /><Metric label="Collected this month" value={money(d.monthly.collected_revenue_minor, d.currency)} /></div>}
+    </div>
+    {manager && <div className="grid grid-cols-2 gap-4 sm:grid-cols-4"><Metric label="Sales this month" value={String(d.monthly.sales)} /><Metric label="Sold this month" value={money(d.monthly.sold_value_minor, d.currency)} /><Metric label="Completed this month" value={money(d.monthly.completed_value_minor, d.currency)} /><Metric label="Collected this month" value={money(d.monthly.collected_revenue_minor, d.currency)} /></div>}
     <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">{([['Doors', d.activity.doors], ['Conversations', d.activity.conversations], ['Leads', d.activity.leads]] as const).map(([label, count]) => <p key={label}><strong className="tabular-nums">{count}</strong> {label}</p>)}</div>
     {d.active_goals.map(g => <Link href="/sales/goals" key={g.id} className="block space-y-2 rounded-xl bg-muted/40 p-4"><div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{g.title}</span><span className="tabular-nums">{goalValue(g, g.actual)} / {goalValue(g, g.target)}</span></div>{g.progress_percent !== undefined && <progress aria-label={`${g.title} progress`} className="h-2 w-full" max={100} value={Math.max(0, Math.min(100, Number(g.progress_percent)))} />}<p className="text-sm text-muted-foreground">{g.progress_percent !== undefined ? `${g.progress_percent}% · ${goalValue(g, g.remaining)} remaining` : "Waiting for enough evidence"}{g.required_daily !== undefined ? ` · ${goalValue(g, g.required_daily)}/day required` : ""}</p></Link>)}
     {!d.active_goals.length && <Link className="text-sm underline" href="/sales/goals">Set a {manager ? "workspace" : "personal"} goal →</Link>}
