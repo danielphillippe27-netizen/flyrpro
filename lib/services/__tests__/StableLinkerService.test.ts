@@ -733,7 +733,7 @@ async function run() {
     assertEqual(match.matchType, 'orphan');
   });
 
-  test('Parcel-free building accepts a unique footprint within 15m', () => {
+  test('Parcel-free building beyond 10m stays unresolved for the database guard', () => {
     const service = createStableLinkerHarness();
     const rowBuilding = makeBuilding(
       'parcel-less-row',
@@ -749,8 +749,7 @@ async function run() {
       new Set()
     );
 
-    assertEqual(match.matchType, 'proximity_verified');
-    assertTrue(match.distanceMeters > 10 && match.distanceMeters <= 15, 'Expected footprint distance within fallback band');
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Parcel-backed match remains eligible beyond the detached 10m cap', () => {
@@ -824,7 +823,7 @@ async function run() {
     assertTrue(match.distanceMeters <= 10, 'Expected fixture inside the automatic band');
   });
 
-  test('Detached exact-address match from 10m through 12m uses parcel-free fallback', () => {
+  test('Detached exact-address match from 10m through 12m stays unresolved', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'review-band-home',
@@ -835,7 +834,7 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(address, [building]);
 
-    assertEqual(match.matchType, 'proximity_verified');
+    assertEqual(match.matchType, 'orphan');
   });
 
   test('Linker summary reports unmatched addresses as orphans', () => {
@@ -1004,6 +1003,19 @@ async function run() {
     const summary = await service.runSpatialJoin('strict-campaign', { features: buildings }, 'test', { parcelsGeoJSON: { features: parcels } });
     return { state, summary };
   }
+
+  await testAsync('A distance rejected by the database never blocks valid links in the batch', async () => {
+    const nearby = makeBuilding('too-far', rectangle(-79.02020,43.02000,-79.02000,43.02020), { primaryStreet: 'Crane Court' });
+    const contained = makeBuilding('valid-home', rectangle(-79.0302,43.03,-79.03,43.0302));
+    const result = await strictRun([
+      makeAddress('5350',-79.01984,43.02010,'Crane Court'),
+      makeAddress('10',-79.0301,43.0301,'Main St'),
+    ],[nearby,contained]);
+    assertEqual(result.summary.matched,1);
+    assertEqual(result.summary.orphans,1);
+    assertEqual(result.state.buildingAddressLinks?.length,1);
+    assertEqual(result.state.buildingAddressLinks?.[0].building_id,'valid-home');
+  });
 
   await testAsync('Screenshot regression: eight addresses on two streets cannot claim one home', async () => {
     const home = makeBuilding('home', rectangle(-79.0002, 42.9998, -78.9998, 43.0002), { unitsCount: 8 });
