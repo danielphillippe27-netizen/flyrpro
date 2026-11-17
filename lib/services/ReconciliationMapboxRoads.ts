@@ -25,7 +25,8 @@ export async function loadMapboxRoads(
   {
     token = process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
     signal,
-  }: { token?: string; signal?: AbortSignal } = {},
+    includeUnnamed = false,
+  }: { token?: string; signal?: AbortSignal; includeUnnamed?: boolean } = {},
 ): Promise<Feature[]> {
   if (!token) throw new Error('Mapbox road lookup is unavailable');
   if (!points.length) return [];
@@ -50,7 +51,8 @@ export async function loadMapboxRoads(
     for (let i = 0; i < layer.length; i++) {
       const f = layer.feature(i);
       const name = f.properties.name || f.properties['name_en'];
-      if (typeof name !== 'string' || !name || !['street', 'street_limited', 'secondary', 'tertiary', 'primary'].includes(String(f.properties.class))) continue;
+      if (!includeUnnamed && (typeof name !== 'string' || !name)) continue;
+      if (!['street', 'street_limited', 'secondary', 'tertiary', 'primary'].includes(String(f.properties.class))) continue;
       const feature = f.toGeoJSON(tx, ty, ZOOM) as Feature;
       if (feature.geometry.type === 'LineString') roads.push(feature);
       if (feature.geometry.type === 'MultiLineString') for (const coordinates of feature.geometry.coordinates) roads.push({ ...feature, geometry: { type: 'LineString', coordinates } });

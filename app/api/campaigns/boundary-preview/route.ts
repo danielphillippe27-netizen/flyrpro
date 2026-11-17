@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
     const [west, south, east, north] = turf.bbox(buffered);
     const roads = await loadMapboxRoads([[west, south], [east, north]], {
       signal: AbortSignal.timeout(8_000),
+      includeUnnamed: true,
     });
     return NextResponse.json({ polygon: previewRoadBoundary(polygon, roads) });
   } catch {
