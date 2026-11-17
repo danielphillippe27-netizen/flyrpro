@@ -66,3 +66,19 @@ test('dragging supersedes the pending snap and keeps the vertex in place in the 
     assert.deepEqual(h.feature.coordinates[0],[[0,0],[11,1],[10,10],[0,10]]);
   } finally {h.controller.dispose();globalThis.fetch=original;}
 });
+
+test('tapping a pin before snapping completes does not discard its pending snap', async()=>{
+  const original=globalThis.fetch;
+  globalThis.fetch=async(_url,options)=>new Response(JSON.stringify({points:JSON.parse(options!.body as string).points.map(([x,y]:number[])=>[x+.01,y])}));
+  const h=harness();
+  try {
+    h.click(0,0);h.click(10,0);h.click(10,10);
+    const event={featureTarget:{properties:{meta:'vertex',coord_path:'0.0'}},lngLat:{lng:0,lat:0}};
+    h.mode.onMouseDown.call(h.context,h.state,event);
+    h.mode.onClick.call(h.context,h.state,event);
+    h.mode.onStop.call(h.context,h.state);
+    await pause();
+    assert.equal(h.feature.coordinates[0][2][0],10.01);
+    assert.equal(h.busy,false);
+  } finally {h.controller.dispose();globalThis.fetch=original;}
+});

@@ -89,7 +89,8 @@ export function createCampaignDrawModes(defaults: Modes, options: {
     onSetup(this: Context) { cancel(); return defaults.draw_polygon.onSetup.call(this); },
     onClick(this: Context, state: DrawingState, event: DrawEvent) {
       if (event.featureTarget?.properties.meta === 'vertex') {
-        if (state.polygon.coordinates[0].length >= 3 && !state.moved) {
+        schedule(this, state.polygon);
+        if (event.featureTarget.properties.coord_path === '0.0' && state.polygon.coordinates[0].length >= 3 && !state.moved) {
           this.changeMode('simple_select', { featureIds: [state.polygon.id] });
         }
         return;
@@ -148,6 +149,10 @@ export function createCampaignDrawModes(defaults: Modes, options: {
       defaults.direct_select.fireUpdate.call(this);
       this.getSelected().forEach(feature => schedule(this, feature));
     },
+    onClick(this: Context, state: { feature: DrawFeature }, event: DrawEvent) {
+      defaults.direct_select.onClick.call(this, state, event);
+      schedule(this, state.feature);
+    },
     clickNoTarget(this: Context, state: { feature: DrawFeature }, event: DrawEvent) { insert(this, state.feature, event); },
     clickActiveFeature(this: Context, state: { feature: DrawFeature }, event: DrawEvent) { insert(this, state.feature, event); },
     onMouseDown(this: Context, state: unknown, event: DrawEvent) {
@@ -176,7 +181,7 @@ export function createCampaignDrawModes(defaults: Modes, options: {
     modes: {
       ...defaults,
       draw_polygon: { ...drawPolygon, onTap: drawPolygon.onClick, onTouchStart: drawPolygon.onMouseDown, onTouchEnd: drawPolygon.onMouseUp },
-      direct_select: { ...directSelect, onTouchStart: directSelect.onMouseDown, onTouchEnd: directSelect.onMouseUp },
+      direct_select: { ...directSelect, onTap: directSelect.onClick, onTouchStart: directSelect.onMouseDown, onTouchEnd: directSelect.onMouseUp },
       simple_select: simpleSelect,
     },
   };
