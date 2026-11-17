@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Resend, type GetReceivingEmailResponseSuccess, type WebhookEventPayload } from 'resend';
+import {
+  inboundEmailText,
+  parseRealtorCaInquiry,
+  isRealtorCaSender,
+  realtorCaRouteToken,
+} from '@/lib/email/realtor-ca';
 import { createAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -318,6 +324,52 @@ async function notifyWorkspaceMembers(context: {
   }
 }
 
+async function receiveRealtorCaEmail(
+  routes: { address: string; token: string }[],
+  email: GetReceivingEmailResponseSuccess | null,
+  emailId: string,
+) {
+  if (!email) return NextResponse.json({ error: 'Could not fetch inbound email' }, { status: 503 });
+
+  const from = extractEmailAddress(email.from);
+  const subject = cleanText(email.subject);
+  const verification = from === 'forwarding-noreply@google.com' && /forwarding confirmation/i.test(subject);
+  if (!isRealtorCaSender(from) && !verification) return NextResponse.json({ ok: true });
+
+  const text = cleanText(email.text);
+  const html = cleanText(email.html);
+  const inquiry = parseRealtorCaInquiry({ from: email.from, subject, text, html, replyTo: email.reply_to ?? [] });
+  const body = text || inboundEmailText(html);
+  const verificationCode = verification
+    ? body.match(/confirmation code\s*:\s*(\d{6,12})\b/i)?.[1] ?? subject.match(/\(#(\d{6,12})\)/)?.[1]
+    : undefined;
+  if (verification && !verificationCode) return NextResponse.json({ ok: true });
+
+  const admin = createAdminClient();
+  for (const { address, token } of routes) {
+    const { error } = await admin.rpc('receive_realtor_ca_email', {
+      route_token: token,
+      mail: {
+        verificationCode,
+        messageId: cleanText(email.message_id) || emailId,
+        from,
+        to: address,
+        subject: subject || 'REALTOR.ca inquiry',
+        body,
+        preview: buildPreview(body),
+        receivedAt: getReceivedAt(email.created_at),
+      },
+      inquiry,
+    });
+    if (error) {
+      console.error('[email/inbound/resend] REALTOR.ca intake failed', { code: error.code });
+      return NextResponse.json({ ok: false }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
 export async function POST(request: NextRequest) {
   const payload = await request.text();
   let event: WebhookEventPayload | null = null;
@@ -338,6 +390,19 @@ export async function POST(request: NextRequest) {
   if (!emailId) return NextResponse.json({ ok: true });
 
   const fullEmail = await fetchFullEmail(emailId);
+  const forwardingAddresses = Object.entries(fullEmail?.headers ?? {})
+    .filter(([name]) => ['x-forwarded-to', 'delivered-to'].includes(name.toLowerCase()))
+    .map(([, value]) => value);
+  const routes = [...new Set([
+    ...normalizeToAddresses(eventData.to),
+    ...normalizeToAddresses(fullEmail?.to),
+    ...forwardingAddresses,
+  ].map(extractEmailAddress).filter((address): address is string => Boolean(address)))].flatMap((address) => {
+    const token = realtorCaRouteToken(address);
+    return token ? [{ address, token }] : [];
+  });
+  if (routes.length) return receiveRealtorCaEmail(routes, fullEmail, emailId);
+
   const toAddresses = normalizeToAddresses(fullEmail?.to ?? eventData.to);
   const receivingDomain = getEnv('RESEND_INBOUND_DOMAIN') ?? INBOUND_DOMAIN;
   const relevantToAddresses = toAddresses.filter((address) => address.endsWith(`@${receivingDomain}`) || address.includes(`@${receivingDomain}`));

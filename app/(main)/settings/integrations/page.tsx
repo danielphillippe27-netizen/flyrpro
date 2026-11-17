@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 
 
+import { RealtorCaIntegrationCard } from '@/components/settings/RealtorCaIntegrationCard';
 import { GmailConnection } from '@/components/outreach/GmailConnection';
 
 
@@ -1246,7 +1247,7 @@ export default function IntegrationsPage() {
                   ].filter((status) => status?.connected).length} connected
                 </span>
                 <span className="rounded-full bg-muted px-3 py-1.5 font-medium">
-                  {5 + VISIBLE_CONTRACTOR_INTEGRATIONS.length} available
+                  {5 + VISIBLE_CONTRACTOR_INTEGRATIONS.length + Number(Boolean(currentWorkspaceId))} available
                 </span>
               </div>
             </div>
@@ -1273,6 +1274,10 @@ export default function IntegrationsPage() {
           )}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+
+          {currentWorkspaceId && (
+            <RealtorCaIntegrationCard key={currentWorkspaceId} workspaceId={currentWorkspaceId} />
+          )}
 
           {/* Follow Up Boss Integration */}
           <Card>

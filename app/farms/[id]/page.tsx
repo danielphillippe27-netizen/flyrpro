@@ -14,6 +14,7 @@ import { useParams } from 'next/navigation';
 import {
   BarChart3,
   CalendarDays,
+  ChevronDown,
   Clock3,
   DollarSign,
   ListTodo,
@@ -219,6 +220,9 @@ export default function FarmPage() {
     if (new URLSearchParams(window.location.search).get('tab') === 'plan') setActiveTab('overview');
   }, []);
   const [chartSessionIds, setChartSessionIds] = useState<string[] | null>(null);
+  const [startingRoundSession, setStartingRoundSession] = useState(false);
+  const [startRoundSessionError, setStartRoundSessionError] = useState('');
+  const startingRoundSessionRef = useRef(false);
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTouch, setSelectedTouch] = useState<FarmTouch | null>(null);
@@ -235,6 +239,7 @@ export default function FarmPage() {
   const [planError, setPlanError] = useState('');
   const pendingPlanCreations = useRef(new Map<string, FarmTouch>());
   const [planDrafts, setPlanDrafts] = useState<PlannerTouchDraft[]>([]);
+  const loadedPlanKey = useRef<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [mapTabVersion, setMapTabVersion] = useState(0);
   const [configName, setConfigName] = useState('');
@@ -518,8 +523,12 @@ export default function FarmPage() {
   }, [defaultPlannedHomesTarget, farm, resolvedTouches]);
 
   useEffect(() => {
+    // Session refreshes should leave edits in place when scheduled touchpoints are unchanged.
+    const key = JSON.stringify([farmId, plannerSlots]);
+    if (loadedPlanKey.current === key) return;
+    loadedPlanKey.current = key;
     setPlanDrafts(plannerSlots);
-  }, [plannerSlots]);
+  }, [farmId, plannerSlots]);
 
   const dedupedLinkedCampaignAddresses = useMemo(() => {
     const logicalAddresses = new Map<string, CampaignAddress>();
@@ -1024,6 +1033,28 @@ export default function FarmPage() {
     }
   }, [currentWorkspaceId, farm, planDrafts, touches]);
 
+  const fieldTouchIds = new Set(activitySessions.map(session => session.farm_touch_id));
+  const manualSessions = touches.filter(touch => touch.started_at && !fieldTouchIds.has(touch.id));
+  const openManualSessions = manualSessions.filter(touch => touch.status === 'in_progress');
+  const completedManualSessions = manualSessions.filter(touch => touch.status === 'completed');
+
+  const handleStartRoundSession = async () => {
+    if (!farm?.active_cycle_number || openManualSessions.length || startingRoundSessionRef.current) return;
+    startingRoundSessionRef.current = true;
+    setStartingRoundSession(true);
+    setStartRoundSessionError('');
+    try {
+      const touch = await FarmTouchService.startRoundSession(farm.id, farm.workspace_id ?? currentWorkspaceId);
+      setTouches(current => current.some(item => item.id === touch.id) ? current : [...current, touch]);
+      await loadData(userId);
+    } catch (error) {
+      setStartRoundSessionError(error instanceof Error ? error.message : 'Failed to start farm session.');
+    } finally {
+      startingRoundSessionRef.current = false;
+      setStartingRoundSession(false);
+    }
+  };
+
   const handleStartSession = async (touch: FarmTouch) => {
     try {
       await FarmTouchService.startTouch(touch.id);
@@ -1189,6 +1220,8 @@ export default function FarmPage() {
         <FarmNavigation />
 
         <TabsContent value="overview" className="mt-1 space-y-4">
+          <h1 className="text-xl font-semibold">{farm.name}</h1>
+
           <FarmPerformanceDashboard
             name={farm.name}
             addresses={addresses}
@@ -1201,32 +1234,6 @@ export default function FarmPage() {
           />
           <FarmActivityPace sessions={activitySessions} touches={resolvedTouches} totalHomes={addresses.length} startDate={farm.start_date} endDate={farm.end_date} />
           <DurhamCommercialReview farmId={farm.id} />
-          <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
-          <FarmTouchPlan
-            drafts={planDrafts}
-            saving={savingPlan}
-            message={planMessage}
-            error={planError}
-            onChange={handlePlanDraftChange}
-            onReset={handleResetPlan}
-            onSave={handleSavePlan}
-            onRemove={(slotId) => { setPlanMessage(''); setPlanError(''); setPlanDrafts(current => current.filter(draft => draft.slotId !== slotId)); }}
-            onAdd={() => {
-              setPlanMessage('');
-              setPlanError('');
-              setPlanDrafts(current => {
-                const cycle = analytics.currentCycleNumber;
-                const date = localPlanDate();
-                return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
-                  suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
-              });
-            }}
-          />
-          <details className="rounded-xl border border-border bg-card p-4">
-            <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
-            <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
-          </details>
-          </FarmPlanModes>
 
           <details className="rounded-2xl border border-border/60 bg-card p-5">
             <summary className="cursor-pointer text-sm font-medium">More analytics <span className="ml-2 text-xs font-normal text-muted-foreground">Cards, sessions, spend & cadence</span></summary>
@@ -1339,11 +1346,63 @@ export default function FarmPage() {
             </div>
           </details>
 
+          <details className="group rounded-xl border border-border bg-card">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl p-4 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+              <CalendarDays className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <span className="flex-1">Farm Plan</span>
+              {farm.active_cycle_number && <span className="font-normal text-muted-foreground">Round {farm.active_cycle_number}</span>}
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground group-open:rotate-180" aria-hidden="true" />
+            </summary>
+            <div className="space-y-4 border-t border-border p-4">
+              {farm.active_cycle_number ? (
+                <>
+                  <p className="text-xl font-semibold">Current Round · {farm.active_cycle_number}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {analytics.currentCycleCoverageCount.toLocaleString()} of {addresses.length.toLocaleString()} homes visited
+                  </p>
+                </>
+              ) : <p className="text-sm text-muted-foreground">Saved round unavailable. Refresh the farm to try again.</p>}
+              <details>
+                <summary className="cursor-pointer text-sm font-medium">Manage Round</summary>
+                <div className="mt-3">
+                  <FarmCycleSettings farm={farm} touches={resolvedTouches} outcomes={touchOutcomes} onChanged={() => loadData(userId)} />
+                </div>
+              </details>
+
+              <FarmPlanModes mode={farmPlanMode} farmId={farm.id} addresses={addresses} touches={touches} outcomes={touchOutcomes} onAddContact={handleOpenCreateContact}>
+                <FarmTouchPlan
+                  drafts={planDrafts}
+                  saving={savingPlan}
+                  message={planMessage}
+                  error={planError}
+                  onChange={handlePlanDraftChange}
+                  onReset={handleResetPlan}
+                  onSave={handleSavePlan}
+                  onRemove={(slotId) => { setPlanMessage(''); setPlanError(''); setPlanDrafts(current => current.filter(draft => draft.slotId !== slotId)); }}
+                  onAdd={() => {
+                    setPlanMessage('');
+                    setPlanError('');
+                    setPlanDrafts(current => {
+                      const cycle = analytics.currentCycleNumber;
+                      const date = localPlanDate();
+                      return [...current, { slotId: crypto.randomUUID(), touchId: null, sequenceNumber: cycle, cycleNumber: cycle,
+                        suggestedDate: date, scheduledDate: date, mode: 'doorknock', title: '', notes: '', homesTarget: defaultPlannedHomesTarget }];
+                    });
+                  }}
+                />
+                <details className="rounded-xl border border-border bg-card p-4">
+                  <summary className="cursor-pointer text-sm font-medium">Daily door assignments</summary>
+                  <div className="mt-4"><FarmDoorPlanner farmId={farm.id} addresses={addresses} onHomesImported={() => loadData(userId)} onAddContact={handleOpenCreateContact} /></div>
+                </details>
+              </FarmPlanModes>
+            </div>
+          </details>
         </TabsContent>
 
 
 
-        <TabsContent value="map" className="mt-1 min-h-0 overflow-hidden rounded-xl border border-border bg-card">
+        <TabsContent value="map" className="mt-1 flex min-h-0 flex-col gap-3">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card" role="region" aria-label="Farm map">
             <FarmMapView
               key={`${farm.id}:${mapTabVersion}:${analytics.currentCycleNumber}`}
               farm={farm}
@@ -1359,6 +1418,29 @@ export default function FarmPage() {
               toolbarContent={<Badge variant="secondary">Current progress</Badge>}
               showOutcomeControls={false}
             />
+          </div>
+          <div className="max-h-[45%] shrink-0 space-y-2 overflow-y-auto">
+            <Button
+              type="button"
+              className="w-full sm:w-auto"
+              disabled={!farm.active_cycle_number || startingRoundSession || openManualSessions.length > 0}
+              onClick={() => void handleStartRoundSession()}
+            >
+              {startingRoundSession ? 'Starting…' : 'Start Session'}
+            </Button>
+            {startRoundSessionError && <p role="alert" className="text-sm text-destructive">{startRoundSessionError}</p>}
+            {openManualSessions.map(touch => (
+              <div key={touch.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p>
+                  <p className="text-xs text-muted-foreground">Session in progress{touch.cycle_number ? ` · Round ${touch.cycle_number}` : ''}</p>
+                </div>
+                <Button type="button" size="sm" variant="outline" onClick={() => handleOpenComplete(touch)}>
+                  Complete Session
+                </Button>
+              </div>
+            ))}
+          </div>
         </TabsContent>
 
         <TabsContent value="activity" className="mt-1 space-y-4">
@@ -1382,6 +1464,23 @@ export default function FarmPage() {
             </div>
             <FarmActivityCalendar farmId={farm.id} campaignId={linkedCampaignId} createdAt={farm.created_at} />
           </div>
+          {completedManualSessions.length > 0 && (
+            <details className="space-y-3 rounded-xl border border-border bg-card p-4">
+              <summary className="cursor-pointer text-sm font-medium">Completed web sessions</summary>
+              <ul className="divide-y divide-border">
+                {completedManualSessions.map(touch => (
+                  <li key={touch.id} className="py-3">
+                    <p className="text-sm font-medium">{touch.title || MODE_LABELS[touch.mode ?? 'doorknock']}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDateLabel(touch.completed_date ?? touch.started_at)}
+                      {touch.cycle_number ? ` · Round ${touch.cycle_number}` : ''}
+                      {touch.homes_reached == null ? '' : ` · ${touch.homes_reached.toLocaleString()} homes reported`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </TabsContent>
 
         <TabsContent value="leads" className="mt-1">

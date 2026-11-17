@@ -327,6 +327,26 @@ export class FarmService {
 export class FarmTouchService {
   private static client = createClient();
 
+  static async startRoundSession(farmId: string, workspaceId?: string | null): Promise<FarmTouch> {
+    const now = new Date().toISOString();
+    // The insert trigger assigns the saved round while holding the farm lock.
+    const { data, error } = await this.client.from('farm_touches').insert({
+      farm_id: farmId,
+      workspace_id: workspaceId ?? undefined,
+      mode: 'doorknock',
+      type: getLegacyFarmTouchType('doorknock'),
+      title: getDefaultFarmTouchTitle('doorknock'),
+      scheduled_date: now,
+      date: formatLegacyTouchDate(now),
+      status: 'in_progress',
+      started_at: now,
+      completed: false,
+    }).select().single();
+
+    if (error) throw new Error(formatError(error));
+    return withFarmTouchDefaults(data as FarmTouch);
+  }
+
   static async createSession(payload: {
     farmId: string;
     workspaceId?: string | null;

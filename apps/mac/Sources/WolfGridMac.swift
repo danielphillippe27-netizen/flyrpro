@@ -41,6 +41,7 @@ struct WolfGridWebView: NSViewRepresentable {
     func makeCoordinator() -> Bridge { bridge }
     func makeNSView(context: Context) -> WKWebView {
         let view = bridge.makeWebView()
+        view.uiDelegate = bridge
         bridge.windows.insert(ObjectIdentifier(view))
         bridge.visibleViews[ObjectIdentifier(view)] = WeakMacView(view)
         view.load(URLRequest(url: bridge.startURL(for: view)))
@@ -66,7 +67,7 @@ struct WolfGridWebView: NSViewRepresentable {
     }
 }
 
-@MainActor final class Bridge: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandlerWithReply {
+@MainActor final class Bridge: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
     let origin = URL(string: Bundle.main.object(forInfoDictionaryKey: "WolfGridWebOrigin") as? String ?? "https://wolfgrid.app")!
     var windows = Set<ObjectIdentifier>()
     var visibleViews: [ObjectIdentifier: WeakMacView] = [:]
@@ -194,6 +195,17 @@ struct WolfGridWebView: NSViewRepresentable {
         let view = MacWindowWebView(frame: .zero, configuration: config); view.connection = self; view.navigationDelegate = self
         view.allowsBackForwardNavigationGestures = true
         return view
+    }
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        guard frame.isMainFrame, trusted(frame.request.url), trusted(webView.url),
+              windows.contains(ObjectIdentifier(webView)), let window = webView.window else { return nil }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = !parameters.allowsDirectories
+        guard await panel.beginSheetModal(for: window) == .OK else { return nil }
+        return panel.urls
     }
     private func trusted(_ url: URL?) -> Bool {
         guard let url else { return false }
