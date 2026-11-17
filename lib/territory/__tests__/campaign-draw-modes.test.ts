@@ -7,10 +7,10 @@ function harness() {
   let busy = false;
   let error: string|null = null;
   const changes: string[] = [];
-  const feature = { id:'boundary',type:'Polygon',coordinates:[[]] as number[][][],
-    setCoordinates(rings:number[][][]){ this.coordinates=rings; },
+  const feature = { id:'boundary',type:'Polygon',coordinates:[[]] as [number, number][][],
+    setCoordinates(rings:[number, number][][]){ this.coordinates=rings; },
     updateCoordinate(path:string,lng:number,lat:number){this.coordinates[0][Number(path.split('.')[1])]=[lng,lat];},
-    toGeoJSON(){return {type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[this.coordinates[0].concat([this.coordinates[0][0]])]}};},
+    toGeoJSON(): GeoJSON.Feature<GeoJSON.Polygon>{return {type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[this.coordinates[0].concat([this.coordinates[0][0]])]}};},
   };
   let alive=true;
   const context = {
