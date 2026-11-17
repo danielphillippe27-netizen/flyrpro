@@ -7,6 +7,7 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import RBush from 'rbush';
+import { isAccessoryBuilding } from './ParcelPinPlacement';
 import { booleanIntersects } from '@turf/turf';
 import type { Polygon, MultiPolygon } from 'geojson';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
@@ -493,7 +494,7 @@ export class StableLinkerService {
       if (building.geometry?.type !== 'Polygon' && building.geometry?.type !== 'MultiPolygon') {
         return false;
       }
-      if (this.isAddressProxyBuildingFeature(building)) {
+      if (this.isAddressProxyBuildingFeature(building) || isAccessoryBuilding(building as GeoJSON.Feature)) {
         return false;
       }
 

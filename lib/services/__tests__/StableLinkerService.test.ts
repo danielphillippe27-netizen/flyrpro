@@ -1046,6 +1046,18 @@ async function run() {
     assertEqual(result.summary.matched,0);
   });
 
+  await testAsync('A known address links to its home despite a garage on the same parcel', async () => {
+    const home = makeBuilding('home', rectangle(-79.0003,43,-79.0001,43.0002));
+    const garage = makeBuilding('garage', rectangle(-78.9997,43,-78.9995,43.0002));
+    Object.assign(garage.properties, { building_type: 'garage' });
+    const result = await strictRun([makeAddress('10',-79,42.9998,'Main St')], [home,garage],
+      [makeParcel('lot',rectangle(-79.001,42.999,-78.999,43.001))]);
+    assertEqual(result.summary.matched,1);
+    assertEqual(result.summary.matchBreakdown.parcelVerified,1);
+    assertEqual(result.state.buildingAddressLinks?.[0].building_id,'home');
+    assertEqual(result.state.campaignAddresses?.length,1);
+  });
+
   await testAsync('Unique parcel bridge succeeds and repeated optimization preserves it', async () => {
     const buildings=[makeBuilding('home',rectangle(-79.0003,43,-79.0001,43.0002))];
     const lot=makeParcel('unique',rectangle(-79.001,42.999,-78.999,43.001));
