@@ -54,3 +54,17 @@ test('rejects self-intersecting and malformed input', () => {
     point(0, 0), point(100, 100), point(100, 0), point(0, 100), point(0, 0),
   ]] }), false);
 });
+
+test('keeps an eligible edge when the shared corner cannot reach the intersection', () => {
+  const corner = point(12, 12);
+  const drawn = turf.polygon([[
+    corner, point(120, 8), point(120, 100), point(13, 100), corner,
+  ]]).geometry;
+  const result = previewRoadBoundary(drawn, [
+    line('Main', [[-20, 0], [150, 0]]),
+    line('Cross', [[0, -20], [0, 125]]),
+  ]);
+  assert.ok(result && isCampaignBoundary(result));
+  assert.ok(turf.distance(corner, result.coordinates[0][0], { units: 'meters' }) <= 15);
+  assert.ok(near(result.coordinates[0][0], point(12, 0)));
+});

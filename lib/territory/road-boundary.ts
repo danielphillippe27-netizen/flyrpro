@@ -145,13 +145,16 @@ export function previewRoadBoundary(polygon: Polygon, features: Feature<Geometry
   });
   const matches = points.map((point, index) => matchEdge(point, points[(index + 1) % points.length], roads));
   const previous = (index: number) => (index + points.length - 1) % points.length;
-  // Drop conflicting edges before calculating corners. A corner shared by two snapped edges must meet on both roads.
-  const conflicts = points.flatMap((point, index) => {
-    const before = matches[previous(index)];
+  // If the shared corner cannot reach the junction, keep the closer road match.
+  // An eligible edge should still snap even if its neighbor cannot meet it.
+  for (const [index, point] of points.entries()) {
+    const beforeIndex = previous(index);
+    const before = matches[beforeIndex];
     const after = matches[index];
-    return before && after && !junction(before, after, point) ? [previous(index), index] : [];
-  });
-  for (const index of conflicts) matches[index] = null;
+    if (before && after && !junction(before, after, point)) {
+      matches[before.score <= after.score ? index : beforeIndex] = null;
+    }
+  }
   if (!matches.some(Boolean)) return null;
 
   const corners = points.map((point, index) => {
