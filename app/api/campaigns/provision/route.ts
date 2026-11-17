@@ -1048,7 +1048,7 @@ async function runCampaignPostProcessing(params: {
       | Awaited<ReturnType<ParcelEnrichmentService['prepareParcelsForProvision']>>
       | null = null;
     const staticParcelCount = staticParcelCountFromSnapshot(effectiveSnapshot);
-    const parcelEnrichment = isParcelRegionSupported(regionCode)
+    const parcelEnrichment = (scopedGeometry?.parcels?.features.length || isParcelRegionSupported(regionCode))
       ? new ParcelEnrichmentService(supabase)
       : null;
 
@@ -1506,6 +1506,29 @@ export async function POST(request: NextRequest) {
           const hasResidentialParcels = scopedParcelCount > 0;
           snapshot = snapshot ? snapshotWithScopedBuildingCount(snapshot, scopedBuildingCount) : snapshot;
 
+          // Resolve source addresses before creating missing-address targets or
+          // publishing tiles. A client opening the campaign must see these links
+          // immediately, without waiting for a Mapbox reverse-geocode result.
+          const initialLinks = await stageTimings.measure('initial_linking_ms', async () => {
+            if (hasResidentialParcels) {
+              await new ParcelEnrichmentService(supabase).prepareParcelsForProvision(
+                campaignId!, scopedGeometry.parcels as GeoJSON.FeatureCollection
+              );
+            }
+            const geometry = BuildingAdapter.fromStaticGeometryGeoJSON(
+              scopedGeometry.buildings ?? { features: bedrockLinkGeometry?.buildings ?? [] }
+            );
+            return new StableLinkerService(supabase).runSpatialJoin(
+              campaignId!, geometry as unknown as { features: StableBuildingFeature[] },
+              snapshot.metadata?.overture_release,
+              {
+                preserveExisting: true,
+                persistenceMode: addressSource === 'diamond' ? 'gold' : 'silver',
+                parcelsGeoJSON: scopedGeometry.parcels as never,
+              }
+            );
+          });
+
           const targets = await stageTimings.measure('geometry_targets_ms', () => new CampaignAddressEnrichmentService(supabase).ensureTargets({
             campaignId: campaignId!, region: regionCode, source: addressSource,
             boundary: campaignPolygon,
@@ -1533,12 +1556,12 @@ export async function POST(request: NextRequest) {
 
           await stageTimings.measure('snapshot_persist_ms', () => upsertSnapshotMetadata(supabase, campaignId!, snapshot));
 
-	          let linkedAddressCount = 0;
-	          let buildingLinkConfidence = 0;
+	          let linkedAddressCount = initialLinks.matched;
+	          let buildingLinkConfidence = initialLinks.avgConfidence;
 	          let mapMode = 'standard_pins';
-	          let linkedBuildingCount = 0;
+	          let linkedBuildingCount = initialLinks.matched;
 	          const effectiveBuildingCount = snapshot.counts.buildings;
-	          const parcelEnrichmentStatus = isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
+	          const parcelEnrichmentStatus = hasResidentialParcels ? 'ready' : isParcelRegionSupported(regionCode) ? 'queued' : 'skipped';
 
           if (parcelEnrichmentStatus === 'queued') {
             await new ParcelEnrichmentService(supabase).markQueued(campaignId!);
@@ -1557,7 +1580,6 @@ export async function POST(request: NextRequest) {
           });
 
           await stageTimings.measure('bundle_publish_ms', () => prewarmCanonicalMapBundle(supabase, campaignId!, scopedGeometry, {
-            linksStatusOverride: 'pending_provision',
             parcelDisplayMode: 'filtered',
           }));
           const initialMapReadyAt = new Date().toISOString();
@@ -1568,12 +1590,12 @@ export async function POST(request: NextRequest) {
             map_ready_at: initialMapReadyAt,
             provision_timings: stageTimings.snapshot(),
             has_parcels: hasResidentialParcels,
-            building_link_confidence: 0,
+            building_link_confidence: buildingLinkConfidence,
             map_mode: hasResidentialParcels ? 'hybrid' : mapMode,
             data_quality_reason: homeCapNotice,
           });
 
-	          console.log('[Provision] Initial map-ready bundle published; backend linking will optimize the canonical bundle in background.', {
+	          console.log('[Provision] Initial linked map-ready bundle published; remaining optimization will continue.', {
 	            campaignId,
 	            addresses: finalAddressCount,
 	            buildings: scopedBuildingCount ?? effectiveBuildingCount,
