@@ -42,3 +42,11 @@ test('rejects self-intersecting and malformed input', () => {
     point(0, 0), point(100, 100), point(100, 0), point(0, 100), point(0, 0),
   ]] }), false);
 });
+
+test('snaps the first drawing point and a moved point without requiring a polygon', async () => {
+  const { snapRoadPoints } = await import('../road-boundary');
+  const roads = [line([[-20, 0], [150, 0]]), line([[-20, 40], [150, 40]])];
+  assert.ok(near(snapRoadPoints([point(15, 9)], roads)[0], point(15, 0)));
+  assert.ok(near(snapRoadPoints([point(15, 34)], roads)[0], point(15, 40)));
+  assert.deepEqual(snapRoadPoints([point(15, 95)], roads)[0], point(15, 95));
+});

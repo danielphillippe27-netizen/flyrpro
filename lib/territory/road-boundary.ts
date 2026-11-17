@@ -27,6 +27,18 @@ function closeBoundary(points: Position[]): Polygon {
   return { type: 'Polygon', coordinates: [[...points, points[0]]] };
 }
 
+export function snapRoadPoints(points: Position[], features: Feature<Geometry>[]): Position[] {
+  const roads = features.flatMap(({ geometry }) =>
+    geometry.type === 'LineString' && geometry.coordinates.length >= 2 ? [geometry.coordinates] : [],
+  );
+  if (!roads.length) return points;
+  const network = turf.multiLineString(roads);
+  return points.map(point => {
+    const closest = turf.nearestPointOnLine(network, point, meters);
+    return closest.properties.dist <= ROAD_SNAP_METERS ? closest.geometry.coordinates : point;
+  });
+}
+
 export function previewRoadBoundary(polygon: Polygon, features: Feature<Geometry>[]): Polygon | null {
   const roads = features.flatMap(({ geometry }) =>
     geometry.type === 'LineString' && geometry.coordinates.length >= 2 ? [geometry.coordinates] : [],
