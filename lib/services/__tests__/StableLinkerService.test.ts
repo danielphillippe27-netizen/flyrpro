@@ -336,6 +336,24 @@ async function run() {
     assertEqual(match.buildingId, 'building-1');
   });
 
+  test('Parcel-free fallback rejects a nearby competing footprint', () => {
+    const service = createStableLinkerHarness();
+    const buildings = [
+      makeBuilding('left', rectangle(-79.00030, 43.00000, -79.00020, 43.00020)),
+      makeBuilding('right', rectangle(-79.00000, 43.00000, -78.99990, 43.00020)),
+    ];
+    const address = makeAddress('1', -79.00010, 43.00010, 'Main Street');
+    assertEqual(service.matchAddressToBuilding(address, buildings).matchType, 'orphan');
+  });
+
+  test('Available parcels prevent a distance-only fallback outside coverage', () => {
+    const service = createStableLinkerHarness();
+    const building = makeBuilding('home', rectangle(-79.00030, 43.00000, -79.00020, 43.00020));
+    const address = makeAddress('1', -79.00010, 43.00010, 'Main Street');
+    const parcels = service.prepareParcels([makeParcel('elsewhere', rectangle(-79.010, 43.010, -79.009, 43.011))]);
+    assertEqual(service.matchAddressToBuilding(address, [building], parcels).matchType, 'orphan');
+  });
+
   test('Canonical proximity: same-street address outside footprint links nearby building', () => {
     const service = createStableLinkerHarness();
     const building = makeBuilding(
@@ -715,7 +733,7 @@ async function run() {
     assertEqual(match.matchType, 'orphan');
   });
 
-  test('Known multi-address building without parcels cannot bypass the 10m proximity cap', () => {
+  test('Parcel-free building accepts a unique footprint within 15m', () => {
     const service = createStableLinkerHarness();
     const rowBuilding = makeBuilding(
       'parcel-less-row',
@@ -731,8 +749,8 @@ async function run() {
       new Set()
     );
 
-    assertEqual(match.matchType, 'orphan');
-    assertTrue(match.distanceMeters === 0, 'Orphan results must not persist a speculative distance link');
+    assertEqual(match.matchType, 'proximity_verified');
+    assertTrue(match.distanceMeters > 10 && match.distanceMeters <= 15, 'Expected footprint distance within fallback band');
   });
 
   test('Parcel-backed match remains eligible beyond the detached 10m cap', () => {
@@ -806,7 +824,7 @@ async function run() {
     assertTrue(match.distanceMeters <= 10, 'Expected fixture inside the automatic band');
   });
 
-  test('Detached exact-address match from 10m through 12m stays orphan for review', () => {
+  test('Detached exact-address match from 10m through 12m uses parcel-free fallback', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'review-band-home',
@@ -817,7 +835,7 @@ async function run() {
 
     const match = (service as any).matchAddressToBuilding(address, [building]);
 
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'proximity_verified');
   });
 
   test('Linker summary reports unmatched addresses as orphans', () => {
@@ -839,7 +857,7 @@ async function run() {
     assertEqual(summary.orphans, 1);
   });
 
-  test('Right-outside footprint address: no usable street signal stays orphan', () => {
+  test('Right-outside footprint address uses unique parcel-free geometry', () => {
     const service = new StableLinkerService({} as any);
     const building = makeBuilding(
       'no-street-building',
@@ -852,7 +870,7 @@ async function run() {
       [building]
     );
 
-    assertEqual(match.matchType, 'orphan');
+    assertEqual(match.matchType, 'proximity_verified');
   });
 
   test('Nearby different-street address stays orphan without parcel bridge', () => {

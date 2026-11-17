@@ -151,6 +151,8 @@ const MIN_LINKABLE_BUILDING_AREA_SQM = 30;
 const NEAREST_BUILDING_CANDIDATE_LIMIT = 10;
 const PARCEL_BRIDGE_CONFIDENCE = 0.95;
 const PROXIMITY_CONFIDENCE = 0.80;
+const PARCEL_FREE_RADIUS_METERS = 15;
+const PARCEL_FREE_SEPARATION_METERS = 5;
 const FOOTPRINT_EDGE_GRACE_CONFIDENCE = 0.90;
 const FOOTPRINT_EDGE_GRACE_METERS = 10;
 // Detached-neighbourhood safety policy:
@@ -544,10 +546,13 @@ export class StableLinkerService {
 
     const parcelMatch = this.parcelBridgeMatch(address, nearby, parcels);
     if (parcelMatch) return accept(parcelMatch);
-    // Parcel ambiguity is not permission to retry by proximity.
-    const owners = this.owningParcels(address, parcels);
-    if (owners.length > 1 || owners.some(p =>
-      ((p.addressIds?.size ?? 1) !== 1 || (p.buildingIds?.size ?? 1) !== 1))) return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+    if (parcels.length > 0) return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+    const [nearest, runnerUp] = nearby;
+    if (!nearest || nearest.distance > PARCEL_FREE_RADIUS_METERS ||
+        (runnerUp && runnerUp.distance - nearest.distance < PARCEL_FREE_SEPARATION_METERS) ||
+        this.hasStreetConflict(address, nearest.building)) {
+      return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+    }
 
     const semantic = nearby
       .filter((candidate) => (
@@ -577,7 +582,11 @@ export class StableLinkerService {
       .sort((a, b) => this.rankMatches(a, b));
     if (footprintEdgeMatch.length > 0) return footprintEdgeMatch.length === 1 ? accept(footprintEdgeMatch[0]) : this.createMatchResult(address, null, 'orphan', 0, 0, 0);
 
-    return this.createMatchResult(address, null, 'orphan', 0, 0, 0);
+    return accept({
+      ...nearest,
+      matchType: 'proximity_verified',
+      confidence: PROXIMITY_CONFIDENCE,
+    });
   }
 
   private hasFootprintEdgeGrace(address: CampaignAddressWithPoint, candidate: MatchCandidate): boolean {
