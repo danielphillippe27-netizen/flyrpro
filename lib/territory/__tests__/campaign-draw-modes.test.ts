@@ -60,7 +60,7 @@ test('dragging supersedes the pending snap and keeps the vertex in place in the 
   const h=harness();
   try {
     h.click(0,0);h.click(10,0);h.click(10,10);h.click(0,10);
-    h.mode.onMouseDown.call(h.context,h.state,{featureTarget:{properties:{meta:'vertex',coord_path:'0.1'}}});
+    h.mode.onMouseDown.call(h.context,h.state,{lngLat:{lng:10,lat:0},featureTarget:{properties:{meta:'vertex',coord_path:'0.1'}}});
     h.mode.onDrag.call(h.context,h.state,{lngLat:{lng:11,lat:1}});
     h.mode.onMouseUp.call(h.context,h.state); await pause();
     assert.deepEqual(h.feature.coordinates[0],[[0,0],[11,1],[10,10],[0,10]]);
