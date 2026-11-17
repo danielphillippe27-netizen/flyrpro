@@ -1,5 +1,5 @@
 import * as turf from '@turf/turf';
-import type { Feature, Geometry, Polygon, Position } from 'geojson';
+import type { Feature, Geometry, LineString, Polygon, Position } from 'geojson';
 
 export const ROAD_SNAP_METERS = 50;
 const meters = { units: 'meters' } as const;
@@ -27,31 +27,67 @@ function closeBoundary(points: Position[]): Polygon {
   return { type: 'Polygon', coordinates: [[...points, points[0]]] };
 }
 
+const INTERSECTION_SNAP_METERS = 20;
+
+function intersectionArms(point: Position, roads: Feature<LineString>[]): number[] {
+  const bearings: number[] = [];
+  for (const road of roads) {
+    const nearest = turf.nearestPointOnLine(road, point, meters);
+    if (nearest.properties.dist > 0.5) continue;
+    const location = nearest.properties.location;
+    const length = turf.length(road, meters);
+    for (const offset of [-3, 3]) {
+      const along = Math.max(0, Math.min(length, location + offset));
+      if (Math.abs(along - location) < 1) continue;
+      const direction = turf.bearing(point, turf.along(road, along, meters));
+      if (!bearings.some(existing => Math.abs(((direction - existing + 540) % 360) - 180) < 20)) {
+        bearings.push(direction);
+      }
+    }
+  }
+  return bearings;
+}
+
+function preferredIntersection(
+  point: Position,
+  closestRoad: Feature<LineString>,
+  roads: Feature<LineString>[],
+): Position | undefined {
+  const groundRoads = roads.filter(road => {
+    const structure = road.properties?.structure ?? road.properties?.brunnel;
+    return structure !== 'bridge' && structure !== 'tunnel' &&
+      turf.pointToLineDistance(point, road, meters) <= INTERSECTION_SNAP_METERS;
+  });
+  if (!groundRoads.includes(closestRoad)) return undefined;
+  const candidates = groundRoads.flatMap(road => {
+    if (road === closestRoad) return [];
+    return turf.lineIntersect(closestRoad, road).features.map(feature => feature.geometry.coordinates);
+  }).filter(candidate => turf.distance(point, candidate, meters) <= INTERSECTION_SNAP_METERS);
+  candidates.sort((a, b) => turf.distance(point, a, meters) - turf.distance(point, b, meters));
+  return candidates.find(candidate => intersectionArms(candidate, groundRoads).length >= 3);
+}
+
 export function snapRoadPoints(points: Position[], features: Feature<Geometry>[]): Position[] {
-  const roads = features.flatMap(({ geometry }) =>
-    geometry.type === 'LineString' && geometry.coordinates.length >= 2 ? [geometry.coordinates] : [],
+  const roads = features.filter((feature): feature is Feature<LineString> =>
+    feature.geometry.type === 'LineString' && feature.geometry.coordinates.length >= 2,
   );
   if (!roads.length) return points;
-  const network = turf.multiLineString(roads);
   return points.map(point => {
-    const closest = turf.nearestPointOnLine(network, point, meters);
-    return closest.properties.dist <= ROAD_SNAP_METERS ? closest.geometry.coordinates : point;
+    const matches = roads.map(road => ({ road, closest: turf.nearestPointOnLine(road, point, meters) }));
+    matches.sort((a, b) => a.closest.properties.dist - b.closest.properties.dist);
+    const { road, closest } = matches[0];
+    if (closest.properties.dist > ROAD_SNAP_METERS) return point;
+    return preferredIntersection(point, road, roads) ?? closest.geometry.coordinates;
   });
 }
 
 export function previewRoadBoundary(polygon: Polygon, features: Feature<Geometry>[]): Polygon | null {
-  const roads = features.flatMap(({ geometry }) =>
-    geometry.type === 'LineString' && geometry.coordinates.length >= 2 ? [geometry.coordinates] : [],
-  );
-  if (!roads.length) return null;
-
-  const network = turf.multiLineString(roads);
   const original = polygon.coordinates[0].slice(0, -1);
+  const projected = snapRoadPoints(original, features);
   const matches = original.flatMap((point, index) => {
-    const closest = turf.nearestPointOnLine(network, point, meters);
-    const distance = closest.properties.dist;
-    if (distance < minimumMoveMeters || distance > ROAD_SNAP_METERS) return [];
-    return [{ index, distance, point: closest.geometry.coordinates }];
+    const distance = turf.distance(point, projected[index], meters);
+    if (distance < minimumMoveMeters) return [];
+    return [{ index, distance, point: projected[index] }];
   });
   if (!matches.length) return null;
 
