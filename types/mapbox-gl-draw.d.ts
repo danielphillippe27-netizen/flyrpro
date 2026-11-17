@@ -15,10 +15,12 @@ declare module '@mapbox/mapbox-gl-draw' {
     displayControlsDefault?: boolean;
     controls?: Record<string, boolean>;
     defaultMode?: DrawMode;
+    modes?: ReturnType<typeof import('../lib/territory/campaign-draw-modes').createCampaignDrawModes>['modes'];
     styles?: Array<Record<string, unknown>>;
   };
 
   export default class MapboxDraw implements IControl {
+    static modes: Parameters<typeof import('../lib/territory/campaign-draw-modes').createCampaignDrawModes>[0];
     constructor(options?: DrawOptions);
     onAdd(map: Map): HTMLElement;
     onRemove(map: Map): void;

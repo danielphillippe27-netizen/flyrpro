@@ -30,14 +30,14 @@ export function CreateTerritoryCta({
   );
 }
 
-export function TerritoryDrawHint({ visible }: { visible: boolean }) {
+export function TerritoryDrawHint({ visible, hint }: { visible: boolean; hint?: string }) {
   if (!visible) return null;
 
   return (
     <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 rounded-full border border-border bg-card px-5 py-2.5 shadow-lg">
       <p className="text-sm text-foreground whitespace-nowrap">
-        <span className="font-semibold">Click</span> to draw •{' '}
-        <span className="font-semibold">Double-click</span> to finish
+        {hint ?? <><span className="font-semibold">Click</span> to draw •{' '}
+        <span className="font-semibold">Double-click</span> to finish</>}
       </p>
     </div>
   );

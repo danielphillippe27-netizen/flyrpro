@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { TerritoryDrawHint } from '@/components/territory/TerritoryCreateFlow';
+import { createCampaignDrawModes } from '@/lib/territory/campaign-draw-modes';
 import { getDrawnPolygon } from '@/lib/territory/create-polygon';
 import {
   applyDrawModeForPhase,
@@ -465,6 +466,12 @@ export default function CreateCampaignPage() {
   const resolvedMapStyle = useMemo(() => resolveMapStyle('standard', mapTheme, 'v11'), [mapTheme]);
   const [name, setName] = useState('');
   const [stormMode, setStormMode] = useState(false);
+  const [checkingRoads, setCheckingRoads] = useState(false);
+  const [roadSnapError, setRoadSnapError] = useState<string | null>(null);
+  const roadSnapUser = useRef<string | null>(null);
+  const roadModes = useRef<ReturnType<typeof createCampaignDrawModes> | null>(null);
+  useEffect(() => () => roadModes.current?.dispose(), []);
+
   const [farmCreation, setFarmCreation] = useState<{ boundary: GeoJSON.Polygon | null; name: string } | null>(null);
   const [stormContext, setStormContext] = useState<StormCampaignContext | null>(null);
   useEffect(() => { setStormContext(null); }, [currentWorkspaceId]);
@@ -477,6 +484,7 @@ export default function CreateCampaignPage() {
   const [addressCount, setAddressCount] = useState<number | null>(null);
   const [campaignBuildingCount, setCampaignBuildingCount] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
+  roadSnapUser.current = userId;
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapStyleRevision, setMapStyleRevision] = useState(0);
   const [isSatellite, setIsSatellite] = useState(false);
@@ -525,7 +533,7 @@ export default function CreateCampaignPage() {
     map,
     mapLoaded,
   });
-  const isBusy = loading || provisioning || generatingAddresses;
+  const isBusy = loading || provisioning || generatingAddresses || checkingRoads;
   const campaignBuildingLimitExceeded = campaignBuildingCount > CAMPAIGN_BUILDING_LIMIT;
   const selfServePreviewOutcomes = useMemo(
     () => buildSelfServeDoorOutcomes(selfServeSelectedCount),
@@ -899,7 +907,14 @@ export default function CreateCampaignPage() {
     });
 
     // Initialize Mapbox Draw with red styling (no visible controls - draw by clicking)
+    roadModes.current?.dispose();
+    roadModes.current = createCampaignDrawModes(MapboxDraw.modes, {
+      enabled: () => Boolean(roadSnapUser.current),
+      onBusy: setCheckingRoads,
+      onError: setRoadSnapError,
+    });
     const draw = new MapboxDraw({
+      modes: roadModes.current.modes,
       displayControlsDefault: false,
       controls: {}, // Hide all default controls to avoid duplicates
       defaultMode: 'simple_select',
@@ -1054,7 +1069,14 @@ export default function CreateCampaignPage() {
       }
 
       // Create fresh draw instance
+      roadModes.current?.dispose();
+      roadModes.current = createCampaignDrawModes(MapboxDraw.modes, {
+        enabled: () => Boolean(roadSnapUser.current),
+        onBusy: setCheckingRoads,
+        onError: setRoadSnapError,
+      });
       const newDraw = new MapboxDraw({
+        modes: roadModes.current.modes,
         displayControlsDefault: false,
         controls: {},
         defaultMode: 'simple_select',
@@ -1599,6 +1621,7 @@ export default function CreateCampaignPage() {
   };
 
   const handlePrimaryCreateAction = () => {
+    if (checkingRoads) return;
     if (phase === 'idle') {
       handleStartCreating();
       return;
@@ -1650,6 +1673,8 @@ export default function CreateCampaignPage() {
   };
 
   const clearDrawing = () => {
+    roadModes.current?.dispose();
+    setRoadSnapError(null);
     selfServeTerritoryHandoffStartedRef.current = false;
     const nextPhase = clearTerritoryDrawing(drawRef.current, phase);
     setPhase(nextPhase);
@@ -2014,8 +2039,8 @@ export default function CreateCampaignPage() {
     track('map_reveal_started', 3, { buildings: total });
   };
 
-  const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
-    e?.preventDefault();
+  const handleSubmit = async () => {
+    if (checkingRoads) return;
     if (!name.trim()) {
       await showFeedbackDialog({
         title: `${copy.nouns.campaign.charAt(0).toUpperCase()}${copy.nouns.campaign.slice(1)} name required`,
@@ -2609,7 +2634,9 @@ export default function CreateCampaignPage() {
                   <span>
                     {!mapLoaded
                       ? 'Loading map...'
-                      : isBusy
+                      : checkingRoads
+                        ? 'Checking nearby roads…'
+                        : isBusy
                         ? 'Creating...'
                         : campaignBuildingLimitExceeded
                           ? 'Area Too Large'
@@ -2641,8 +2668,14 @@ export default function CreateCampaignPage() {
           />
         ) : null}
 
-        <TerritoryDrawHint visible={!isSelfServeDemo && !stormMode && mapLoaded && phase === 'drawing'} />
+        <TerritoryDrawHint visible={!isSelfServeDemo && !stormMode && mapLoaded && phase === 'drawing'} hint="Click beside an edge to add a pin. Drag pins to adjust. Roads snap automatically." />
       </div>
+
+      {(checkingRoads || roadSnapError) && (
+        <div role="status" className="pointer-events-none absolute bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-xl border bg-card px-4 py-2 text-sm shadow-lg">
+          {checkingRoads ? 'Snapping to nearby roads…' : roadSnapError}
+        </div>
+      )}
 
       {(provisioning || generatingAddresses) && (
         <div className="fixed inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-50">
