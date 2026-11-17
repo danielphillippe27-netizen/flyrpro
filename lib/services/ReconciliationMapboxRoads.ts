@@ -12,11 +12,22 @@ const CONCURRENCY_DEADLINE_MS = 25_000;
 export async function loadReconciliationMapboxRoads(
   buildings: Feature[], token = process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
 ): Promise<Feature[]> {
-  if (!token || buildings.length === 0) return [];
+  if (!token) return [];
   const points = buildings.flatMap(feature => {
     try { const [x, y] = turf.centroid(feature).geometry.coordinates; return Number.isFinite(x) && Number.isFinite(y) ? [[x, y]] : []; }
     catch { return []; }
   });
+  return loadMapboxRoads(points, { token });
+}
+
+export async function loadMapboxRoads(
+  points: number[][],
+  {
+    token = process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
+    signal,
+  }: { token?: string; signal?: AbortSignal } = {},
+): Promise<Feature[]> {
+  if (!token) throw new Error('Mapbox road lookup is unavailable');
   if (!points.length) return [];
   const n = 2 ** ZOOM;
   const x = (lon: number) => Math.floor((lon + 180) / 360 * n);
@@ -29,7 +40,8 @@ export async function loadReconciliationMapboxRoads(
   const results = await reconciliationLookupPool(tiles, async ([tx, ty]) => {
     const url = new URL(`https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/${ZOOM}/${tx}/${ty}.mvt`);
     url.searchParams.set('access_token', token);
-    const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    const timeout = AbortSignal.timeout(10_000);
+    const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!response.ok) throw new Error(`Mapbox road tile request failed (${response.status})`);
     const tile = new VectorTile(new Pbf(new Uint8Array(await response.arrayBuffer())));
     const layer = tile.layers.road;
