@@ -1,7 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-export type StormAddressCount = { count: number; partial: boolean; zoom: number; regions: string[] };
+import type { StormCampaignPreview } from '@/lib/storm-maps/intelligence/campaign-preview';
+
+export const STORM_CAMPAIGN_PREVIEW_ENDPOINT = '/api/storm-maps/intelligence/campaign-preview';
+export type StormAddressCount = { count: number; partial: boolean; zoom: number; regions: string[]; campaignPreview?: StormCampaignPreview };
 type Entry = { promise: Promise<StormAddressCount>; abort: AbortController; users: number; settled: boolean; expires: number };
 // The count display and campaign action share one scan of the same workspace/boundary.
 const scans = new Map<string, Entry>();
@@ -16,7 +19,7 @@ function acquire(key: string, workspaceId: string, body: string, endpoint: strin
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Address count unavailable.');
     if (!Number.isFinite(data.count) || data.count < 0) throw new Error('Address count unavailable.');
-    entry.settled = true; entry.expires = Date.now() + 30_000;
+    entry.settled = true; entry.expires = Date.now() + (data.campaignPreview?.status === 'unavailable' ? 0 : 30_000);
     return data as StormAddressCount;
   }).catch(error => { if (scans.get(key) === entry) scans.delete(key); throw error; });
   scans.set(key, entry);

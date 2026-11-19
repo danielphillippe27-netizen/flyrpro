@@ -5,16 +5,24 @@ import { stormGeometrySchema } from '@/lib/storm-maps/intelligence/geometry';
 import { resolveCampaignRegion, resolveAmbiguousRegionCountry } from '@/lib/geo/regionResolver';
 import { BEDROCK_CANADA_CONFIG, BEDROCK_US_CONFIG, BedrockCountryService } from '@/lib/services/BedrockCountryService';
 import { getCachedStormValue, setCachedStormValue } from '@/lib/storm-maps/cache';
+import type { StandardCampaignAddress } from '@/lib/services/AddressAdapter';
+import type { StormCampaignPreview } from '@/lib/storm-maps/intelligence/campaign-preview';
 import regions from '@/scripts/regions.json';
-type Count = { count: number; zoom: number; partial: boolean; regions: string[]; tiles: number; tileZooms: number[]; countedAt: string };
-export async function countBoundaryAddresses(request: NextRequest, workspaceId: string) {
+type Count = {
+  count: number; zoom: number; partial: boolean; regions: string[]; tiles: number; tileZooms: number[]; countedAt: string;
+  campaignPreview?: StormCampaignPreview;
+};
+export async function countBoundaryAddresses(
+  request: NextRequest, workspaceId: string, { includeCampaignPreview = false } = {},
+) {
   const text = await request.text();
   if (text.length > 100_000) return NextResponse.json({ error: 'Boundary is too large.' }, { status: 413 });
   let raw: unknown; try { raw = JSON.parse(text); } catch { return NextResponse.json({ error: 'Invalid boundary.' }, { status: 400 }); }
   const parsed = stormGeometrySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: 'Choose a closed, non-crossing territory smaller than 5,000 km².' }, { status: 400 });
   const boundary = parsed.data;
-  const key = `territory-address-count:native:v1:${workspaceId}:${createHash('sha256').update(JSON.stringify(boundary)).digest('hex')}`;
+  const cacheScope = includeCampaignPreview ? 'storm-campaign-preview:v1' : 'territory-address-count:native:v1';
+  const key = `${cacheScope}:${workspaceId}:${createHash('sha256').update(JSON.stringify(boundary)).digest('hex')}`;
   const cached = await getCachedStormValue<Count>(key);
   if (cached) return NextResponse.json(cached.value, { headers: { 'Cache-Control': 'private, no-store' } });
   try {
@@ -29,11 +37,36 @@ export async function countBoundaryAddresses(request: NextRequest, workspaceId: 
     const parts=boundary.type==='Polygon'?[boundary]:boundary.coordinates.map(coordinates=>({type:'Polygon' as const,coordinates}));
     if(parts.length*targets.length>12) return NextResponse.json({error:'This territory requires indexed spatial counting. Select fewer neighbourhoods until the spatial migration is enabled.'},{status:422});
     const results = await Promise.allSettled(targets.flatMap(region=>parts.map(async part => ({ region, ...await service.countStormTerritoryPins(part, region, true) }))));
-    const ids = new Set<string>(), covered: string[] = []; let tiles = 0;
-    for (const result of results) if (result.status === 'fulfilled') { covered.push(result.value.region); tiles += result.value.tiles; for (const id of result.value.ids) ids.add(id); }
+    const ids = new Set<string>();
+    const addresses = new Map<string, StandardCampaignAddress>();
+    const covered: string[] = [];
+    let tiles = 0;
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const scan = result.value;
+      covered.push(scan.region);
+      tiles += scan.tiles;
+      scan.ids.forEach((id, index) => {
+        ids.add(id);
+        if (includeCampaignPreview) addresses.set(id, scan.addresses[index]);
+      });
+    }
     if (!covered.length) throw new Error('Zoom-10 address data is unavailable here.');
     const data: Count = { count: ids.size, zoom: Math.min(...results.flatMap(result => result.status === 'fulfilled' ? [result.value.tileZoom] : [])), tileZooms: [...new Set(results.flatMap(result => result.status === 'fulfilled' ? [result.value.tileZoom] : []))], partial: results.some(result=>result.status==='rejected'), regions: [...new Set(covered)], tiles, countedAt: new Date().toISOString() };
-    await setCachedStormValue(key, data, 900, 900);
+    if (includeCampaignPreview) {
+      try {
+        const { estimateStormCampaign } = await import('@/lib/storm-maps/intelligence/campaign-preview');
+        data.campaignPreview = await estimateStormCampaign(
+          boundary, addresses, { partial: data.partial, primaryRegion: resolution.regionCode }, service,
+        );
+      } catch (error) {
+        console.warn('[Storm campaign preview] Stop estimate unavailable', {
+          region: resolution.regionCode, error: error instanceof Error ? error.message : String(error),
+        });
+        data.campaignPreview = { status: 'unavailable' };
+      }
+    }
+    if (data.campaignPreview?.status !== 'unavailable') await setCachedStormValue(key, data, 900, 900);
     return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch { return NextResponse.json({ error: 'Address pin count unavailable. Retry or choose a smaller territory.' }, { status: 503 }); }
 }

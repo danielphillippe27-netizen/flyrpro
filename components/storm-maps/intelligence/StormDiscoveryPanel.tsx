@@ -168,8 +168,8 @@ export function StormDiscoveryPanel({map,workspaceId,onSelect,onTerritory,onSave
        boundary={picked.geometry}
        label="Mapped address pins in this hail zone"
        emptyLabel="No mapped pins found"
+       showCampaignPreview
      />
-     <p className="text-xs text-muted-foreground">Campaign setup can add stops from eligible buildings and parcels.</p>
    </> : <p className="text-xs text-muted-foreground">Mapped address counts are available for U.S. and Canadian territories.</p>}
    {counts && <div className="space-y-2">
      <p className="text-xs font-semibold">Historical exposure estimate</p>

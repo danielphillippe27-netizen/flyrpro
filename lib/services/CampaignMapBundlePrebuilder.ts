@@ -1624,6 +1624,7 @@ function scopedGeometryCacheKey(params: {
   campaignId: string;
   snapshot: CampaignSnapshotRow;
   campaignRow: { bbox?: unknown; territory_boundary?: unknown } | null;
+  failOnReadError?: boolean;
 }) {
   const buildingBufferMeters = isBedrockUsSnapshot(params.snapshot)
     ? PMTILES_BEDROCK_US_BUILDING_DISPLAY_BUFFER_METERS
@@ -1640,6 +1641,7 @@ function scopedGeometryCacheKey(params: {
     bbox: params.campaignRow?.bbox ?? null,
     territory_boundary: params.campaignRow?.territory_boundary ?? null,
     building_buffer_meters: buildingBufferMeters,
+    strict: params.failOnReadError === true,
   });
 }
 
@@ -1670,8 +1672,9 @@ async function extractScopedMapGeometry(params: {
   snapshot: CampaignSnapshotRow;
   campaignRow: { bbox?: unknown; territory_boundary?: unknown } | null;
   recordTiming?: TimingRecorder;
+  failOnReadError?: boolean;
 }): Promise<PrehydratedScopedMapGeometry> {
-  const { campaignId, snapshot, campaignRow, recordTiming } = params;
+  const { campaignId, snapshot, campaignRow, recordTiming, failOnReadError } = params;
   if (!snapshot.bucket) return {};
 
   const isBedrockUs = isBedrockUsSnapshot(snapshot);
@@ -1710,6 +1713,7 @@ async function extractScopedMapGeometry(params: {
             });
             return scopedBuildings;
           } catch (error) {
+            if (failOnReadError) throw error;
             console.warn('[CampaignMapBundlePrebuilder] Failed to hydrate scoped buildings:', {
               campaignId,
               message: error instanceof Error ? error.message : String(error),
@@ -1733,6 +1737,7 @@ async function extractScopedMapGeometry(params: {
               ? parcelRowsToFeatureCollection(scopedParcels.parcels)
               : null;
           } catch (error) {
+            if (failOnReadError) throw error;
             console.warn('[CampaignMapBundlePrebuilder] Failed to hydrate scoped parcels:', {
               campaignId,
               message: error instanceof Error ? error.message : String(error),
@@ -1754,11 +1759,12 @@ export async function resolveScopedCampaignMapGeometry(params: {
   snapshot: CampaignSnapshotRow | null;
   campaignRow: { bbox?: unknown; territory_boundary?: unknown } | null;
   recordTiming?: TimingRecorder;
+  failOnReadError?: boolean;
 }): Promise<PrehydratedScopedMapGeometry> {
-  const { campaignId, snapshot, campaignRow, recordTiming } = params;
+  const { campaignId, snapshot, campaignRow, recordTiming, failOnReadError } = params;
   if (!snapshot?.bucket) return {};
 
-  const cacheKey = scopedGeometryCacheKey({ campaignId, snapshot, campaignRow });
+  const cacheKey = scopedGeometryCacheKey({ campaignId, snapshot, campaignRow, failOnReadError });
   const cacheStarted = performance.now();
   const cached = getCachedScopedGeometry(cacheKey);
   if (cached) {
@@ -1773,7 +1779,7 @@ export async function resolveScopedCampaignMapGeometry(params: {
     return value;
   }
 
-  const promise = extractScopedMapGeometry({ campaignId, snapshot, campaignRow, recordTiming })
+  const promise = extractScopedMapGeometry({ campaignId, snapshot, campaignRow, recordTiming, failOnReadError })
     .then((value) => {
       setCachedScopedGeometry(cacheKey, value);
       return value;

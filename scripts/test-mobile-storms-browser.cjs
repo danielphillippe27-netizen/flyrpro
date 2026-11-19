@@ -37,6 +37,15 @@ await page.route('**/api/storm-maps/**',async route=>{
   const selected=req.postDataJSON().territoryId===drawnTerritoryId?drawnTerritory:territory;
   json={parts:[{boundary:selected.boundary,addressCount:12}],name:selected.name,context:{...selected.context,territoryId:selected.id}};
  }
+ else if(u.pathname.endsWith('/campaign-preview')){
+  assert.deepEqual(req.postDataJSON(),boundary,'Count the exact selected hail polygon');
+  json={
+   count:selectedZonePinCount,partial:false,zoom:14,regions:['ON'],
+   campaignPreview:selectedZonePinCount>4000?{status:'territory-only'}:{
+    status:'ready',total:selectedZonePinCount+5,pendingParcelStops:5,addressedParcelStops:0,buildingStops:0,campaignCount:1,
+   },
+  };
+ }
  else if(u.pathname.endsWith('/address-count')){
   const isStormZone=JSON.stringify(req.postDataJSON())===JSON.stringify(boundary);
   const count=isStormZone ? selectedZonePinCount : process.env.STORMS_TEST_DRAWN_CAMPAIGN?12:0;
@@ -107,7 +116,12 @@ await page.locator('.mapboxgl-canvas').tap({position:{x:195,y:422}});
 await page.getByRole('button',{name:'Storm info',exact:true}).click();
 const preview=page.locator('[aria-live="polite"]').filter({hasText:'Mapped address pins in this hail zone'});
 await preview.getByText(selectedZonePinCount.toLocaleString(),{exact:true}).waitFor();
-assert(requests.some(r=>r.path.endsWith('/address-count')&&JSON.stringify(r.body)===JSON.stringify(boundary)),'The preview counts the selected hail polygon');
+if(selectedZonePinCount<=4000){
+ await preview.getByText(`${(selectedZonePinCount+5).toLocaleString()} stops`,{exact:true}).waitFor();
+ const parcels=preview.locator('dl > div').filter({hasText:'Pending parcel stops'});
+ assert.equal(await parcels.locator('dd').innerText(),'5');
+}
+assert(requests.some(r=>r.path.endsWith('/campaign-preview')&&JSON.stringify(r.body)===JSON.stringify(boundary)),'The preview counts the selected hail polygon');
 assert(!requests.some(r=>r.path.endsWith('/territories')&&r.method==='POST'),'The mapped count appears before the territory is saved');
 await page.getByLabel('Selected zone territory name').fill('Selected hail area');
 await page.getByRole('region',{name:'Find storm content'}).getByRole('button',{name:'Create storm territory',exact:true}).click();

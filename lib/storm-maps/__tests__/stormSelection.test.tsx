@@ -114,10 +114,16 @@ async function main() {
       id: 'zone', minimum_mm: 25.4, estimation_method: 'WolfGrid zones derived from NOAA MRMS 24-hour maximum estimated hail size',
       geometry: { type: 'MultiPolygon', coordinates: [selectedBoundary.coordinates, emptyBoundary.coordinates] },
     }] });
-    if (url.includes('/address-count?')) {
+    if (url.includes('/campaign-preview?')) {
       const boundary = JSON.parse(String(init?.body));
       countedBoundaries.push(boundary);
-      return Response.json({ count: JSON.stringify(boundary) === JSON.stringify(selectedBoundary) ? 26 : 0, partial: false, regions: ['TX'] });
+      const known = JSON.stringify(boundary) === JSON.stringify(selectedBoundary);
+      return Response.json({
+        count: known ? 26 : 0, partial: false, regions: ['TX'],
+        campaignPreview: known
+          ? { status: 'ready', total: 31, pendingParcelStops: 5, addressedParcelStops: 0, buildingStops: 0, campaignCount: 1 }
+          : { status: 'no-mapped-addresses' },
+      });
     }
     if (url.includes('/exposure?')) return Response.json({ available: false, counts: null, reason: 'Historical exposure is disabled.' });
     return Response.json({ events: [storm] });
@@ -148,9 +154,13 @@ async function main() {
   assert.deepEqual(countedBoundaries, [selectedBoundary], 'Count only the selected connected polygon before it is saved');
   const preview = () => [...document.querySelectorAll('[aria-live="polite"]')].find(node => node.textContent?.includes('Mapped address pins in this hail zone'));
   assert.ok(preview()?.textContent?.includes('26'), 'Mapped pin totals are available with historical exposure disabled');
+  assert.ok(preview()?.textContent?.includes('31 stops'), 'Show the total before save');
+  const parcelRow = [...preview()!.querySelectorAll('dt')].find(term => term.textContent === 'Pending parcel stops');
+  assert.equal(parcelRow?.nextElementSibling?.textContent, '5');
   assert.equal(savedZoneId, undefined);
   await pickZone(-101.4);
   assert.ok(!preview()?.textContent?.includes('26'), 'Switching zones must hide the previous count immediately');
+  assert.ok(!preview()?.textContent?.includes('31 stops'));
   await waitForCount();
   assert.deepEqual(countedBoundaries, [selectedBoundary, emptyBoundary]);
   assert.ok(preview()?.textContent?.includes('No mapped pins found'));

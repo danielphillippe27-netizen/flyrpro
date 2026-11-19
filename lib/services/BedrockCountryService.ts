@@ -596,7 +596,7 @@ function normalizeAddress(config: BedrockCountryConfig, campaignId: string, row:
   };
 }
 
-function snapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): CampaignSnapshotRow {
+export function snapshotToCampaignSnapshotRow(snapshot: LambdaSnapshotResponse): CampaignSnapshotRow {
   return {
     bucket: snapshot.bucket,
     prefix: snapshot.prefix,
