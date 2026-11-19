@@ -81,7 +81,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-09-19-parcel-targets-v2';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-11-19-parcel-roof-links-v3';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;
@@ -2249,7 +2249,7 @@ export async function prebuildCampaignMapBundle(
     buildingResolutions
   );
   const links = await measure('links', recordTiming, () => fetchCanonicalLinks(supabase, campaignId));
-  const addressOrphans = await measure('address_orphans', recordTiming, () =>
+  const persistedAddressOrphans = await measure('address_orphans', recordTiming, () =>
     fetchCanonicalAddressOrphans(supabase, campaignId)
   );
   const enriched = enrichFeatureCollectionsWithLinks({
@@ -2310,14 +2310,26 @@ export async function prebuildCampaignMapBundle(
     parcels: ownershipApplied.parcels.features,
     protectedAddressIds: new Set(addressAdjustments.filter(row => row.source !== 'reconciliation').map(row => row.address_id.toLowerCase())),
   });
+  // Verified parcel sections supply the per-unit topology of a shared roof.
+  // Canonical database links take precedence when enriching the offline bundle.
+  const linkedAddresses = new Set(links.map(link => normalizedText(link.address_id)));
+  const rowLinks = placements.filter(p => p.rowUnits && p.buildingId && !linkedAddresses.has(p.addressId))
+    .map(p => ({ id: p.buildingId + ':' + p.addressId, address_id: p.addressId, addressId: p.addressId,
+      building_id: p.buildingId, buildingId: p.buildingId, match_type: 'parcel_verified',
+      matchType: 'parcel_verified', confidence: .99, is_multi_unit: true, unit_count: p.rowUnits,
+      unit_arrangement: 'horizontal' }));
+  links.push(...rowLinks);
+  const rowTopology = rowLinks.length ? enrichFeatureCollectionsWithLinks({
+    addresses: ownershipApplied.addresses, buildings: manualPinsApplied.buildings, links,
+  }) : null;
+  const rowAddressIds = new Set(rowLinks.map(link => link.address_id));
+  const addressOrphans = persistedAddressOrphans.filter(row => !rowAddressIds.has(normalizedText(row.address_id)));
   const addresses = applyAddressAdjustments(
-    applyParcelPinPlacements(ownershipApplied.addresses, placements), addressAdjustments
+    applyParcelPinPlacements(rowTopology?.addresses ?? ownershipApplied.addresses, placements), addressAdjustments
   );
-  const buildings = manualPinsApplied.buildings;
-  // Address and building coordinates are often offset from their lots. Display
-  // classification is independent of address ownership and pin placement.
+  const buildings = rowTopology?.buildings ?? manualPinsApplied.buildings;
   const ownedParcels = ownershipApplied.parcels;
-  const buildingOrphans = enriched.buildingOrphans;
+  const buildingOrphans = rowTopology?.buildingOrphans ?? enriched.buildingOrphans;
   const computedLinksStatus = 'ready';
   const linksStatus = typeof options?.linksStatusOverride === 'string' && options.linksStatusOverride.trim()
     ? normalizedWorkflowStatus(options.linksStatusOverride)

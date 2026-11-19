@@ -10,6 +10,7 @@ export type ParcelPinPlacement = {
   coordinate: [number, number];
   method: 'parcel_center' | 'building_centroid' | 'building_parcel_centroid';
   preservedSource?: boolean;
+  rowUnits?: number;
 };
 const text = (value: unknown): string => typeof value === 'string' ? value.trim().toLowerCase() : '';
 export function buildingIdentifiers(feature: Feature): string[] {
@@ -76,6 +77,7 @@ export function planParcelPinPlacements(input: {
   }
   const normalizeStreet = (value: unknown) => text(value).replace(/[^a-z0-9 ]/g, '').replace(/\b(street|road|avenue|drive|lane|court|boulevard)\b/g,
     word => ({street:'st',road:'rd',avenue:'ave',drive:'dr',lane:'ln',court:'ct',boulevard:'blvd'}[word]!)).replace(/\s+/g, ' ').trim();
+  const rowMasks = new Map<string, Map<string, PolygonFeature>>();
   const placements: ParcelPinPlacement[] = [];
   for (const [parcelId, addresses] of groups) {
     const parcel = parcels.get(parcelId);
@@ -105,6 +107,12 @@ export function planParcelPinPlacements(input: {
         // Ignore slivers at parcel seams. A townhouse portion may be a small
         // fraction of the whole row, but must occupy meaningful parcel area.
         if (!intersection || turf.area(intersection) < 10 || turf.area(intersection) / Math.min(turf.area(parcel), turf.area(feature)) < 0.1) return [];
+        // A known neighbouring home can overhang the lot line. Its
+        // smaller overlap is not a competing house on this parcel.
+        const owners = currentOwners.get(buildingIdentifiers(feature)[0]);
+        if (owners?.size && !owners.has(addressId) &&
+            turf.area(intersection) < turf.area(feature) / 2 &&
+            !turf.booleanPointInPolygon(interiorCentroid(feature), parcel)) return [];
         return [{ feature, intersection }];
       });
       const linkedId = text(p.building_gers_id ?? p.linked_building_id ?? p.building_id);
@@ -113,14 +121,24 @@ export function planParcelPinPlacements(input: {
       // missing footprint can still use parcel-only placement when no eligible
       // replacement exists; the original building link remains untouched.
       const winner = linkedId ? candidates.find(c => c.feature === linked) : candidates.length === 1 ? candidates[0] : null;
+      const row = winner?.feature;
+      const rp = row?.properties ?? {};
+      const rowHouse = rp.is_townhome === true || rp.is_townhouse === true ||
+        [rp.building, rp.building_type, rp.subtype].some(v => /^(townhouse|townhome|terrace|row[ _-]house)$/.test(text(v)));
       if (winner && !linkedId) {
         const key = buildingIdentifiers(winner.feature)[0];
         const owners = currentOwners.get(key);
         const addressStreet = normalizeStreet(p.street_name);
         const bp = winner.feature.properties ?? {};
         const buildingStreet = normalizeStreet(bp.street_name ?? bp.primary_street ?? bp.addr_street);
-        if ((owners && [...owners].some(id => id !== addressId)) ||
+        if ((!rowHouse && owners && [...owners].some(id => id !== addressId)) ||
             (addressStreet && buildingStreet && addressStreet !== buildingStreet)) continue;
+      }
+      if (winner && rowHouse) {
+        const key = buildingIdentifiers(winner.feature)[0];
+        const masks = rowMasks.get(key) ?? new Map<string, PolygonFeature>();
+        masks.set(addressId, winner.intersection);
+        rowMasks.set(key, masks);
       }
       if (preservePoint && coordinates) {
         placements.push({ addressId, parcelId,
@@ -150,7 +168,26 @@ export function planParcelPinPlacements(input: {
   // multi-address building from that geometry; retain only existing associations.
   const claims = new Map<string, number>();
   for (const placement of placements) if (placement.buildingId) claims.set(placement.buildingId, (claims.get(placement.buildingId) ?? 0) + 1);
-  return placements.filter(p => !p.buildingId || (claims.get(p.buildingId) ?? 0) === 1 || currentOwners.get(p.buildingId)?.has(p.addressId));
+  const verifiedRows = new Map<string, number>();
+  for (const [key, masks] of rowMasks) {
+    if (masks.size < 2 || masks.size !== claims.get(key) ||
+        [...(currentOwners.get(key) ?? [])].some(id => !masks.has(id))) continue;
+    const roof = byAlias.get(key);
+    if (!roof) continue;
+    const sections = [...masks.values()];
+    const union = turf.union(turf.featureCollection(sections));
+    if (!union) continue;
+    const area = turf.area(roof);
+    const covered = turf.area(union);
+    const total = sections.reduce((sum, section) => sum + turf.area(section), 0);
+    if (covered >= area * .98 && total - covered <= area * .001) verifiedRows.set(key, masks.size);
+  }
+  return placements.flatMap(p => {
+    const key = p.buildingId;
+    if (key && verifiedRows.has(key)) return [{ ...p, rowUnits: verifiedRows.get(key) }];
+    if (!key || currentOwners.get(key)?.has(p.addressId)) return [p];
+    return claims.get(key) === 1 && !currentOwners.get(key)?.size ? [p] : [];
+  });
 }
 
 export function applyParcelPinPlacements(collection: GeoJSON.FeatureCollection, placements: ParcelPinPlacement[]): GeoJSON.FeatureCollection {

@@ -30,6 +30,9 @@ async function main() {
   assert(turf.booleanPointInPolygon(plan([])[0].coordinate, parcel));
   const ambiguous = { ...garage, properties: { ...garage.properties, building: 'yes' } };
   assert.equal(plan([home, ambiguous]).length, 0);
+  const adjacent = box('neighbour', -78.9991, 43.0002, .00055, .00045, {building:'house'});
+  const other = turf.point([-78.9988,43.0004], {id:'other',parcel_id:'other-lot',building_gers_id:'neighbour'});
+  assert.equal(plan([home,adjacent],[address,other])[0].buildingId,'home');
   const linked = { ...address, properties: { ...address.properties, building_gers_id: 'home' } };
   assert.equal(plan([home, ambiguous], [linked])[0].buildingId, 'home');
   assert.equal(plan([ambiguous], [linked]).length, 0, 'missing linked home must not select garage');
@@ -61,6 +64,10 @@ async function main() {
   const units = [turf.point([-79.0001,43],{id:'u1',parcel_id:'left'}),turf.point([-78.9989,43],{id:'u2',parcel_id:'right'})];
   const town = plan([row], units, [left,right]);
   assert.equal(town.length,0, 'shared roof does not establish multiple automatic address assignments');
+  const typedRow = {...row, properties:{...row.properties, building_type:'townhouse'}};
+  const inferredUnits = plan([typedRow], units, [left,right]);
+  assert.equal(inferredUnits.length,2);
+  assert(inferredUnits.every(p => p.buildingId === 'row' && p.rowUnits === 2));
   const confirmedUnits = units.map(u => ({...u, properties:{...u.properties, building_gers_id:'row'}}));
   const confirmedTown = plan([row], confirmedUnits, [left,right]);
   assert.equal(confirmedTown.length,2, 'existing confirmed row assignments retain their distinct pins');
