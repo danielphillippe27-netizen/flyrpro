@@ -94,11 +94,11 @@ assert.equal(await page.getByRole('complementary',{name:'Storm list'}).isVisible
 assert.equal(await page.getByRole('button',{name:'Saved storm maps'}).innerText(),'');
 assert.equal(await page.getByRole('button',{name:'Map settings'}).innerText(),'');
 await page.getByRole('button',{name:'Storm info',exact:true}).click();
-await page.getByText('Select a hail zone on the map.',{exact:true}).waitFor();
+await page.getByText(/Tap a shaded hail zone on the map/).waitFor();
 await page.getByRole('button',{name:'Hide storm list',exact:true}).click();
 await page.waitForTimeout(900);
 await page.screenshot({path:'/tmp/wolfgrid-mobile-storms-zone.png'});
-await page.locator('.mapboxgl-canvas').click({position:{x:195,y:422}});
+await page.locator('.mapboxgl-canvas').tap({position:{x:195,y:422}});
 await page.getByRole('button',{name:'Storm info',exact:true}).click();
 await page.getByLabel('Selected zone territory name').fill('Selected hail area');
 await page.getByRole('region',{name:'Find storm content'}).getByRole('button',{name:'Create storm territory',exact:true}).click();
