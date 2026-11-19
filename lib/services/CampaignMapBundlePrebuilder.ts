@@ -81,7 +81,7 @@ const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
   features: [],
 };
 
-export const MAP_BUNDLE_RENDER_VERSION = '2026-11-19-parcel-roof-links-v3';
+export const MAP_BUNDLE_RENDER_VERSION = '2026-11-19-parcel-roof-links-v4';
 const MIN_RENDERABLE_BUILDING_AREA_SQM = 30;
 const PARCEL_LABEL_OFFSET_METERS = 4;
 const SCOPED_GEOMETRY_CACHE_TTL_MS = 30_000;

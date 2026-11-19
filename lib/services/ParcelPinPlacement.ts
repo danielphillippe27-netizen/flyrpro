@@ -77,6 +77,43 @@ export function planParcelPinPlacements(input: {
   }
   const normalizeStreet = (value: unknown) => text(value).replace(/[^a-z0-9 ]/g, '').replace(/\b(street|road|avenue|drive|lane|court|boulevard)\b/g,
     word => ({street:'st',road:'rd',avenue:'ave',drive:'dr',lane:'ln',court:'ct',boulevard:'blvd'}[word]!)).replace(/\s+/g, ' ').trim();
+  // Municipal row footprints often have no housing-type tag. Recognize a row
+  // from distinct civic lots that each contain a substantial section of it.
+  const rowLots = new Map<string, Set<string>>();
+  const evidence = new Map<string, { lot: string; street: string; number: string; mask: PolygonFeature }[]>();
+  for (const [lot, occupants] of groups) {
+    const parcel = parcels.get(lot);
+    if (!parcel || occupants.length !== 1) continue;
+    const p = occupants[0].properties ?? {};
+    const street = normalizeStreet(p.street_name);
+    const number = text(p.house_number);
+    if (!street || !number) continue;
+    try {
+      const [minX,minY,maxX,maxY] = turf.bbox(parcel);
+      const sections = tree.search({minX,minY,maxX,maxY}).flatMap(({feature}) => {
+        const mask = turf.intersect(turf.featureCollection([feature, parcel]));
+        return mask ? [{feature, mask, area:turf.area(mask)}] : [];
+      }).sort((a,b) => b.area-a.area);
+      const section = sections[0];
+      if (!section || section.area < 30 || section.area < 3 * (sections[1]?.area ?? 0)) continue;
+      const key = buildingIdentifiers(section.feature)[0];
+      const linked = text(p.building_gers_id ?? p.linked_building_id ?? p.building_id);
+      if (!key || (linked && byAlias.get(linked) !== section.feature)) continue;
+      const entries = evidence.get(key) ?? [];
+      entries.push({lot, street, number, mask:section.mask});
+      evidence.set(key, entries);
+    } catch { /* Invalid geometry supplies no townhouse evidence. */ }
+  }
+  for (const [key, entries] of evidence) {
+    if (entries.length < 3 || new Set(entries.map(e => e.street)).size !== 1 ||
+        new Set(entries.map(e => e.number)).size !== entries.length) continue;
+    const sections = entries.map(e => e.mask);
+    const union = turf.union(turf.featureCollection(sections));
+    const roofArea = turf.area(byAlias.get(key)!);
+    if (!union || turf.area(union) < .90 * roofArea ||
+        sections.reduce((sum,g) => sum + turf.area(g),0) - turf.area(union) > .001 * roofArea) continue;
+    rowLots.set(key, new Set(entries.map(e => e.lot)));
+  }
   const rowMasks = new Map<string, Map<string, PolygonFeature>>();
   const placements: ParcelPinPlacement[] = [];
   for (const [parcelId, addresses] of groups) {
@@ -110,7 +147,7 @@ export function planParcelPinPlacements(input: {
         // A known neighbouring home can overhang the lot line. Its
         // smaller overlap is not a competing house on this parcel.
         const owners = currentOwners.get(buildingIdentifiers(feature)[0]);
-        if (owners?.size && !owners.has(addressId) &&
+        if (!rowLots.get(buildingIdentifiers(feature)[0])?.has(parcelId) && owners?.size && !owners.has(addressId) &&
             turf.area(intersection) < turf.area(feature) / 2 &&
             !turf.booleanPointInPolygon(interiorCentroid(feature), parcel)) return [];
         return [{ feature, intersection }];
@@ -120,10 +157,11 @@ export function planParcelPinPlacements(input: {
       // Never substitute another footprint for an existing association. A
       // missing footprint can still use parcel-only placement when no eligible
       // replacement exists; the original building link remains untouched.
-      const winner = linkedId ? candidates.find(c => c.feature === linked) : candidates.length === 1 ? candidates[0] : null;
+      const rowCandidate = candidates.filter(c => rowLots.get(buildingIdentifiers(c.feature)[0])?.has(parcelId));
+      const winner = linkedId ? candidates.find(c => c.feature === linked) : rowCandidate.length === 1 ? rowCandidate[0] : candidates.length === 1 ? candidates[0] : null;
       const row = winner?.feature;
       const rp = row?.properties ?? {};
-      const rowHouse = rp.is_townhome === true || rp.is_townhouse === true ||
+      const rowHouse = (row && rowLots.get(buildingIdentifiers(row)[0])?.has(parcelId)) || rp.is_townhome === true || rp.is_townhouse === true ||
         [rp.building, rp.building_type, rp.subtype].some(v => /^(townhouse|townhome|terrace|row[ _-]house)$/.test(text(v)));
       if (winner && !linkedId) {
         const key = buildingIdentifiers(winner.feature)[0];
@@ -180,7 +218,7 @@ export function planParcelPinPlacements(input: {
     const area = turf.area(roof);
     const covered = turf.area(union);
     const total = sections.reduce((sum, section) => sum + turf.area(section), 0);
-    if (covered >= area * .98 && total - covered <= area * .001) verifiedRows.set(key, masks.size);
+    if (covered >= area * (rowLots.has(key) ? .90 : .98) && total - covered <= area * .001) verifiedRows.set(key, masks.size);
   }
   return placements.flatMap(p => {
     const key = p.buildingId;
