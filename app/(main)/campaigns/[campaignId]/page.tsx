@@ -1283,9 +1283,13 @@ export default function CampaignDetailPage() {
     );
   };
 
-  // Dedupe by logical address: one row per (formatted + postal_code), prefer scanned
+  const addressText = (addr: CampaignAddress) => (addr.formatted || addr.address || '').trim();
+  const isPendingAddress = (addr: CampaignAddress) =>
+    !addressText(addr) || /^address pending$/i.test(addressText(addr));
   const addressKey = (addr: CampaignAddress) =>
-    `${(addr.formatted || addr.address || '').trim().toLowerCase()}|${(addr.postal_code || '').trim().toLowerCase()}`;
+    isPendingAddress(addr)
+      ? `id:${addr.id}`
+      : `${addressText(addr).toLowerCase()}|${(addr.postal_code || '').trim().toLowerCase()}`;
   const seen = new Map<string, CampaignAddress>();
   for (const addr of addresses) {
     const key = addressKey(addr);
@@ -1311,6 +1315,7 @@ export default function CampaignDetailPage() {
 
   for (const addr of addresses) {
     const logicalKey = addressKey(addr);
+    if (isPendingAddress(addr)) continue;
     for (const candidate of getAddressSearchCandidates(addr)) {
       const keys = logicalKeysBySearchText.get(candidate) ?? new Set<string>();
       keys.add(logicalKey);
@@ -1367,7 +1372,7 @@ export default function CampaignDetailPage() {
 
     return {
       id: addr.id,
-      address_line: addr.formatted || addr.address || '',
+      address_line: isPendingAddress(addr) ? `Address pending · ${addr.id.slice(0, 8)}` : addressText(addr),
       city: addr.locality || '',
       region: addr.region || '',
       postal_code: addr.postal_code || '',

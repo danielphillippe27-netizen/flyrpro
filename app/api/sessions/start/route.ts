@@ -9,6 +9,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type SessionStartBody = {
+  clientSessionId?: string;
+  ownerId?: string;
   campaignId?: string | null;
   workspaceId?: string | null;
   routeAssignmentId?: string | null;
@@ -71,6 +73,14 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => ({}))) as SessionStartBody;
+  const clientId = body.clientSessionId;
+  if (clientId != null && (typeof clientId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clientId))) {
+    return NextResponse.json({ error: 'Invalid client session ID' }, { status: 400 });
+  }
+  if (body.ownerId != null && body.ownerId !== requestUser.id) {
+    return NextResponse.json({ error: 'Session belongs to another account' }, { status: 403 });
+  }
   const campaignId = typeof body.campaignId === 'string' && body.campaignId.trim()
     ? body.campaignId.trim()
     : null;
@@ -99,6 +109,7 @@ export async function POST(request: NextRequest) {
       : new Date();
   const goalAmount = body.goalAmount == null ? 0 : Math.max(0, Number(body.goalAmount) || 0);
   const sessionInsert = {
+    ...(clientId ? { id: clientId } : {}),
     workspace_id: resolvedWorkspaceId,
     user_id: requestUser.id,
     campaign_id: campaignId,
@@ -133,6 +144,19 @@ export async function POST(request: NextRequest) {
     if (routeAssignmentColumnMissing) delete fallback.route_assignment_id;
     delete fallback.leads_created;
     result = await admin.from('sessions').insert(fallback).select('id').single();
+  }
+
+  // A visit, an invitation, and the final upload can all arrive first.
+  // Reuse only the matching personal session and never reset its progress on retry.
+  if (clientId && result.error?.code === '23505') {
+    const existing = await admin.from('sessions').select('id, campaign_id, workspace_id')
+      .eq('id', clientId).eq('user_id', requestUser.id).maybeSingle();
+    if (existing.error) return NextResponse.json({ error: 'Unable to verify session' }, { status: 500 });
+    if (!existing.data || existing.data.campaign_id !== campaignId || existing.data.workspace_id !== resolvedWorkspaceId) {
+      return NextResponse.json({ error: 'Session identity conflict' }, { status: 409 });
+    }
+    return NextResponse.json({ success: true, sessionId: clientId, session_id: clientId,
+      workspace_id: resolvedWorkspaceId, workspaceId: resolvedWorkspaceId });
   }
 
   if (result.error || !result.data?.id) {
