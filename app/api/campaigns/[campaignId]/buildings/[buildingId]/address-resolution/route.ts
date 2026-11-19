@@ -174,13 +174,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
             error: 'formatted, longitude and latitude are required',
           }, { status: 400 });
         }
-        const { data: sequenceRow } = await admin
-          .from('campaign_addresses')
-          .select('seq')
-          .eq('campaign_id', campaignId)
-          .order('seq', { ascending: false })
-          .limit(1)
-          .maybeSingle();
         const { error } = await admin.from('campaign_addresses').upsert({
           id: addressId,
           campaign_id: campaignId,
@@ -194,7 +187,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
           source_id: `client:${addressId}`,
           geom: `SRID=4326;POINT(${longitude} ${latitude})`,
           coordinate: { longitude, latitude },
-          seq: Math.max(-1, Number(sequenceRow?.seq ?? -1)) + 1,
         }, { onConflict: 'id' });
         if (error) throw new Error(`Failed to create manual address: ${error.message}`);
       }
