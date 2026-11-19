@@ -638,6 +638,24 @@ async function run() {
     assertEqual(state.buildingAddressLinks?.[0].building_id, 'durham_buildings:170090');
   });
 
+  await testAsync('Manual Gold assignment preserves both UUID and snapshot-only roof identifiers', async () => {
+    const uuid = 'e4a9e053-9413-4b58-81a6-40b0edc650de';
+    for (const publicId of [uuid, `overture:building:${uuid}`]) {
+      const campaignId = 'campaign-1';
+      const addressId = 'address-1';
+      const state: MockState = {
+        campaignAddresses: [{ id: addressId, campaign_id: campaignId }],
+        addressOrphans: [{ address_id: addressId, campaign_id: campaignId }],
+      };
+      const service = new StableLinkerService(createMockSupabase(state) as unknown as SupabaseLike);
+      const result = await service.assignAddressToGoldBuilding({ campaignId, addressId, buildingPublicId: publicId });
+      assertEqual(state.campaignAddresses?.[0].building_id, publicId === uuid ? uuid : null);
+      assertEqual(state.campaignAddresses?.[0].building_gers_id, publicId);
+      assertEqual(state.addressOrphans?.[0].assigned_building_id, publicId);
+      assertEqual(result.linkedAddressIds, [addressId]);
+    }
+  });
+
   test('Canonical linker skips a claimed single-unit building for the next address', () => {
     const service = createStableLinkerHarness();
     const alreadyMatched = makeBuilding(

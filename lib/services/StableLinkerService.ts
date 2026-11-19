@@ -7,10 +7,20 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import RBush from 'rbush';
+import { isUuid } from '@/app/api/campaigns/_utils/resolve-campaign-building';
 import { isAccessoryBuilding } from './ParcelPinPlacement';
 import { booleanIntersects } from '@turf/turf';
 import type { Polygon, MultiPolygon } from 'geojson';
 import { fetchAllInPages } from '@/lib/supabase/fetchAllInPages';
+
+export function goldAddressPlacement(buildingPublicId: string) {
+  return {
+    building_id: isUuid(buildingPublicId) ? buildingPublicId : null,
+    building_gers_id: buildingPublicId,
+    match_source: 'manual',
+    confidence: 1,
+  };
+}
 
 // Match result types
 export interface MatchResult {
@@ -1415,12 +1425,7 @@ export class StableLinkerService {
   }): Promise<StableManualLinkResult> {
     const { campaignId, addressId, buildingPublicId, coordinate, assignedBy } = input;
 
-    const addressUpdate: Record<string, unknown> = {
-      building_id: buildingPublicId,
-      building_gers_id: buildingPublicId,
-      match_source: 'manual',
-      confidence: 1,
-    };
+    const addressUpdate: Record<string, unknown> = goldAddressPlacement(buildingPublicId);
     if (coordinate) {
       addressUpdate.geom = JSON.stringify({ type: 'Point', coordinates: coordinate });
     }

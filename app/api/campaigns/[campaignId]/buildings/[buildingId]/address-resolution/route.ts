@@ -12,7 +12,7 @@ import {
   readCurrentCampaignMapBundle,
 } from '@/lib/services/CampaignMapBundlePrebuilder';
 import { CampaignMapReconciliationService } from '@/lib/services/CampaignMapReconciliationService';
-import { StableLinkerService } from '@/lib/services/StableLinkerService';
+import { goldAddressPlacement, StableLinkerService } from '@/lib/services/StableLinkerService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -187,6 +187,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           source_id: `client:${addressId}`,
           geom: `SRID=4326;POINT(${longitude} ${latitude})`,
           coordinate: { longitude, latitude },
+          ...(!building.rowId ? goldAddressPlacement(building.publicId) : {}),
         }, { onConflict: 'id' });
         if (error) throw new Error(`Failed to create manual address: ${error.message}`);
       }
