@@ -311,6 +311,46 @@ export async function GET(
       }));
     }
 
+    // The bundle carries verified townhouse sections even when only one unit
+    // has a legacy building link. Read the same identities used on the roof.
+    const [bundleResult, editResult] = await Promise.all([
+      supabase.from('campaign_map_bundles').select('links,counts')
+        .eq('campaign_id', campaignId).eq('is_current', true).maybeSingle(),
+      supabase.from('campaign_map_edit_states').select('features').eq('campaign_id', campaignId).maybeSingle(),
+    ]);
+    if (bundleResult.error || editResult.error) throw bundleResult.error || editResult.error;
+    let bundleLinks = bundleResult.data?.links;
+    if (bundleResult.data?.counts?._external_map_payload) {
+      const { readCurrentCampaignMapBundle } = await import('@/lib/services/CampaignMapBundlePrebuilder');
+      bundleLinks = (await readCurrentCampaignMapBundle(supabase, campaignId))?.links;
+    }
+    const aliases = new Set(candidateBuildingIdList.map(id => id.toLowerCase()));
+    const byAddress = new Map(addresses.map(a => [a.address_id, a]));
+    const edits = editResult.data?.features ?? {};
+    const belongsHere = (id: string) => {
+      const edit = edits['address:' + id.toLowerCase()];
+      return !edit?.hidden && (!edit?.buildingLinkSet || aliases.has(String(edit.buildingId).toLowerCase()));
+    };
+    const unitIds = new Set<string>();
+    for (const link of Array.isArray(bundleLinks) ? bundleLinks : []) {
+      if (link.is_multi_unit && link.match_type === 'parcel_verified' &&
+          aliases.has(String(link.building_id).toLowerCase()) && belongsHere(link.address_id) && !byAddress.has(link.address_id))
+        unitIds.add(link.address_id);
+    }
+    if (unitIds.size) {
+      const { data, error } = await supabase.from('campaign_addresses')
+        .select('id,formatted,house_number,street_name,geom,building_gers_id,building_id')
+        .eq('campaign_id', campaignId).in('id', [...unitIds]);
+      if (error) throw error;
+      for (const a of data ?? []) {
+        if ((a.building_gers_id || a.building_id) && ![a.building_gers_id,a.building_id].some(v => aliases.has(String(v).toLowerCase()))) continue;
+        byAddress.set(a.id, {address_id:a.id, formatted:displayAddressText(a) ?? '', house_number:resolveHouseNumberLabel(a),
+          street_name:a.street_name, geom:a.geom, unit_number:null, match_type:'parcel_verified',confidence:.99,
+          distance_meters:0,is_outside_footprint:false});
+      }
+    }
+    addresses = [...byAddress.values()].filter(a => belongsHere(a.address_id));
+
     if (addresses.length > 0) {
       const { data: canonicalStates } = await supabase
         .from('campaign_addresses_geojson')
