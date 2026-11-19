@@ -9,7 +9,7 @@ import {
 import { createAdminClient } from '@/lib/supabase/server';
 import {
   prebuildCampaignMapBundle,
-  readCurrentCampaignMapBundle,
+  readCurrentCampaignMapBundleMetadata,
 } from '@/lib/services/CampaignMapBundlePrebuilder';
 import { CampaignMapReconciliationService } from '@/lib/services/CampaignMapReconciliationService';
 import { goldAddressPlacement, StableLinkerService } from '@/lib/services/StableLinkerService';
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const replay = await replayResponse(admin, campaignId, idempotencyKey);
   if (replay) return replay;
 
-  const currentBundle = await readCurrentCampaignMapBundle(admin, campaignId);
+  const currentBundle = await readCurrentCampaignMapBundleMetadata(admin, campaignId);
   const baseSignature = stringValue(body.base_bundle_signature);
   let acceptedHistoricalOfflineBase = false;
   if (
@@ -161,6 +161,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     } else {
       let addressId = stringValue(body.address_id);
+      // The address and snapshot roof link are persisted together. This field client
+      // reads its placement from map edits while the existing bundle worker runs.
+      const deferBundleRebuild = action === 'create_manual' && !building.rowId &&
+        body.defer_bundle_rebuild === true && body.offline_mutation !== true &&
+        addressId === idempotencyKey;
       if (action === 'create_manual') {
         addressId = addressId ?? randomUUID();
         if (!UUID_PATTERN.test(addressId)) {
@@ -188,7 +193,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
           geom: `SRID=4326;POINT(${longitude} ${latitude})`,
           coordinate: { longitude, latitude },
           ...(!building.rowId ? goldAddressPlacement(building.publicId) : {}),
-        }, { onConflict: 'id' });
+          ...(deferBundleRebuild ? {
+            address_resolution_status: 'confirmed',
+            address_resolution_bundle_pending: true,
+          } : {}),
+        }, { onConflict: 'id', ignoreDuplicates: deferBundleRebuild });
         if (error) throw new Error(`Failed to create manual address: ${error.message}`);
       }
 
@@ -201,6 +210,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
         .maybeSingle();
       if (addressError || !address) throw new Error(addressError?.message ?? 'Address not found');
 
+      if (deferBundleRebuild && (address.source !== 'manual' || address.building_gers_id !== building.publicId)) {
+        throw new Error('Address already belongs to another placement');
+      }
       if (action === 'undo') {
         const result = await linker.unassignAddressFromBuilding({
           campaignId,
@@ -235,10 +247,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
           .eq('address_id', addressId);
         response = { action, address_id: addressId, building_id: building.publicId, ...result };
       }
-      const rebuilt = await prebuildCampaignMapBundle(admin, campaignId, undefined, {
-        forceRebuild: true,
-      });
-      response.bundle_signature = rebuilt.asset_signature;
+      if (deferBundleRebuild) {
+        response.bundle_refresh_queued = true;
+      } else {
+        const rebuilt = await prebuildCampaignMapBundle(admin, campaignId, undefined, {
+          forceRebuild: true,
+        });
+        response.bundle_signature = rebuilt.asset_signature;
+      }
     }
 
     const linkedAddressIds = Array.isArray(response.linkedAddressIds)
