@@ -352,20 +352,16 @@ export async function GET(
     addresses = [...byAddress.values()].filter(a => belongsHere(a.address_id));
 
     if (addresses.length > 0) {
-      const { data: canonicalStates } = await supabase
-        .from('campaign_addresses_geojson')
-        .select('id, visited, address_status')
-        .in('id', addresses.map((address) => address.address_id));
-
-      const stateById = new Map(
-        (canonicalStates || []).map((row) => [
-          row.id as string,
-          {
-            visited: (row as { visited?: boolean | null }).visited ?? null,
-            address_status: (row as { address_status?: string | null }).address_status ?? null,
-          },
-        ])
-      );
+      const ids = addresses.map(a => a.address_id);
+      const [visits, outcomes] = await Promise.all([
+        supabase.from('campaign_addresses_geojson').select('id,visited').eq('campaign_id',campaignId).in('id',ids),
+        supabase.from('address_statuses').select('campaign_address_id,status').eq('campaign_id',campaignId).in('campaign_address_id',ids),
+      ]);
+      if (visits.error || outcomes.error) throw visits.error || outcomes.error;
+      const status = new Map((outcomes.data ?? []).map(row => [row.campaign_address_id,row.status]));
+      const stateById = new Map((visits.data ?? []).map(row => [row.id, {
+        visited:row.visited, address_status:status.get(row.id) ?? null,
+      }]));
 
       addresses = addresses.map((address) => ({
         ...address,
