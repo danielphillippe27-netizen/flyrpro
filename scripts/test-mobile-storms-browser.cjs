@@ -6,6 +6,7 @@ const assert=require('node:assert/strict');
 const browser=await chromium.launch({headless:true,channel:'chrome',args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true});
 const failures=[]; const requests=[];
+const selectedZonePinCount=Number(process.env.STORMS_TEST_LARGE_COUNT)||26;
 page.on('pageerror',e=>failures.push(e.message));
 const workspace='c02ae085-144b-4234-b1f7-234fd7a937ed';
 const territoryId='ac78c005-f4c4-4fda-8f53-63751929e4d2';
@@ -36,8 +37,12 @@ await page.route('**/api/storm-maps/**',async route=>{
   const selected=req.postDataJSON().territoryId===drawnTerritoryId?drawnTerritory:territory;
   json={parts:[{boundary:selected.boundary,addressCount:12}],name:selected.name,context:{...selected.context,territoryId:selected.id}};
  }
- else if(u.pathname.endsWith('/address-count'))json={count:process.env.STORMS_TEST_DRAWN_CAMPAIGN&&JSON.stringify(req.postDataJSON())!==JSON.stringify(boundary)?12:Number(process.env.STORMS_TEST_LARGE_COUNT)||0,partial:false,zoom:14,regions:['ON']};
- else if(u.pathname.endsWith('/exposure'))json={counts:[{minimumMM:25.4,count:2400}],available:true};
+ else if(u.pathname.endsWith('/address-count')){
+  const isStormZone=JSON.stringify(req.postDataJSON())===JSON.stringify(boundary);
+  const count=isStormZone ? selectedZonePinCount : process.env.STORMS_TEST_DRAWN_CAMPAIGN?12:0;
+  json={count,partial:false,zoom:14,regions:['ON']};
+ }
+ else if(u.pathname.endsWith('/exposure'))json={counts:null,available:false};
  await route.fulfill({json});
 });
 let provisionAttempts=0;
@@ -100,6 +105,10 @@ await page.waitForTimeout(900);
 await page.screenshot({path:'/tmp/wolfgrid-mobile-storms-zone.png'});
 await page.locator('.mapboxgl-canvas').tap({position:{x:195,y:422}});
 await page.getByRole('button',{name:'Storm info',exact:true}).click();
+const preview=page.locator('[aria-live="polite"]').filter({hasText:'Mapped address pins in this hail zone'});
+await preview.getByText(selectedZonePinCount.toLocaleString(),{exact:true}).waitFor();
+assert(requests.some(r=>r.path.endsWith('/address-count')&&JSON.stringify(r.body)===JSON.stringify(boundary)),'The preview counts the selected hail polygon');
+assert(!requests.some(r=>r.path.endsWith('/territories')&&r.method==='POST'),'The mapped count appears before the territory is saved');
 await page.getByLabel('Selected zone territory name').fill('Selected hail area');
 await page.getByRole('region',{name:'Find storm content'}).getByRole('button',{name:'Create storm territory',exact:true}).click();
 await page.waitForTimeout(300);

@@ -106,7 +106,22 @@ async function main() {
   };
   const storm = { key: 'iem:hail:2026-10-21:AZ', title: 'TX hail reports', hazard: 'hail', source: 'iem', sourceId: 'test', start: range.start.toISOString(), end: range.end.toISOString(), reportCount: 1, maxHailMM: 50.8, features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [-101, 35] }, properties: { kind: 'report', hailMM: 50.8 } }] };
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: string) => ({ ok: true, json: async () => url.includes('/zones?') ? { zones: [{ id: 'zone', minimum_mm: 25.4, estimation_method: 'WolfGrid zones derived from NOAA MRMS 24-hour maximum estimated hail size', geometry: { type: 'Polygon', coordinates: [[[-101.1,34.9],[-100.9,34.9],[-100.9,35.1],[-101.1,35.1],[-101.1,34.9]]] } }] } : { events: [storm] } })) as typeof fetch;
+  const selectedBoundary = { type: 'Polygon', coordinates: [[[-101.1,34.9],[-100.9,34.9],[-100.9,35.1],[-101.1,35.1],[-101.1,34.9]]] };
+  const emptyBoundary = { type: 'Polygon', coordinates: [[[-101.5,34.9],[-101.3,34.9],[-101.3,35.1],[-101.5,35.1],[-101.5,34.9]]] };
+  const countedBoundaries: unknown[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    if (url.includes('/zones?')) return Response.json({ zones: [{
+      id: 'zone', minimum_mm: 25.4, estimation_method: 'WolfGrid zones derived from NOAA MRMS 24-hour maximum estimated hail size',
+      geometry: { type: 'MultiPolygon', coordinates: [selectedBoundary.coordinates, emptyBoundary.coordinates] },
+    }] });
+    if (url.includes('/address-count?')) {
+      const boundary = JSON.parse(String(init?.body));
+      countedBoundaries.push(boundary);
+      return Response.json({ count: JSON.stringify(boundary) === JSON.stringify(selectedBoundary) ? 26 : 0, partial: false, regions: ['TX'] });
+    }
+    if (url.includes('/exposure?')) return Response.json({ available: false, counts: null, reason: 'Historical exposure is disabled.' });
+    return Response.json({ events: [storm] });
+  }) as typeof fetch;
   let savedZoneId: string | undefined;
   const stormRoot = createRoot(document.getElementById('root')!);
   await act(async () => { stormRoot.render(<StormDiscoveryPanel allAreasByDefault map={map as never} workspaceId="test" onSelect={() => {}} onTerritory={() => {}} onSaveZone={async (_name, _boundary, context) => { savedZoneId = context.zoneId; }} />); });
@@ -119,12 +134,27 @@ async function main() {
   assert.ok(document.body.textContent?.includes('Tap a shaded hail zone'));
   assert.ok(![...document.querySelectorAll('button')].some(button => button.textContent === 'Select hail zone'),
     'Archived zones are selected directly on the map, without opening the rolling provider selector');
-  await act(async () => {
-    for (const listener of listeners.get('click') ?? []) {
-      (listener as (event: { lngLat: { lng: number; lat: number } }) => void)({ lngLat: { lng: -101, lat: 35 } });
-    }
-  });
+  const pickZone = async (lng: number) => {
+    await act(async () => {
+      for (const listener of listeners.get('click') ?? []) {
+        (listener as (event: { lngLat: { lng: number; lat: number } }) => void)({ lngLat: { lng, lat: 35 } });
+      }
+    });
+  };
+  const waitForCount = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 550)); });
+  await pickZone(-101);
   assert.ok(document.body.textContent?.includes('Estimated hail: 1.00″+'));
+  await waitForCount();
+  assert.deepEqual(countedBoundaries, [selectedBoundary], 'Count only the selected connected polygon before it is saved');
+  const preview = () => [...document.querySelectorAll('[aria-live="polite"]')].find(node => node.textContent?.includes('Mapped address pins in this hail zone'));
+  assert.ok(preview()?.textContent?.includes('26'), 'Mapped pin totals are available with historical exposure disabled');
+  assert.equal(savedZoneId, undefined);
+  await pickZone(-101.4);
+  assert.ok(!preview()?.textContent?.includes('26'), 'Switching zones must hide the previous count immediately');
+  await waitForCount();
+  assert.deepEqual(countedBoundaries, [selectedBoundary, emptyBoundary]);
+  assert.ok(preview()?.textContent?.includes('No mapped pins found'));
+  await pickZone(-101);
   await click('Create storm territory');
   assert.equal(savedZoneId, 'zone');
   await act(async () => { stormRoot.unmount(); });
