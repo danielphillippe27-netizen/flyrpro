@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare daily regional MRMS hail maps for Canadian land in NOAA's radar grid."""
+"""Prepare daily regional MRMS hail maps on Canadian or U.S. land in NOAA's radar grid."""
 import argparse
 import importlib.util
 import json
@@ -34,22 +34,31 @@ CELL_DEGREES = 0.01
 
 
 @lru_cache(maxsize=2)
-def province_windows(transform, domain_bounds, width, height):
+def region_windows(country, transform, domain_bounds, width, height):
     regions = json.loads((ADMIN / "wind-region-boundaries.json").read_text())
+    us_names = {region["name"]: region["code"] for region in json.loads((BASE / "regions.json").read_text())
+                if region["country"] == "US"}
     domain = box(*domain_bounds)
     extent = Window(0, 0, width, height)
     windows = []
     for region in regions:
-        if region["country"] != "CA":
+        if region["country"] != country:
             continue
-        province = make_valid(shape(region["geometry"])).intersection(domain)
+        name = region["name"]
+        land = make_valid(shape(region["geometry"]))
+        if country == "US" and name == "Washington" and land.bounds[0] > -90:
+            name = "District of Columbia"
+        code = (PROVINCE_CODE if country == "CA" else us_names).get(name)
+        if code is None or (country == "US" and code in {"AK", "HI"}):
+            continue
+        province = land.intersection(domain)
         if province.is_empty or province.area < CELL_DEGREES**2:
             continue
         window = from_bounds(*province.bounds, transform=transform).round_offsets().round_lengths()
         window = window.intersection(extent)
         sampled = geometry_mask([mapping(province)], (int(window.height), int(window.width)),
                                 transform * transform.translation(window.col_off, window.row_off), invert=True)
-        windows.append((region["name"], province, window, sampled))
+        windows.append((name, code, province, window, sampled))
     return windows
 
 
@@ -100,27 +109,28 @@ def severity_rows(key, values, transform, province, interior, frame):
     return rows if len(rows) >= 2 else []
 
 
-def process_day(day, assets):
+def process_day(day, country, assets):
     frame = datetime.combine(day + timedelta(days=1), NOON)
     source_url, data = builder.grid_bytes(frame)
     entries = []
     with MemoryFile(data) as source, source.open() as grid:
         builder.validate_grid(grid, frame)
         interior = box(*grid.bounds).buffer(-0.001)
-        for province_name, province, window, mask in province_windows(grid.transform, tuple(grid.bounds), grid.width, grid.height):
-            values = grid.read(1, window=window)
+        raster = grid.read(1)
+        windows = region_windows(country, grid.transform, tuple(grid.bounds), grid.width, grid.height)
+        for region_name, region_code, province, window, mask in windows:
+            values = raster[window.toslices()]
             values = np.where(mask & np.isfinite(values) & (values > 0), values, 0)
             if np.count_nonzero(values >= SEVERE_MM) < MINIMUM_CORE_CELLS:
                 continue
-            province_code = PROVINCE_CODE[province_name]
-            key = f"noaa-mrms:ca:hail:{day}:{province_code}"
+            key = f"noaa-mrms:{country.lower()}:hail:{day}:{region_code}"
             transform = grid.window_transform(window)
             rows = severity_rows(key, values, transform, province, interior, frame)
             if not rows:
                 continue
             overlay = builder.render_overlay(key, rows, values, transform, assets)
             entry = {
-                "key": key, "title": f"{province_name} estimated hail · {day}", "hazard": "hail",
+                "key": key, "title": f"{region_name} estimated hail · {day}", "hazard": "hail",
                 "source": "noaa-mrms", "sourceId": frame.strftime("%Y%m%d-%H%M%S:MESHMax1440min"),
                 "start": (frame - timedelta(days=1)).isoformat(), "end": frame.isoformat(),
                 "features": [], "reportCount": 0, "maxHailMM": None, "maxWindKPH": None,
@@ -134,6 +144,7 @@ def process_day(day, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--country", choices=("CA", "US"), default="CA")
     parser.add_argument("--from", dest="start", required=True, type=date.fromisoformat)
     parser.add_argument("--through", dest="end", required=True, type=date.fromisoformat)
     parser.add_argument("--output", required=True, type=Path)
@@ -147,7 +158,7 @@ def main():
 
     def prepare(day):
         try:
-            return day, process_day(day, assets), None
+            return day, process_day(day, args.country, assets), None
         except Exception as error:
             return day, [], str(error)
 

@@ -1,11 +1,11 @@
 import { createAdminClient } from '@/lib/supabase/server';
-import { canadianMrmsHailStoragePath } from '@/lib/storm-maps/intelligence/mrms-hail-overlay';
+import { mrmsHailStoragePath } from '@/lib/storm-maps/intelligence/mrms-hail-overlay';
 
 export const runtime = 'nodejs';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ eventKey: string }> }) {
   const { eventKey } = await params;
-  const path = eventKey.endsWith('.png') ? canadianMrmsHailStoragePath(eventKey.slice(0, -4)) : null;
+  const path = eventKey.endsWith('.png') ? mrmsHailStoragePath(eventKey.slice(0, -4)) : null;
   if (!path) return new Response(null, { status: 404 });
 
   const { data, error } = await createAdminClient().storage.from('storm-archive').download(path);

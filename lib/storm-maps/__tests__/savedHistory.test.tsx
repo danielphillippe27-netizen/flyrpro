@@ -1,4 +1,4 @@
-import { canadianMrmsHailStoragePath, mrmsHailOverlay } from '../intelligence/mrms-hail-overlay';
+import { mrmsHailStoragePath, mrmsHailOverlay } from '../intelligence/mrms-hail-overlay';
 import assert from 'node:assert/strict';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -11,6 +11,8 @@ async function main() {
   for (const invalid of ['-1', 'abc', '1.5', '9007199254740991']) assert.equal(savedStormArchiveOffset(invalid), null);
   assert.equal(savedStormArchiveOffset('200'), 200);
   assert.equal(savedStormArchiveFilter('US', 'hail')?.source, 'iem');
+  assert.equal(savedStormArchiveFilter('US', 'hail')?.radarKeyPattern, 'noaa-mrms:us:hail:%');
+  assert.equal(savedStormArchiveFilter('US', 'tornado')?.radarKeyPattern, null);
   assert.equal(savedStormArchiveFilter('AU', 'hail'), null);
   assert.equal(savedStormArchiveFilter('CA', 'hail')?.keyPattern, 'noaa-mrms:ca:hail:%');
   assert.equal(savedStormArchiveFilter('NZ', 'hail'), null);
@@ -19,8 +21,11 @@ async function main() {
   const hailMap = { coordinates: [[-115, 52], [-113, 52], [-113, 50], [-115, 50]] } satisfies NonNullable<import('../intelligence/model').StormEvent['hailMap']>;
   assert.equal(mrmsHailOverlay(archivedKey, hailMap)?.url, '/storm-maps/hail/archive/noaa-mrms%3Aca%3Ahail%3A2026-07-17%3AAB.png');
   assert.equal(mrmsHailOverlay(archivedKey), undefined);
+  assert.equal(mrmsHailOverlay('noaa-mrms:us:hail:2026-07-17:TX', hailMap)?.url, '/storm-maps/hail/archive/noaa-mrms%3Aus%3Ahail%3A2026-07-17%3ATX.png');
+  assert.equal(mrmsHailStoragePath('noaa-mrms:ca:hail:2026-07-17:TX'), null);
+  assert.equal(mrmsHailStoragePath('noaa-mrms:us:hail:2026-07-17:AB'), null);
   assert.equal(mrmsHailOverlay('noaa-mrms:ca:hail:2025-08-20:AB')?.url, '/storm-maps/hail/mrms-v1/noaa-mrms-ca-hail-2025-08-20-AB.png');
-  assert.equal(canadianMrmsHailStoragePath(archivedKey + '/../private'), null);
+  assert.equal(mrmsHailStoragePath(archivedKey + '/../private'), null);
 
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://wolfgrid.app/campaigns/create' });
   Object.assign(globalThis, { React, self: dom.window, window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });

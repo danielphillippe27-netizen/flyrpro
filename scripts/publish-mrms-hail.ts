@@ -1,13 +1,13 @@
 /**
- * Publish reviewed Canadian hail maps prepared by backfill-canadian-mrms-hail.py.
- * DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/publish-canadian-mrms-hail.ts <directory> <from> <through> --publish
+ * Publish reviewed hail maps prepared by backfill-mrms-hail.py.
+ * DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/publish-mrms-hail.ts <directory> <from> <through> --publish
  */
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createAdminClient } from '../lib/supabase/server';
 import { MRMS_HAIL_ZONE_METHOD } from '../lib/storm-maps/intelligence/geometry';
-import { canadianMrmsHailStoragePath, mrmsHailOverlay } from '../lib/storm-maps/intelligence/mrms-hail-overlay';
+import { mrmsHailStoragePath, mrmsHailOverlay } from '../lib/storm-maps/intelligence/mrms-hail-overlay';
 import { eventReferenceSchema, type StormEvent } from '../lib/storm-maps/intelligence/model';
 
 type Zone = {
@@ -40,7 +40,7 @@ async function main() {
     throw Error('Choose up to 400 unique maps prepared for the requested dates.');
   }
   const files = await Promise.all(entries.map(async ({ event, image, sourceUrl, zones }) => {
-    const path = canadianMrmsHailStoragePath(event.key);
+    const path = mrmsHailStoragePath(event.key);
     const source = new URL(sourceUrl);
     const reference = { key: event.key, title: event.title, hazard: event.hazard, source: event.source,
       sourceId: event.sourceId, start: event.start, end: event.end };

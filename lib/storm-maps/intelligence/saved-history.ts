@@ -5,8 +5,8 @@ export function savedStormArchiveFilter(country: string | null, hazard: string |
   if (!isStormCountry(country) || !['hail', 'tornado'].includes(hazard ?? '')) return null;
   // Never show U.S. reports or Canadian radar estimates under another country.
   return country === 'US'
-    ? { hazard: hazard!, source: 'iem', keyPattern: '%' }
-    : { hazard: hazard!, source: 'noaa-mrms', keyPattern: `noaa-mrms:ca:${hazard}:%` };
+    ? { hazard: hazard!, source: 'iem', keyPattern: '%', radarKeyPattern: hazard === 'hail' ? 'noaa-mrms:us:hail:%' : null }
+    : { hazard: hazard!, source: 'noaa-mrms', keyPattern: `noaa-mrms:ca:${hazard}:%`, radarKeyPattern: null };
 }
 
 export function savedStormArchiveOffset(cursor: string | null): number | null {

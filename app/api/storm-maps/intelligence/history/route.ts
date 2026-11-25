@@ -13,8 +13,13 @@ export async function GET(request: NextRequest) {
   const offset = savedStormArchiveOffset(params.get('cursor'));
   if (!filter || offset == null) return NextResponse.json({ error: 'Choose a valid country, storm type and archive page.' }, { status: 400 });
   try {
-    const query = () => context.admin.from('storm_events').select('event_key,event_start,metadata')
-      .eq('hazard', filter.hazard).eq('source', filter.source).like('event_key', filter.keyPattern);
+    const query = () => {
+      const records = context.admin.from('storm_events').select('event_key,event_start,metadata').eq('hazard', filter.hazard);
+      if (filter.radarKeyPattern) {
+        return records.or(`source.eq.iem,and(source.eq.noaa-mrms,event_key.like.${filter.radarKeyPattern})`);
+      }
+      return records.eq('source', filter.source).like('event_key', filter.keyPattern);
+    };
     const [page, first] = await Promise.all([
       query().order('event_start', { ascending: false }).order('event_key').range(offset, offset + SAVED_STORM_PAGE_SIZE),
       query().order('event_start').order('event_key').limit(1).maybeSingle(),
