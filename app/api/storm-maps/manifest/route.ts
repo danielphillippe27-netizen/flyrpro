@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stormPointInCoverage } from '@/lib/storm-maps/tile-policy';
 import { resolveUserFromRequest } from '@/app/api/_utils/request-user';
 import { resolveWorkspaceMembershipForUser, type MinimalSupabaseClient } from '@/app/api/_utils/workspace';
 import { createAdminClient } from '@/lib/supabase/server';
@@ -92,6 +93,10 @@ export async function GET(request: NextRequest) {
   const lon = Number.parseFloat(request.nextUrl.searchParams.get('lon') || '-79.35');
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return NextResponse.json({ error: 'lat and lon must be valid coordinates' }, { status: 400 });
+  }
+
+  if (!stormPointInCoverage(lon, lat)) {
+    return NextResponse.json({error:'Storm Maps covers Canada and the United States.'},{status:400});
   }
 
   const xweatherConfigured = isXweatherConfigured();

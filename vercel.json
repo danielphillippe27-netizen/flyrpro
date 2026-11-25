@@ -46,14 +46,6 @@
     {
       "path": "/api/cron/storm-collection",
       "schedule": "15 * * * *"
-    },
-    {
-      "path": "/api/cron/storm-australia",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/storm-wind",
-      "schedule": "*/5 * * * *"
     }
   ]
 }

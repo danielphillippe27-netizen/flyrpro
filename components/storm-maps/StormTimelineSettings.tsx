@@ -1,7 +1,8 @@
 'use client';
 import { useContext, useEffect, useState } from 'react';
 import { StormCountryContext } from '@/lib/storm-maps/storm-country-context';
-import { WIND_COUNTRIES, type WindCountry } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { WIND_COUNTRIES } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { isStormCountry, STORM_COUNTRIES } from '@/lib/storm-maps/storm-countries';
 import { Settings2, X } from 'lucide-react';
 import { StormTimelineRange } from './StormTimelineRange';
 import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
@@ -40,8 +41,8 @@ export function StormTimelineSettings({ range, duration, settings, onChange, onR
     {open && <section aria-label="Timeline settings" className="absolute right-0 top-full mt-3 z-50 max-h-[calc(100dvh-12rem)] w-[min(24rem,calc(100vw-3rem))] overflow-y-auto rounded-2xl bg-white p-5 text-slate-900 shadow-2xl" style={{overscrollBehavior:'contain'}}>
       <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">Timeline</h2><button type="button" aria-label="Close timeline settings" onClick={()=>setOpen(false)} className="rounded-full bg-slate-100 p-2"><X className="h-4 w-4" /></button></div>
       {countryFilter && <label className="mb-5 block text-sm font-semibold">Country
-        <select aria-label="Storm country" value={countryFilter.country} onChange={event => countryFilter.setCountry(event.target.value as WindCountry)} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white p-2 text-base text-slate-900">
-          {(['CA', 'US', 'AU'] as const).map(code => <option key={code} value={code}>{WIND_COUNTRIES[code].name}</option>)}
+        <select aria-label="Storm country" value={countryFilter.country} onChange={event => { if (isStormCountry(event.target.value)) countryFilter.setCountry(event.target.value); }} className="mt-2 min-h-11 w-full rounded-lg border border-slate-300 bg-white p-2 text-base text-slate-900">
+          {STORM_COUNTRIES.map(code => <option key={code} value={code}>{WIND_COUNTRIES[code].name}</option>)}
         </select>
       </label>}
       <h3 className="mb-2 text-base font-semibold">Weather mode</h3>

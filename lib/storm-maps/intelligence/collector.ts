@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { createAdminClient } from '@/lib/supabase/server';
-import { loadReportCollection,xweatherData } from './provider';
-import { reportEvents,cycloneEvent,type CycloneResponse } from './normalize';
-import { isXweatherEnabled } from '../xweather-config';
+import { loadReportCollection } from './provider';
+import { reportEvents } from './normalize';
 import type { StormEvent } from './model';
 import { collectionWindow,reportCollectionStart,meshReferenceTime } from './archive-format';
 const NOAA_URL='https://mrms.ncep.noaa.gov/2D/MESH_Max_1440min/MRMS_MESH_Max_1440min.latest.grib2.gz';
@@ -12,7 +11,7 @@ export async function collectStormArchive(now=new Date()){
  const admin=createAdminClient(),window=collectionWindow(now);
  const {error:claimError}=await admin.from('storm_collection_runs').insert({window_key:window});
  if(claimError){if(claimError.code==='23505')return {status:'already_attempted',window};throw Error('Archive collector database unavailable.');}
- const start=reportCollectionStart(now),details:Record<string,unknown>={},failures:string[]=[];
+ const start=reportCollectionStart(now),details:Record<string,unknown>={cyclones:{status:'paused'}},failures:string[]=[];
  async function asset(provider:string,product:string,bytes:Buffer,sourceTime:Date,metadata:Record<string,unknown>){
   const digest=hash(bytes),path=`${provider}/${product}/${sourceTime.toISOString().slice(0,10)}/${digest}.gz`;
   const {data:existing,error:readError}=await admin.from('storm_archive_assets').select('id').eq('provider',provider).eq('product',product).eq('content_hash',digest).maybeSingle();
@@ -39,33 +38,6 @@ export async function collectStormArchive(now=new Date()){
    for(const event of [...hail,...tornado])await saveEvent(event,event);
    details.reports={hailEvents:hail.length,tornadoEvents:tornado.length,hailReports:hail.reduce((n,e)=>n+e.reportCount,0),tornadoReports:tornado.reduce((n,e)=>n+e.reportCount,0),lookbackDays:7};
   }catch{failures.push('reports');details.reports={status:'failed'};}})(),
-  (async()=>{
-   if (!isXweatherEnabled()) { details.cyclones={status:'paused'}; return; }
-   try{
-   const active=await xweatherData<CycloneResponse>('tropicalcyclones',{limit:'100',filter:'geo,windfield'});
-   const rows=new Map(active.map(row=>[row.id,row]));
-   // Include recently ended storms so disappearance from the active feed does not lose the final advisory.
-   try{
-    for(const year of new Set([start.getUTCFullYear(),now.getUTCFullYear()])){
-     for(let page=0;page<5;page++){
-      const recent=await xweatherData<CycloneResponse>('tropicalcyclones/archive/search',{query:`year:${year}`,fields:'id,profile',limit:'50',skip:String(page*50)});
-      for(const row of recent){
-       const ended=row.profile.lifespan.endDateTimeISO;
-       if(rows.has(row.id)||!ended||Date.parse(ended)<+start)continue;
-       const {data:existing}=await admin.from('storm_events').select('source_updated_at').eq('event_key',`xweather:${row.id}`).maybeSingle();
-       if(existing&&Date.parse(existing.source_updated_at)>=Date.parse(ended))continue;
-       const full=await xweatherData<CycloneResponse>(`tropicalcyclones/archive/${row.id}`,{filter:'geo,windfield'});
-       for(const complete of full)rows.set(complete.id,complete);
-      }
-      if(recent.length<50)break;
-      if(page===4)failures.push('cyclone_archive_truncated');
-     }
-    }
-   }catch{failures.push('cyclone_recent_archive');}
-   if(active.length>=100)failures.push('cyclone_active_truncated');
-   for(const row of rows.values())await saveEvent(cycloneEvent(row),row);
-   details.cyclones={events:rows.size,active:active.length,evidence:'Advisory tracks, forecasts, and supplied wind polygons; not a complete damage footprint'};
-  }catch{failures.push('cyclones');details.cyclones={status:'failed'};}})(),
   (async()=>{try{
    const response=await fetch(NOAA_URL,{cache:'no-store',signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('Grid unavailable.');
    const bytes=Buffer.from(await response.arrayBuffer()),reference=meshReferenceTime(bytes);
@@ -74,7 +46,7 @@ export async function collectStormArchive(now=new Date()){
   }catch{failures.push('hail_grid');details.hailGrid={status:'failed'};}})(),
  ]);
  details.limitations=['Xweather native hail grid export is not connected.','Tornado reports are not surveyed impact tracks.','Coverage is limited to the named provider feeds; this cannot establish every storm worldwide.'];
- const status=failures.length?['reports','cyclones','hailGrid'].every(key=>(details[key] as {status?:string})?.status==='failed')?'failed':'partial':'complete';
+ const status=failures.length?['reports','hailGrid'].every(key=>(details[key] as {status?:string})?.status==='failed')?'failed':'partial':'complete';
  const {error}=await admin.from('storm_collection_runs').update({status,details:{...details,failures},completed_at:new Date().toISOString()}).eq('window_key',window);
  if(error)throw Error('Collector run record failed.');
  return {status,window,details,failures};

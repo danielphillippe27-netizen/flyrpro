@@ -1,9 +1,11 @@
+import { isStormCountry } from '../storm-countries';
 import { gunzipSync } from 'node:zlib';
 import { createAdminClient } from '@/lib/supabase/server';
 import { WIND_PRODUCT, type WindArchiveBundle, type WindCountry } from './wind-archive-format';
 
 const bundles = new Map<string, { value: Promise<WindArchiveBundle>; expires: number }>();
 export async function loadWindArchive(country: WindCountry, time: string) {
+  if (!isStormCountry(country)) throw Error('Wind maps are available for Canada and the United States.');
   const key = `${country}:${time}`, existing = bundles.get(key);
   if (existing && existing.expires > Date.now()) return existing.value;
   // Coalesce map-tile requests; keep at most two decoded country frames in memory.

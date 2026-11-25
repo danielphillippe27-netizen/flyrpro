@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stormBoundsIntersectCoverage } from '@/lib/storm-maps/tile-policy';
 import { stormContext, stormError, consumeArchiveRequest } from '@/lib/storm-maps/intelligence/access';
 import { boundsSchema, dateWindow, hazardSchema } from '@/lib/storm-maps/intelligence/model';
 import { archivePage } from '@/lib/storm-maps/intelligence/history';
@@ -11,9 +12,12 @@ export async function GET(request:NextRequest){
   const bbox=boundsSchema.safeParse((q.get('bbox')||'').split(',').map(Number));
   const hazard=hazardSchema.safeParse(q.get('hazard'));
   if(!bbox.success||!hazard.success)return NextResponse.json({error:'Choose a valid region and hazard'},{status:400});
+  if (!stormBoundsIntersectCoverage(bbox.data)) {
+    return NextResponse.json({error:'Storm Maps covers Canada and the United States.'},{status:400});
+  }
   let range;try{range=dateWindow(q.get('from')||'',q.get('to')||'',366);}catch(e){return NextResponse.json({error:(e as Error).message},{status:400});}
   const id=q.get('sourceId')||undefined;
-  if(id&&!/^\d{4}-(AL|EP|CP|WP|IO|SH)-\d{2}$/.test(id))return NextResponse.json({error:'Invalid cyclone ID'},{status:400});
+  if(id&&!/^\d{4}-(AL|EP|CP)-\d{2}$/.test(id))return NextResponse.json({error:'Invalid cyclone ID'},{status:400});
   try{
     const b=bbox.data;
     const page=archivePage(range.start,range.end,q.get('cursor'),hazard.data==='hurricane'?31:7);

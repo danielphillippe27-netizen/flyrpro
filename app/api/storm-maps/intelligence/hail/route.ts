@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stormPointInCoverage } from '@/lib/storm-maps/tile-policy';
 import { z } from 'zod';
 import { stormContext, stormError, consumeArchiveRequest } from '@/lib/storm-maps/intelligence/access';
 import { dateWindow } from '@/lib/storm-maps/intelligence/model';
@@ -12,6 +13,9 @@ export async function GET(request:NextRequest){
   if(!q.has('lon')||!q.has('lat')||!coordinates.success)return NextResponse.json({error:'Select a location'},{status:400});
   let range;try{range=dateWindow(q.get('date')||'',q.get('date')||'',1);}catch(e){return NextResponse.json({error:(e as Error).message},{status:400});}
   const [lon,lat]=coordinates.data;
+  if (!stormPointInCoverage(lon, lat)) {
+    return NextResponse.json({error:'Storm Maps covers Canada and the United States.'},{status:400});
+  }
   const key=`hail-lookup:${lat.toFixed(4)}:${lon.toFixed(4)}:${range.start}`;
   try{
     const cached=await getCachedStormValue<HailArchiveRow[]>(key);

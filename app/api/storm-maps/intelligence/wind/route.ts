@@ -1,15 +1,16 @@
 import { recentWindDays, qualifyingWindRegions } from '@/lib/storm-maps/intelligence/storm-browser';
 import { NextRequest, NextResponse } from 'next/server';
+import { isStormCountry } from '@/lib/storm-maps/storm-countries';
 import { stormContext, stormError } from '@/lib/storm-maps/intelligence/access';
 import { dateWindow } from '@/lib/storm-maps/intelligence/model';
-import { WIND_PRODUCT, windCountry } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { WIND_PRODUCT } from '@/lib/storm-maps/intelligence/wind-archive-format';
 import { windArchiveHealth } from '@/lib/storm-maps/intelligence/wind-archive-history';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const context = await stormContext(request); if ('response' in context) return context.response;
   const params = request.nextUrl.searchParams, country = params.get('country');
-  if (!windCountry(country)) return NextResponse.json({ error: 'Choose Canada, United States or Australia.' }, { status: 400 });
+  if (!isStormCountry(country)) return NextResponse.json({ error: 'Choose Canada or the United States.' }, { status: 400 });
   let range;
   try { range = dateWindow(params.get('from') ?? '', params.get('to') ?? '', 31); }
   catch { return NextResponse.json({ error: 'Choose a date range of up to 31 days.' }, { status: 400 }); }

@@ -2,11 +2,12 @@
 import { useEffect, useState } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { DEFAULT_WIND_STORM_MINIMUM, type WindStormDay } from '@/lib/storm-maps/intelligence/storm-browser';
-import { WIND_COUNTRIES, type WindCountry } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import type { StormCountry } from '@/lib/storm-maps/storm-countries';
+import { WIND_COUNTRIES } from '@/lib/storm-maps/intelligence/wind-archive-format';
 import type { StormWindActions } from '../StormWorkbenchView';
 import type { SaveWindTerritory } from './WindZoneSelector';
 import { WindStormArchive } from './WindStormArchive';
-export function RecentWindStorms({map,workspaceId,country,onView,active,onSave,windActions}:{map:mapboxgl.Map;workspaceId:string;country:WindCountry;onView:()=>void;active:boolean;onSave:SaveWindTerritory;windActions?:StormWindActions}){
+export function RecentWindStorms({map,workspaceId,country,onView,active,onSave,windActions}:{map:mapboxgl.Map;workspaceId:string;country:StormCountry;onView:()=>void;active:boolean;onSave:SaveWindTerritory;windActions?:StormWindActions}){
   const [minimum,setMinimum]=useState(()=>{const q=new URLSearchParams(window.location.search),value=Number(q.get('minimum'));return q.get('windTime')&&q.get('country')===country&&[40,60,93.341952,120,160].includes(value)?value:DEFAULT_WIND_STORM_MINIMUM;});
   const [anchor]=useState(()=>{const value=new URLSearchParams(window.location.search).get('windTime'),parsed=Date.parse(value??'');return Number.isFinite(parsed)&&parsed<=Date.now()&&parsed<Date.now()-29*86400000?new Date(parsed):new Date();});
   const pageDate=(offset:number)=>new Date(+anchor-offset*86400000).toISOString().slice(0,10);

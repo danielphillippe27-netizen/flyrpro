@@ -2,10 +2,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextRequest,NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { createAdminClient } from '@/lib/supabase/server';
-import { loadReportEvents,xweatherData } from '@/lib/storm-maps/intelligence/provider';
-import type { CycloneResponse } from '@/lib/storm-maps/intelligence/normalize';
+import { loadReportEvents } from '@/lib/storm-maps/intelligence/provider';
 import { buildStormDigest,torontoDigestClock } from '@/lib/storm-maps/intelligence/digest';
-import { australianHailDigest } from '@/lib/storm-maps/intelligence/australian-hail-history';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 export const maxDuration=180;
@@ -23,8 +21,8 @@ export async function GET(request:NextRequest){
  const from=process.env.TWILIO_DEFAULT_SMS_FROM_NUMBER?.trim()||process.env.TWILIO_DEFAULT_FROM_NUMBER?.trim(),sid=process.env.TWILIO_ACCOUNT_SID?.trim(),token=process.env.TWILIO_AUTH_TOKEN?.trim();
  if(!from||!sid||!token)return NextResponse.json({error:'Storm SMS sender is not configured.'},{status:503});
  const start=new Date(+now-86400000);
- const [hail,cyclones,australia]=await Promise.allSettled([loadReportEvents([-180,18,-50,85],start.toISOString(),now.toISOString(),'hail'),xweatherData<CycloneResponse>('tropicalcyclones',{limit:'100',fields:'id,profile,position,track.dateTimeISO'}),australianHailDigest(start,now)]);
- const summary=buildStormDigest(hail.status==='fulfilled'?hail.value:null,cyclones.status==='fulfilled'?cyclones.value:null,start,now,australia.status==='fulfilled'?australia.value:null);
+ const hail=await loadReportEvents([-180,18,-50,85],start.toISOString(),now.toISOString(),'hail').catch(()=>null);
+ const summary=buildStormDigest(hail,start,now);
  if(preview)return NextResponse.json({status:'preview',summary});
  const client=twilio(sid,token),results:Array<{subscriptionId:string;status:string;messageId?:string}>=[];
  for(const subscription of due){

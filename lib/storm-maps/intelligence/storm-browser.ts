@@ -1,4 +1,5 @@
-import { canonicalWindTime, type WindCountry } from './wind-archive-format';
+import { isStormCountry, type StormCountry } from '../storm-countries';
+import { canonicalWindTime } from './wind-archive-format';
 export const DEFAULT_WIND_STORM_MINIMUM = 93.341952;
 export type WindStormDay = { date: string; peakTime: string; latestTime: string; maximumKPH: number; hours: number; regions:string[] };
 type WindHour = { source_time: string; captured_at?: string; metadata: { maximumGustKPH?: unknown; windRegions?:unknown } };
@@ -21,9 +22,9 @@ export function recentWindDays(rows: WindHour[], minimum = DEFAULT_WIND_STORM_MI
   }
   return [...days.values()].sort((a,b)=>b.date.localeCompare(a.date));
 }
-export function stormBrowserDefaults(query: URLSearchParams): {country:WindCountry;type:'hail'|'wind'} {
+export function stormBrowserDefaults(query: URLSearchParams): {country:StormCountry;type:'hail'|'wind'} {
   const country=query.get('country');
-  return {country:country==='CA'||country==='US'||country==='AU'?country:query.get('region')==='au'?'AU':'CA',type:query.get('type')==='hail'?'hail':query.get('type')==='wind'||query.get('region')==='wind'?'wind':'hail'};
+  return {country:isStormCountry(country)?country:'CA',type:query.get('type')==='hail'?'hail':query.get('type')==='wind'||query.get('region')==='wind'?'wind':'hail'};
 }
 export function recentMapDates(now=new Date(), days=7) {
   return Array.from({length:days},(_,offset)=>new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-offset)).toISOString().slice(0,10));

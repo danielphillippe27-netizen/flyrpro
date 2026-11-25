@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { createAdminClient } from '@/lib/supabase/server';
+import { STORM_COUNTRIES } from '../storm-countries';
 import { isXweatherEnabled } from '../xweather-config';
-import { availableWindTimes, WIND_COUNTRIES, WIND_DATASET, WIND_ENCODING, WIND_PRODUCT, WIND_TILE_SIZE, WIND_ZOOM, validateWindResponse, windCountryTiles, type WindArchiveBundle, type WindCountry } from './wind-archive-format';
+import { availableWindTimes, WIND_COUNTRIES, WIND_DATASET, WIND_ENCODING, WIND_PRODUCT, WIND_TILE_SIZE, WIND_ZOOM, validateWindResponse, windCountryTiles, type WindArchiveBundle } from './wind-archive-format';
 
 import { windDisplayPyramid, windArchiveStatistics } from './wind-archive-rendering';
 export { windDisplayPyramid } from './wind-archive-rendering';
@@ -40,7 +41,7 @@ export async function collectWindArchive(now = new Date(), runTag = 'scheduled',
       for (const row of data ?? []) saved.add(`${row.metadata.country}:${new Date(row.source_time).toISOString()}`);
       if ((data?.length ?? 0) < 1000) break;
     }
-    const countries = (Object.keys(WIND_COUNTRIES) as WindCountry[]).filter(country=>country!=='NZ');
+    const countries = STORM_COUNTRIES;
     if (backfillShard != null && (!Number.isInteger(backfillShard) || backfillShard < 0 || backfillShard > 2)) throw Error('Invalid backfill partition.');
     const missing = available.filter(time => countries.some(country => !saved.has(`${country}:${time}`)) && (backfillShard == null || Date.parse(time) / 3600000 % 3 === backfillShard));
     // Keep the newest hour current, then rescue the oldest frames before their rolling window expires.

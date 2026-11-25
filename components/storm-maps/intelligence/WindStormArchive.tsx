@@ -2,7 +2,8 @@
 import { useContext, useEffect, useState } from 'react';
 import { useStormTerritoryDisplay } from '@/lib/storm-maps/territory-display';
 import type mapboxgl from 'mapbox-gl';
-import { WIND_COUNTRIES, type WindCountry } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { isStormCountry, STORM_COUNTRIES, type StormCountry } from '@/lib/storm-maps/storm-countries';
+import { WIND_COUNTRIES } from '@/lib/storm-maps/intelligence/wind-archive-format';
 import { WindZoneSelector, type SaveWindTerritory } from './WindZoneSelector';
 import type { StormWindActions } from '../StormWorkbenchView';
 import { StormLocationSearch } from '../StormLocationSearch';
@@ -11,11 +12,11 @@ import { StormMobileMapContext } from '@/lib/storm-maps/mobile-session';
 type Archive = { indexingPending?: boolean; times: string[]; archiveStartsAt: string | null; coverage: string; health: { available: boolean; message: string; latestAvailable?: string | null } };
 const field = 'min-h-11 w-full rounded-lg border border-border bg-background p-2 text-base text-foreground md:text-xs';
 const layerId = 'wolfgrid-saved-wind', sourceId = 'wolfgrid-saved-wind-source';
-export function WindStormArchive({ map, workspaceId, onView, active, onSave, windActions, simple=false, selectedCountry, selectedTime, selectedMinimum=93.341952, selectedRegions=[] }: { map: mapboxgl.Map; workspaceId: string; onView: () => void; active: boolean; onSave: SaveWindTerritory; windActions?: StormWindActions; simple?: boolean; selectedCountry?: WindCountry; selectedTime?: string; selectedMinimum?: number; selectedRegions?:string[] }) {
+export function WindStormArchive({ map, workspaceId, onView, active, onSave, windActions, simple=false, selectedCountry, selectedTime, selectedMinimum=93.341952, selectedRegions=[] }: { map: mapboxgl.Map; workspaceId: string; onView: () => void; active: boolean; onSave: SaveWindTerritory; windActions?: StormWindActions; simple?: boolean; selectedCountry?: StormCountry; selectedTime?: string; selectedMinimum?: number; selectedRegions?:string[] }) {
   const territoryDisplay = useStormTerritoryDisplay();
   const mobileSessionRevision = useContext(StormMobileMapContext)?.revision ?? 0;
   const [minimum,setMinimum]=useState(String(selectedMinimum));
-  const [country, setCountry] = useState<WindCountry>(selectedCountry??'CA');
+  const [country, setCountry] = useState<StormCountry>(selectedCountry??'CA');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   useEffect(()=>{if(selectedCountry)setCountry(selectedCountry);},[selectedCountry]);
   const [archive, setArchive] = useState<Archive | null>(null), [time, setTime] = useState('');
@@ -25,11 +26,11 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
     if(simple)return;
     const query=new URLSearchParams(window.location.search), region=query.get('country'), requested=query.get('windTime');
     const threshold=query.get('minimum'); if(threshold && ['40','60','93.341952','120','160'].includes(threshold))setMinimum(threshold);
-    if(!selectedCountry && region && Object.hasOwn(WIND_COUNTRIES,region))setCountry(region as WindCountry);
+    if(!selectedCountry && region && Object.hasOwn(WIND_COUNTRIES,region))setCountry(region as StormCountry);
     if(requested && /^\d{4}-\d{2}-\d{2}T/.test(requested))setDate(requested.slice(0,10));
   }, [simple, selectedCountry]);
   useEffect(() => {
-    const bounds = country === 'NZ' ? [166, -48, 185, -33] : [...WIND_COUNTRIES[country].bounds[0]];
+    const bounds = [...WIND_COUNTRIES[country].bounds[0]];
     map.setProjection('mercator');
     map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: 35, duration: 500 });
   }, [map, country]);
@@ -62,7 +63,7 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
   </section>;
   return <section aria-label="Saved wind maps" className="space-y-3">
     <p className="text-sm font-semibold">Historical wind storms</p>
-    {!selectedCountry&&<label className="block text-xs">Country<select aria-label="Wind archive country" className={field} value={country} onChange={event => setCountry(event.target.value as WindCountry)}>{Object.entries(WIND_COUNTRIES).filter(([code])=>code!=='NZ').map(([key, value]) => <option key={key} value={key}>{value.name}</option>)}</select></label>}
+    {!selectedCountry&&<label className="block text-xs">Country<select aria-label="Wind archive country" className={field} value={country} onChange={event => { if (isStormCountry(event.target.value)) setCountry(event.target.value); }}>{STORM_COUNTRIES.map(code => <option key={code} value={code}>{WIND_COUNTRIES[code].name}</option>)}</select></label>}
     <StormLocationSearch map={map} inline />
     <label className="block text-xs">Show gusts above<select aria-label="Historical wind storm threshold" className={field} value={minimum} onChange={event=>setMinimum(event.target.value)}>{[40,60,93.341952,120,160].map(value=><option key={value} value={value}>{Math.round(value)} km/h · {Math.round(value/1.609344)} mph</option>)}</select></label>
     <p className="text-xs text-muted-foreground">Only gusts meeting this threshold appear. Choose a saved storm hour, then tap a coloured area to create a campaign.</p>

@@ -2,8 +2,9 @@ import { windDisplayPyramid } from '@/lib/storm-maps/intelligence/wind-archive-r
 import sharp from 'sharp';
 import { windCountryCell } from '@/lib/storm-maps/intelligence/wind-country-mask';
 import { NextRequest, NextResponse } from 'next/server';
+import { isStormCountry } from '@/lib/storm-maps/storm-countries';
 import { stormContext, stormError } from '@/lib/storm-maps/intelligence/access';
-import { canonicalWindTime, WIND_COUNTRIES, WIND_TILE_SIZE, WIND_ZOOM, windCountry, windGustKPH } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { canonicalWindTime, WIND_COUNTRIES, WIND_TILE_SIZE, WIND_ZOOM, windGustKPH } from '@/lib/storm-maps/intelligence/wind-archive-format';
 import { loadWindArchive } from '@/lib/storm-maps/intelligence/wind-archive-history';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams, country = params.get('country');
   let time;
   try { time = canonicalWindTime(params.get('time') ?? ''); } catch { return NextResponse.json({ error: 'Choose a valid archived hour.' }, { status: 400 }); }
-  if (!windCountry(country)) return NextResponse.json({ error: 'Invalid wind region.' }, { status: 400 });
+  if (!isStormCountry(country)) return NextResponse.json({ error: 'Invalid wind region.' }, { status: 400 });
   try {
     if (params.get('sample') === '1') {
       const lonText = params.get('lon'), latText = params.get('lat'), lon = Number(lonText), lat = Number(latText);

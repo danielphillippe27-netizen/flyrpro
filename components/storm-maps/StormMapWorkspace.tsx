@@ -10,7 +10,8 @@ import { DEFAULT_STORM_DISPLAY, readStormDisplay, migrateStormDisplay, resolveSt
 import { StormMapsControl } from '@/components/storm-maps/StormMapsControl';
 import { StormCountryContext } from '@/lib/storm-maps/storm-country-context';
 import { stormBrowserDefaults } from '@/lib/storm-maps/intelligence/storm-browser';
-import { WIND_COUNTRIES, type WindCountry } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { WIND_COUNTRIES } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { isStormCountry, STORM_COUNTRIES, type StormCountry } from '@/lib/storm-maps/storm-countries';
 import type { StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
 import { StormMobileMapContext } from '@/lib/storm-maps/mobile-session';
 
@@ -34,14 +35,14 @@ export function StormMapWorkspace({ workspaceId: currentWorkspaceId, initialCent
   const router = useRouter();
   const [preferences, setPreferences] = useState<{ workspace: string; value: StormDisplaySettings } | null>(null);
   const display = preferences?.workspace === currentWorkspaceId ? preferences.value : DEFAULT_STORM_DISPLAY;
-  const [country,setCountry]=useState<WindCountry>('CA');
+  const [country,setCountry]=useState<StormCountry>('CA');
   const [countryReady,setCountryReady]=useState(false);
   useEffect(()=>{
     const query=new URLSearchParams(window.location.search);
-    try {if(!query.has('country')&&query.get('region')!=='au'){const saved=localStorage.getItem(`wolfgrid:storm-country:${currentWorkspaceId}`);if(saved)query.set('country',saved);}} catch { /* optional storage */ }
+    try {if(!query.has('country')){const saved=localStorage.getItem(`wolfgrid:storm-country:${currentWorkspaceId}`);if(isStormCountry(saved))query.set('country',saved);}} catch { /* optional storage */ }
     setCountry(stormBrowserDefaults(query).country);setCountryReady(true);
   },[currentWorkspaceId]);
-  const changeCountry=(value:WindCountry)=>{setCountry(value);if(map&&loaded){const bounds=WIND_COUNTRIES[value].bounds[0];map.setProjection('mercator');map.fitBounds([[bounds[0],bounds[1]],[bounds[2],bounds[3]]],{padding:35,duration:500});}try{localStorage.setItem(`wolfgrid:storm-country:${currentWorkspaceId}`,value);}catch{/* optional storage */}};
+  const changeCountry=(value:StormCountry)=>{setCountry(value);if(map&&loaded){const bounds=WIND_COUNTRIES[value].bounds[0];map.setProjection('mercator');map.fitBounds([[bounds[0],bounds[1]],[bounds[2],bounds[3]]],{padding:35,duration:500});}try{localStorage.setItem(`wolfgrid:storm-country:${currentWorkspaceId}`,value);}catch{/* optional storage */}};
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [controlsHidden, setControlsHidden] = useState(false);
   const activityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,7 +141,7 @@ export function StormMapWorkspace({ workspaceId: currentWorkspaceId, initialCent
     <div ref={container} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: controlsHidden || settingsOpen ? 0 : sidebarWidth, height: '100%' }} />
     {/* Empty overlay space must pass wheel and drag gestures to the map canvas. */}
     <div inert={controlsHidden || settingsOpen} className={"pointer-events-none absolute inset-0 " + (controlsHidden || settingsOpen ? "opacity-0" : "opacity-100 [&>*]:pointer-events-auto")}>{countryReady&&<StormCountryContext.Provider value={{country,setCountry:changeCountry}}><StormMapsControl mobileCampaign={mobile} initiallyOpenDiscovery={mobile || initiallyOpenDiscovery} drawingRequest={drawingRequest} onSidebarWidth={setSidebarWidth} displaySettings={display} onDisplaySettings={() => setSettingsOpen(true)} standalone map={map} mapLoaded={loaded} workspaceId={currentWorkspaceId} onStormCampaign={context => { if (onStormCampaign) { onStormCampaign(context); return; } if (context.territoryId) router.push(`/campaigns/create?stormTerritory=${encodeURIComponent(context.territoryId)}`); }} /></StormCountryContext.Provider>}</div>
-    {settingsOpen && <section role="dialog" aria-label="Storm map settings" className="absolute left-5 top-5 z-40 max-h-[calc(100%-2.5rem)] w-[min(30rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-border bg-white/95 p-5 text-slate-900 shadow-2xl dark:border-white/15 dark:bg-slate-950/95 dark:text-white"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-semibold">Map settings</h2><button type="button" aria-label="Close map settings" onClick={() => setSettingsOpen(false)} className="rounded-lg border border-border px-3 py-2 text-sm dark:border-white/15">Close</button></div><label className="mb-5 block text-sm font-medium">Country<select aria-label="Storm country" className="mt-2 min-h-11 w-full rounded-lg border border-border bg-background p-2 text-base text-foreground" value={country} onChange={event=>changeCountry(event.target.value as WindCountry)}>{Object.entries(WIND_COUNTRIES).filter(([code])=>code!=='NZ').map(([code,value])=><option key={code} value={code}>{value.name}</option>)}</select></label><StormDisplaySettingsPanel campaignOnly={mobile} value={display} onChange={saveDisplay} /></section>}
+    {settingsOpen && <section role="dialog" aria-label="Storm map settings" className="absolute left-5 top-5 z-40 max-h-[calc(100%-2.5rem)] w-[min(30rem,calc(100%-2.5rem))] overflow-y-auto rounded-2xl border border-border bg-white/95 p-5 text-slate-900 shadow-2xl dark:border-white/15 dark:bg-slate-950/95 dark:text-white"><div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-semibold">Map settings</h2><button type="button" aria-label="Close map settings" onClick={() => setSettingsOpen(false)} className="rounded-lg border border-border px-3 py-2 text-sm dark:border-white/15">Close</button></div><label className="mb-5 block text-sm font-medium">Country<select aria-label="Storm country" className="mt-2 min-h-11 w-full rounded-lg border border-border bg-background p-2 text-base text-foreground" value={country} onChange={event=>{if(isStormCountry(event.target.value))changeCountry(event.target.value);}}>{STORM_COUNTRIES.map(code=><option key={code} value={code}>{WIND_COUNTRIES[code].name}</option>)}</select></label><StormDisplaySettingsPanel campaignOnly={mobile} value={display} onChange={saveDisplay} /></section>}
     {mapError && <p role="alert" className="absolute bottom-5 left-5 z-40 max-w-md rounded-xl bg-red-950 p-4 text-white">{mapError}</p>}
     {!loaded && !mapError && <p role="status" className="absolute left-5 top-5 rounded-xl bg-white p-4 text-slate-900 dark:bg-slate-950 dark:text-white">Loading storm map…</p>}
   </div>;

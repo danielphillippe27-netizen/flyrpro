@@ -10,7 +10,7 @@ async function main() {
   for (const invalid of ['-1', 'abc', '1.5', '9007199254740991']) assert.equal(savedStormArchiveOffset(invalid), null);
   assert.equal(savedStormArchiveOffset('200'), 200);
   assert.equal(savedStormArchiveFilter('US', 'hail')?.source, 'iem');
-  assert.equal(savedStormArchiveFilter('AU', 'hail')?.keyPattern, 'xweather:au:hail:%');
+  assert.equal(savedStormArchiveFilter('AU', 'hail'), null);
   assert.equal(savedStormArchiveFilter('CA', 'hail')?.keyPattern, 'xweather:ca:hail:%');
   assert.equal(savedStormArchiveFilter('NZ', 'hail'), null);
 
