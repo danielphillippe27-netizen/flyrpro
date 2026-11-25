@@ -35,6 +35,7 @@ export type StormEvent = StormReference & {
   maxWindKPH: number | null; category: string | null; active: boolean;
   footprintStatus: 'unavailable' | 'surveyed';
   surveyStatus?: 'available' | 'unavailable' | 'error';
+  hailMap?: { coordinates: [[number, number], [number, number], [number, number], [number, number]] };
 };
 export const boundsSchema = z.tuple([z.number().min(-180).max(180), z.number().min(-85).max(85), z.number().min(-180).max(180), z.number().min(-85).max(85)])
   .refine(b => b[0] < b[2] && b[1] < b[3], 'Choose a region that does not cross the date line');

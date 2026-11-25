@@ -56,6 +56,19 @@ def grid_bytes(end):
     return url, data
 
 
+def validate_grid(grid, end):
+    tags = grid.tags(1)
+    if (
+        tags.get("GRIB_ELEMENT") != "MESHMax1440min"
+        or tags.get("GRIB_UNIT") != "[mm]"
+        or tags.get("GRIB_VALID_TIME") != str(int(end.timestamp()))
+        or not grid.crs or not grid.crs.is_geographic
+        or not np.allclose((grid.transform.a, grid.transform.e), (0.01, -0.01))
+        or grid.transform.b or grid.transform.d
+    ):
+        raise ValueError("Unexpected NOAA hail grid product, time or georeferencing")
+
+
 def report_points(event):
     kinds = {"report", "position"} if event["source"] == "noaa-mrms" else {"report"}
     return [
@@ -107,16 +120,7 @@ def event_zones(event, day, overlay_directory, overlays, frame_end=None):
     end = frame_end or datetime.combine(day + timedelta(days=1), time(), timezone.utc)
     url, data = grid_bytes(end)
     with MemoryFile(data) as source, source.open() as grid:
-        tags = grid.tags(1)
-        if (
-            tags.get("GRIB_ELEMENT") != "MESHMax1440min"
-            or tags.get("GRIB_UNIT") != "[mm]"
-            or tags.get("GRIB_VALID_TIME") != str(int(end.timestamp()))
-            or not grid.crs or not grid.crs.is_geographic
-            or not np.allclose((grid.transform.a, grid.transform.e), (0.01, -0.01))
-            or grid.transform.b or grid.transform.d
-        ):
-            raise ValueError("Unexpected NOAA hail grid product, time or georeferencing")
+        validate_grid(grid, end)
         # Select same-day swaths within about 30 km of a report. Keep the entire
         # connected area and reject a crop that would cut one short.
         nearby = [p.buffer(0.3) for p in reports]

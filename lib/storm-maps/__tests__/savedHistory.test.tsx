@@ -1,3 +1,4 @@
+import { canadianMrmsHailStoragePath, mrmsHailOverlay } from '../intelligence/mrms-hail-overlay';
 import assert from 'node:assert/strict';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -13,6 +14,13 @@ async function main() {
   assert.equal(savedStormArchiveFilter('AU', 'hail'), null);
   assert.equal(savedStormArchiveFilter('CA', 'hail')?.keyPattern, 'noaa-mrms:ca:hail:%');
   assert.equal(savedStormArchiveFilter('NZ', 'hail'), null);
+
+  const archivedKey = 'noaa-mrms:ca:hail:2026-07-17:AB';
+  const hailMap = { coordinates: [[-115, 52], [-113, 52], [-113, 50], [-115, 50]] } satisfies NonNullable<import('../intelligence/model').StormEvent['hailMap']>;
+  assert.equal(mrmsHailOverlay(archivedKey, hailMap)?.url, '/storm-maps/hail/archive/noaa-mrms%3Aca%3Ahail%3A2026-07-17%3AAB.png');
+  assert.equal(mrmsHailOverlay(archivedKey), undefined);
+  assert.equal(mrmsHailOverlay('noaa-mrms:ca:hail:2025-08-20:AB')?.url, '/storm-maps/hail/mrms-v1/noaa-mrms-ca-hail-2025-08-20-AB.png');
+  assert.equal(canadianMrmsHailStoragePath(archivedKey + '/../private'), null);
 
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://wolfgrid.app/campaigns/create' });
   Object.assign(globalThis, { React, self: dom.window, window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true });
