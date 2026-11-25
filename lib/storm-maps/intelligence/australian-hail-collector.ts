@@ -3,12 +3,14 @@ import { gzipSync } from 'node:zlib';
 import { VectorTile } from '@mapbox/vector-tile';
 import Pbf from 'pbf';
 import { createAdminClient } from '@/lib/supabase/server';
+import { isXweatherEnabled } from '../xweather-config';
 import type { StormEvent } from './model';
 import { AU_FRAME_PREFIX, AU_HAIL_PRODUCT, australianFramesToCollect, australianHailFrame, mergeAustralianEvent, type AustralianHailFrame } from './australian-hail-format';
 
 const ORIGIN = 'https://prod.v1.mapsgl.api.xweather.com';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 export async function collectAustralianHail(now = new Date(), runTag = 'scheduled') {
+  if (!isXweatherEnabled()) return { status: 'paused' };
   const admin = createAdminClient();
   // A durable claim prevents overlapping scheduled collectors; a later run retries failures.
   const window = `au-hail-run:${now.toISOString().slice(0, 16)}:${runTag}`;

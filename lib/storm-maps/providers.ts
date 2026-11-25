@@ -1,5 +1,6 @@
 import { aggregationHoursForLayer, mapGradientForLayer, STORM_RASTER_CATALOG, tomorrowFieldForLayer } from './catalog';
 import { getCachedStormValue, getStaleStormValue, setCachedStormValue } from './cache';
+import { isXweatherEnabled } from './xweather-config';
 import type { StormFeatureProperties, StormMapsProvider, StormRasterLayerId } from './types';
 
 const TILE_SIZE = 256;
@@ -115,7 +116,7 @@ export function buildTomorrowUrl(request: UpstreamTileRequest, apiKey: string) {
 }
 
 export function isXweatherConfigured() {
-  return Boolean(process.env.XWEATHER_API_KEY || (process.env.XWEATHER_CLIENT_ID && process.env.XWEATHER_CLIENT_SECRET));
+  return isXweatherEnabled() && Boolean(process.env.XWEATHER_API_KEY || (process.env.XWEATHER_CLIENT_ID && process.env.XWEATHER_CLIENT_SECRET));
 }
 
 export function buildXweatherUrl(request: UpstreamTileRequest, clientId: string, clientSecret?: string) {

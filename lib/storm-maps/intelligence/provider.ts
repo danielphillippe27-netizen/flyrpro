@@ -1,9 +1,11 @@
 import { loadTornadoSurveys } from './tornado-surveys';
 import { getCachedStormValue, setCachedStormValue } from '../cache';
 import { cycloneEvent, reportEvents, type CycloneResponse } from './normalize';
+import { isXweatherEnabled } from '../xweather-config';
 import type { StormHazard } from './model';
 
 export async function xweatherData<T>(path: string, params: Record<string,string>): Promise<T[]> {
+  if (!isXweatherEnabled()) throw new Error('Xweather is paused');
   const id=process.env.XWEATHER_CLIENT_ID, secret=process.env.XWEATHER_CLIENT_SECRET;
   if(!id||!secret)throw new Error('Xweather archive access is not configured');
   const url=new URL(`https://data.api.xweather.com/${path}`);

@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { createAdminClient } from '@/lib/supabase/server';
 import { loadReportCollection,xweatherData } from './provider';
 import { reportEvents,cycloneEvent,type CycloneResponse } from './normalize';
+import { isXweatherEnabled } from '../xweather-config';
 import type { StormEvent } from './model';
 import { collectionWindow,reportCollectionStart,meshReferenceTime } from './archive-format';
 const NOAA_URL='https://mrms.ncep.noaa.gov/2D/MESH_Max_1440min/MRMS_MESH_Max_1440min.latest.grib2.gz';
@@ -38,7 +39,9 @@ export async function collectStormArchive(now=new Date()){
    for(const event of [...hail,...tornado])await saveEvent(event,event);
    details.reports={hailEvents:hail.length,tornadoEvents:tornado.length,hailReports:hail.reduce((n,e)=>n+e.reportCount,0),tornadoReports:tornado.reduce((n,e)=>n+e.reportCount,0),lookbackDays:7};
   }catch{failures.push('reports');details.reports={status:'failed'};}})(),
-  (async()=>{try{
+  (async()=>{
+   if (!isXweatherEnabled()) { details.cyclones={status:'paused'}; return; }
+   try{
    const active=await xweatherData<CycloneResponse>('tropicalcyclones',{limit:'100',filter:'geo,windfield'});
    const rows=new Map(active.map(row=>[row.id,row]));
    // Include recently ended storms so disappearance from the active feed does not lose the final advisory.

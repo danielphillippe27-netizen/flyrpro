@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { createAdminClient } from '@/lib/supabase/server';
+import { isXweatherEnabled } from '../xweather-config';
 import { availableWindTimes, WIND_COUNTRIES, WIND_DATASET, WIND_ENCODING, WIND_PRODUCT, WIND_TILE_SIZE, WIND_ZOOM, validateWindResponse, windCountryTiles, type WindArchiveBundle, type WindCountry } from './wind-archive-format';
 
 import { windDisplayPyramid, windArchiveStatistics } from './wind-archive-rendering';
@@ -15,6 +16,7 @@ async function parallel<T>(values: T[], work: (value: T) => Promise<void>, concu
 }
 
 export async function collectWindArchive(now = new Date(), runTag = 'scheduled', maximumFrames = 2, backfillShard?: number) {
+  if (!isXweatherEnabled()) return { status: 'paused' };
   const admin = createAdminClient(), window = `wind-run:${now.toISOString().slice(0, 16)}:${runTag}`;
   const { error: claim } = await admin.from('storm_collection_runs').insert({ window_key: window });
   if (claim) { if (claim.code === '23505') return { status: 'already_attempted', window }; throw Error('Wind collection ledger unavailable.'); }

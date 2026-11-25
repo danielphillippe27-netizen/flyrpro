@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isXweatherEnabled } from '@/lib/storm-maps/xweather-config';
 import { verifyStormMapsTileToken } from '@/lib/storm-maps/token';
 import { resolveGLRequest, allowedVectorProducts } from '@/lib/storm-maps/gl-proxy-policy';
 
@@ -9,6 +10,9 @@ const ORIGIN = 'https://prod.v1.mapsgl.api.xweather.com';
 type Context = { params: Promise<{ token: string; path: string[] }> };
 
 async function proxy(request: NextRequest, context: Context) {
+  if (!isXweatherEnabled()) {
+    return NextResponse.json({ error: 'Xweather is paused' }, { status: 503 });
+  }
   const { token, path } = await context.params;
   const sessionWorkspace = token.startsWith('session-') ? token.slice(8) : null;
   const capability = verifyStormMapsTileToken(sessionWorkspace ? request.cookies.get(`storm-gl-${sessionWorkspace}`)?.value || '' : token);
