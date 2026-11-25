@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { isWorkspaceStormMapsActive } from '@/lib/storm-maps/addon';
 import { providerForLayer, STORM_RASTER_CATALOG } from '@/lib/storm-maps/catalog';
 import { issueStormMapsTileToken } from '@/lib/storm-maps/token';
-import { getEcccRadarFrameTimes, isXweatherConfigured } from '@/lib/storm-maps/providers';
+import { getEcccRadarFrameTimes, isTomorrowStormMapsConfigured, isXweatherConfigured } from '@/lib/storm-maps/providers';
 import type { StormMapsManifest, StormRasterLayer, StormRasterLayerId } from '@/lib/storm-maps/types';
 
 export const runtime = 'nodejs';
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
   const radarProvider = xweatherConfigured ? 'xweather' : radarProviderForCenter(lat, lon);
   const generatedAt = Date.now();
   const ecccTimes = radarProvider === 'eccc' ? await getEcccRadarFrameTimes() : [];
-  const tomorrowConfigured = Boolean(process.env.TOMORROW_IO_API_KEY);
+  const tomorrowConfigured = isTomorrowStormMapsConfigured();
   const layers = Object.values(STORM_RASTER_CATALOG).map((entry): StormRasterLayer => {
     const provider = providerForLayer(entry.id, radarProvider);
     const available = provider !== 'tomorrow' || tomorrowConfigured;
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
       legend: entry.legend,
       provider,
       available,
-      unavailableReason: available ? undefined : 'Tomorrow.io production credentials are not configured.',
+      unavailableReason: available ? undefined : 'This layer requires a commercial weather provider.',
       frames: entry.id === 'radar'
         ? radarFrames(radarProvider, generatedAt, ecccTimes)
         : provider === 'iem'
@@ -127,14 +127,15 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  const approvedTiles = layers.flatMap((layer) => layer.frames.map((frame) => `${layer.provider}:${layer.id}:${frame.time}`));
+  const approvedTiles = layers.filter((layer) => layer.available).flatMap((layer) => layer.frames.map((frame) => `${layer.provider}:${layer.id}:${frame.time}`));
   const issued = issueStormMapsTileToken(membership.workspaceId, approvedTiles, generatedAt);
+  const glToken = xweatherConfigured ? issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token : undefined;
   const payload: StormMapsManifest = {
     enabled: true,
     generatedAt: new Date(generatedAt).toISOString(),
     expiresAt: issued.expiresAt,
     tileToken: issued.token,
-    glToken: issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token,
+    glToken,
     radarProvider,
     layers,
     featureEndpoint: '/api/storm-maps/features',
@@ -146,7 +147,7 @@ export async function GET(request: NextRequest) {
     },
     attribution: [
       ...(xweatherConfigured ? [{ label: 'Weather data © Vaisala Xweather', url: 'https://www.xweather.com/' }] : []),
-      { label: 'Tomorrow.io', url: 'https://www.tomorrow.io/' },
+      ...(tomorrowConfigured ? [{ label: 'Tomorrow.io', url: 'https://www.tomorrow.io/' }] : []),
       { label: 'NOAA/NWS', url: 'https://www.weather.gov/' },
       { label: 'Iowa Environmental Mesonet', url: 'https://mesonet.agron.iastate.edu/' },
       { label: 'ECCC/MSC', url: 'https://weather.gc.ca/' },
@@ -155,7 +156,7 @@ export async function GET(request: NextRequest) {
   };
 
   const response = NextResponse.json(payload, { headers: { 'Cache-Control': 'private, no-store' } });
-  response.cookies.set(`storm-gl-${membership.workspaceId}`, issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token, {
+  if (glToken) response.cookies.set(`storm-gl-${membership.workspaceId}`, glToken, {
     httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
     path: `/api/storm-maps/gl/session-${membership.workspaceId}`, maxAge: 15 * 60,
   });

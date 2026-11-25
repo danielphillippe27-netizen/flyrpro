@@ -22,7 +22,6 @@ type Status = {
   canManage: boolean;
   connection?: {
     destination_workspace_name: string;
-    auto_sync: boolean;
     last_sync_at: string | null;
   };
   jobs: Job[];
@@ -143,17 +142,7 @@ export function KimiCocoCard({ workspaceId }: { workspaceId?: string }) {
                 {new Date(status.connection.last_sync_at).toLocaleString()}
               </p>
             )}
-            <label className="flex gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={status.connection?.auto_sync ?? false}
-                disabled={busy || !status.canManage}
-                onChange={(event) =>
-                  void action("settings", { autoSync: event.target.checked })
-                }
-              />{" "}
-              Automatically send new and updated contacts
-            </label>
+            <p className="text-sm">Contacts are sent manually from this screen.</p>
             <div className="flex flex-wrap gap-2">
               <Button disabled={busy} onClick={() => void loadContacts()}>
                 Choose contacts to send

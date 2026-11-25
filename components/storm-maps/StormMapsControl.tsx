@@ -30,10 +30,9 @@ import { CloudLightning, Play, Pause, X, Loader2, Settings2, Map as MapIcon, Che
 import { Slider } from '@/components/ui/slider';
 import { StormIntelligencePanel } from './intelligence/StormIntelligencePanel';
 import type { StormEvent, StormCampaignContext } from '@/lib/storm-maps/intelligence/model';
-import { StormMapsRasterControl } from './StormMapsRasterControl';
 import { StormGLSettingsPanel } from './StormGLSettingsPanel';
 import { useStormGLSettings } from './useStormGLSettings';
-import { bindStormFeaturePopups, upsertStormFeatures, removeStormFeatures, ensureStormDrawCasing } from '@/lib/storm-maps/map-layers';
+import { bindStormFeaturePopups, upsertStormFeatures, removeStormFeatures, upsertStormRaster, removeStormRaster, ensureStormDrawCasing } from '@/lib/storm-maps/map-layers';
 import { STORM_LAYER_GROUPS, WEATHER_SHADES, STRONGEST_STORM_SETTINGS, stormTimeRange, hurricaneViewSettings, stormLayerForMode, hailViewSettings, isHistoricalHailShade } from '@/lib/storm-maps/gl-settings';
 import { resetStormTimeline } from '@/lib/storm-maps/gl-timeline';
 import { stormTerritoryImpact, type StormTerritories } from '@/lib/storm-maps/gl-impact';
@@ -152,7 +151,7 @@ function StormWorkbench(props: Props) {
     if (!workspaceId) return;
     const abort = new AbortController();
     fetch(`/api/storm-maps/settings?workspaceId=${encodeURIComponent(workspaceId)}`, { signal: abort.signal, cache: 'no-store' })
-      .then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not check Storm Maps access.'); return data; }).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) { setSettings(previous => props.mobileCampaign ? { ...hailViewSettings(previous, 'history'), shade: 'none', radar: false, wind: false, pressure: false, cyclones: false, hail: false, cells: false, stormCones: false, lightning: false, lightningThreats: false, reports: false, alerts: false, outlook: false, inspector: false, impact: false } : { ...STRONGEST_STORM_SETTINGS, units: previous.units, shade: 'temperatures', hail: false, cells: false, lightning: false, lightningThreats: false, reports: false, outlook: false, opacity: 100, radarOpacity: 70 }); setOpen(true); } } }).catch(reason => { if (!abort.signal.aborted) setAccessError(reason instanceof Error ? reason.message : 'Could not connect to Storms.'); }).finally(() => { if (!abort.signal.aborted) setCheckingAccess(false); });
+      .then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not check Storm Maps access.'); return data; }).then((d) => { if (!abort.signal.aborted) { setEntitled(d?.addon?.isActive === true); if (standalone && d?.addon?.isActive === true) { setSettings(previous => props.mobileCampaign ? { ...hailViewSettings(previous, 'history'), shade: 'none', radar: true, wind: false, pressure: false, cyclones: false, hail: false, cells: false, stormCones: false, lightning: false, lightningThreats: false, reports: false, alerts: false, outlook: false, inspector: false, impact: false } : { ...STRONGEST_STORM_SETTINGS, units: previous.units, shade: 'temperatures', hail: false, cells: false, lightning: false, lightningThreats: false, reports: false, outlook: false, opacity: 100, radarOpacity: 70 }); setOpen(true); } } }).catch(reason => { if (!abort.signal.aborted) setAccessError(reason instanceof Error ? reason.message : 'Could not connect to Storms.'); }).finally(() => { if (!abort.signal.aborted) setCheckingAccess(false); });
     return () => abort.abort();
   }, [workspaceId, standalone, setSettings, accessAttempt, props.mobileCampaign]);
 
@@ -170,9 +169,28 @@ function StormWorkbench(props: Props) {
     const load = () => { void refresh(abort.signal).catch((e) => { if (!abort.signal.aborted) setError(e.message); }); };
     load();
     const minutes = props.displaySettings?.autoUpdateMinutes ?? 10;
-    const interval = minutes ? window.setInterval(() => { load(); setRevision(value => value + 1); setTerritoryWindowEnd(new Date()); }, minutes * 60_000) : undefined;
-    return () => { abort.abort(); window.clearInterval(interval); };
-  }, [open, refresh, props.displaySettings?.autoUpdateMinutes]);
+    const update = () => {
+      if (document.hidden) return;
+      load();
+      setRevision(value => value + 1);
+      setTerritoryWindowEnd(new Date());
+    };
+    let moveTimer: number | undefined;
+    const onMapMove = () => {
+      window.clearTimeout(moveTimer);
+      moveTimer = window.setTimeout(() => { if (!document.hidden) load(); }, 450);
+    };
+    const interval = minutes ? window.setInterval(update, minutes * 60_000) : undefined;
+    document.addEventListener('visibilitychange', update);
+    map?.on('moveend', onMapMove);
+    return () => {
+      abort.abort();
+      window.clearInterval(interval);
+      window.clearTimeout(moveTimer);
+      document.removeEventListener('visibilitychange', update);
+      map?.off('moveend', onMapMove);
+    };
+  }, [map, open, refresh, props.displaySettings?.autoUpdateMinutes]);
 
   useEffect(() => {
     if (!map) return;
@@ -184,6 +202,22 @@ function StormWorkbench(props: Props) {
   const glCapability = props.mobileCampaign ? manifest?.glToken : undefined;
   const glPath = props.mobileCampaign ? glCapability : `session-${workspaceId}`;
   const glEnabled = manifest?.providerHealth.xweather.available === true;
+  const publicWeather = Boolean(manifest && !glEnabled);
+  const radar = publicWeather ? manifest?.layers.find(
+    layer => layer.id === 'radar' && layer.available && (layer.provider === 'iem' || layer.provider === 'eccc'),
+  ) : undefined;
+  const showPublicRadar = settings.radar && !selectedEvent && !windArchiveView && !savedTerritory;
+  useEffect(() => {
+    const frame = radar?.frames.at(-1);
+    if (!map || !mapLoaded || !open || !showPublicRadar || !radar || !frame || !manifest) return;
+    const tileUrl = `/api/storm-maps/tiles/${radar.provider}/radar/${encodeURIComponent(frame.time)}/{z}/{x}/{y}.png?token=${encodeURIComponent(manifest.tileToken)}`;
+    try {
+      upsertStormRaster(map, { tileUrl, provider: radar.provider, opacity: settings.radarOpacity / 100 });
+      ensureStormDrawCasing(map);
+    } catch { /* A style update may be in progress. Retry when style.load fires. */ }
+    return () => { try { removeStormRaster(map); } catch { /* map removed */ } };
+  }, [map, mapLoaded, open, showPublicRadar, radar, manifest, settings.radarOpacity, revision]);
+
   useEffect(() => {
     if (!open || !map || !mapLoaded || !glEnabled || !workspaceId || !glPath) return;
     let disposed = false;
@@ -321,8 +355,11 @@ function StormWorkbench(props: Props) {
   }, [ready]);
 
   useEffect(() => {
-    const enabled = !savedTerritory && !archiveView && settings.mode !== 'history' && (settings.alerts || settings.outlook || settings.reports);
-    if (!map || !mapLoaded || !open || !manifest || !glEnabled || !enabled) {
+    const showFeatures = publicWeather
+      ? !selectedEvent && !windArchiveView
+      : glEnabled && !archiveView && settings.mode !== 'history';
+    const enabled = !savedTerritory && showFeatures && (settings.alerts || settings.outlook || settings.reports);
+    if (!map || !mapLoaded || !open || !manifest || !enabled) {
       if (map && mapLoaded) removeStormFeatures(map);
       setRisk(EMPTY_RISK); setRiskLoaded(false); return;
     }
@@ -348,9 +385,9 @@ function StormWorkbench(props: Props) {
     };
     const moved = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 400); };
     void load(); map.on('moveend', moved);
-    const minutes = props.displaySettings?.autoUpdateMinutes ?? 5; const interval = minutes ? window.setInterval(() => void load(), minutes * 60_000) : undefined;
+    const minutes = props.displaySettings?.autoUpdateMinutes ?? 5; const interval = minutes ? window.setInterval(() => { if (!document.hidden) void load(); }, minutes * 60_000) : undefined;
     return () => { abort.abort(); window.clearInterval(interval); window.clearTimeout(timer); map.off('moveend', moved); cleanup?.(); try { removeStormFeatures(map); } catch { /* map removed */ } };
-  }, [map, mapLoaded, open, manifest, glEnabled, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView, props.displaySettings?.autoUpdateMinutes, savedTerritory]);
+  }, [map, mapLoaded, open, manifest, glEnabled, publicWeather, selectedEvent, windArchiveView, settings.alerts, settings.outlook, settings.reports, settings.mode, revision, archiveView, props.displaySettings?.autoUpdateMinutes, savedTerritory]);
 
   const togglePlayback = () => {
     const timeline = controllerRef.current?.timeline;
@@ -384,16 +421,24 @@ function StormWorkbench(props: Props) {
   if (checkingAccess && props.standalone) return <p role="status" className="absolute left-5 top-5 rounded-xl bg-background p-5">Checking Storm Maps access…</p>;
   if (accessError && props.standalone) return <div role="alert" className="absolute left-5 right-5 top-5 rounded-xl bg-background p-5"><p>{accessError}</p><button type="button" className="mt-3 min-h-11 rounded-lg border px-4" onClick={() => setAccessAttempt(value => value + 1)}>Retry</button></div>;
   if (!entitled) return props.standalone ? <div className="absolute left-5 top-5 z-30 rounded-xl bg-slate-950 p-5 text-white">Storm Maps requires an active workspace Storm Maps add-on. <Link className="underline" href="/settings">Open settings</Link></div> : null;
-  if (manifest && !glEnabled && !props.mobileCampaign) return <StormMapsRasterControl {...props} />;
   if (props.standalone) return <StormTerritoryDrawingContext.Provider value={territory => {
     setSavedTerritory(territory);
     props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() });
   }}><StormTerritoryDisplayContext.Provider value={!!savedTerritory}>
     <StormTerritoryOverlay map={map} territory={savedTerritory} />
-    <StormWorkbenchView historicHail={!!mrmsHailOverlay(selectedEvent?.key) && !savedTerritory} archivedWind={windArchiveView} mobileCampaign={props.mobileCampaign} initiallyOpenDiscovery={props.initiallyOpenDiscovery} drawingRequest={props.drawingRequest} onCreateTerritory={setTerritorySelection} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={!savedTerritory && loading} error={savedTerritory ? null : error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
+    <StormWorkbenchView publicWeather={publicWeather} historicHail={!!mrmsHailOverlay(selectedEvent?.key) && !savedTerritory} archivedWind={windArchiveView} mobileCampaign={props.mobileCampaign} initiallyOpenDiscovery={props.initiallyOpenDiscovery} drawingRequest={props.drawingRequest} onCreateTerritory={setTerritorySelection} onSidebarWidth={props.onSidebarWidth} timelineRange={timelineRange} onTimelineRange={setCustomTimeline} onTimelineSpeed={speed => setSettings(previous => ({ ...previous, speed }))} map={map} settings={settings} selectedStorm={selectedEvent !== null} onChange={value => { if (value.mode !== settings.mode) setCustomTimeline(null); if (value.shade === 'hail-size-max') map.setProjection('mercator'); setSettings(selectedEvent ? { ...value, mode: 'history' } : value); if (!selectedEvent) setTab('overview'); }} onSettings={props.onDisplaySettings} onArchive={handleWorkbenchArchive} alwaysShowNames={props.displaySettings?.alwaysShowNames} ready={ready} loading={!savedTerritory && loading} error={savedTerritory ? null : error || (layerErrors.length ? `Unavailable layers: ${layerErrors.join(', ')}` : null)} playing={playing} position={position} clock={clock} rangeTitle={rangeTitle} rangeLabels={rangeLabels} onPlay={togglePlayback} onScrub={scrub} onNow={goNow} legendRef={legendRef}
       renderSaved={() => workspaceId ? <SavedStormTerritories initiallyOpen renderOverlay={false} map={map} workspaceId={workspaceId} revision={territoryRevision} active={savedTerritory} onSelect={setSavedTerritory} onCampaign={territory => props.onStormCampaign?.({ ...territory.context, territoryId: territory.id, territoryRevision: territory.revision, selectedAt: new Date().toISOString() })} /> : null}
       renderArchive={(onTerritory, browseOnly, onSelected, windActions) => workspaceId ? <StormRegionBrowser map={map} workspaceId={workspaceId} onHailView={showHailDay} onReports={showStormReports} onWindView={showWindArchive} windActive={windArchiveView} onSaveWind={saveTerritoryAndReturn} windActions={windActions} onEvent={selectEvent} onTerritory={onTerritory} renderHistory={country=><StormDiscoveryPanel key={`history:${country}`} simple savedHistory savedCountry={country} browseOnly={browseOnly} onSelected={onSelected} allAreasByDefault map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory}/>} renderReports={()=><StormDiscoveryPanel simple browseOnly={browseOnly} onSelected={onSelected} allAreasByDefault map={map} workspaceId={workspaceId} onSelect={selectEvent} onTerritory={onTerritory} onSaveZone={saveTerritory}/>} /> : null}
-      renderLayers={() => <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
+      renderLayers={() => publicWeather ? (
+        <div className="space-y-3 text-sm">
+          {([['radar', 'Live radar'], ['alerts', 'Official weather alerts'], ['outlook', 'Storm outlooks'], ['reports', 'U.S. storm reports']] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2">
+              <input type="checkbox" checked={settings[key]} onChange={event => setSettings({ ...settings, [key]: event.target.checked })} />
+              {label}
+            </label>
+          ))}
+        </div>
+      ) : <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={onSelectionReady => <>
         <div style={props.mobileCampaign ? { display: 'none' } : undefined} className="mb-3 flex gap-2" role="group" aria-label="Storm territory selection">
           <button type="button" aria-pressed={territorySelection === 'draw'} onClick={() => setTerritorySelection('draw')} className="flex-1 rounded-lg border border-cyan-300/40 px-2 py-2 text-xs">Draw territory</button>

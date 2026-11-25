@@ -13,6 +13,10 @@ export async function POST(request: NextRequest) {
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await request.json().catch(() => null);
+  if (body?.automatic === true) {
+    // Released iOS builds interpret 404 as an optional integration being unavailable.
+    return NextResponse.json({ error: "Automatic KimiCoco sync has been removed." }, { status: 404 });
+  }
   const id = body?.id ?? body?.contactId;
   if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id))
     return NextResponse.json(
@@ -44,12 +48,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const { data: connection } = await admin
       .from("kimicoco_connections")
-      .select("auto_sync")
+      .select("workspace_id")
       .eq("workspace_id", workspace.workspaceId)
       .maybeSingle();
-    if (!connection || (body.automatic === true && !connection.auto_sync))
+    if (!connection)
       return NextResponse.json(
-        { error: "KimiCoco is not connected for automatic transfers" },
+        { error: "KimiCoco is not connected" },
         { status: 404 },
       );
     const changes: Record<string, string | null> = {};

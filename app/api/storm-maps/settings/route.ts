@@ -7,7 +7,7 @@ import {
   isStormMapsBetaAvailable,
   STORM_MAPS_ADDON_KEY,
 } from '@/lib/storm-maps/addon';
-import { validateTomorrowFullSuiteAccess, isXweatherConfigured, validateXweatherAccess } from '@/lib/storm-maps/providers';
+import { validateTomorrowFullSuiteAccess, isTomorrowStormMapsConfigured, isXweatherConfigured, validateXweatherAccess } from '@/lib/storm-maps/providers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest) {
   if (body.enabled && !isStormMapsBetaAvailable()) {
     return NextResponse.json({ error: 'Storm Maps is coming soon' }, { status: 503 });
   }
-  if (body.enabled) {
+  if (body.enabled && (isXweatherConfigured() || isTomorrowStormMapsConfigured())) {
     const validation = isXweatherConfigured() ? await validateXweatherAccess() : await validateTomorrowFullSuiteAccess();
     if (!validation.ok) {
       return NextResponse.json(

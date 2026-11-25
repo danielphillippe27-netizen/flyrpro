@@ -169,6 +169,16 @@ function buildEcccUrl(request: UpstreamTileRequest) {
   return url.toString();
 }
 
+function tomorrowStormMapsKey() {
+  return process.env.TOMORROW_IO_STORM_MAPS_ENABLED === 'true'
+    ? process.env.TOMORROW_IO_API_KEY?.trim()
+    : undefined;
+}
+
+export function isTomorrowStormMapsConfigured() {
+  return Boolean(tomorrowStormMapsKey());
+}
+
 async function consumeTomorrowBudget() {
   const limit = Number.parseInt(process.env.TOMORROW_IO_DAILY_TILE_BUDGET || '250000', 10);
   const now = new Date();
@@ -183,11 +193,11 @@ async function consumeTomorrowBudget() {
 }
 
 export async function validateTomorrowFullSuiteAccess() {
+  const apiKey = tomorrowStormMapsKey();
+  if (!apiKey) return { ok: false, checkedAt: new Date().toISOString() };
   const validationCacheKey = 'provider-validation:tomorrow-full-suite-v2-hail';
   const cached = await getCachedStormValue<{ ok: boolean; checkedAt: string }>(validationCacheKey);
   if (cached) return cached.value;
-  const apiKey = process.env.TOMORROW_IO_API_KEY;
-  if (!apiKey) return { ok: false, checkedAt: new Date().toISOString() };
 
   const start = new Date();
   start.setUTCMinutes(0, 0, 0);
@@ -251,7 +261,7 @@ export async function validateTomorrowFullSuiteAccess() {
 async function fetchTileFromProvider(request: UpstreamTileRequest): Promise<CachedTile> {
   let url: string;
   if (request.provider === 'tomorrow') {
-    const apiKey = process.env.TOMORROW_IO_API_KEY;
+    const apiKey = tomorrowStormMapsKey();
     if (!apiKey) throw new Error('Tomorrow.io is not configured');
     if (!(await consumeTomorrowBudget())) throw new Error('Tomorrow.io daily tile budget reached');
     url = buildTomorrowUrl(request, apiKey);
@@ -278,6 +288,12 @@ async function fetchTileFromProvider(request: UpstreamTileRequest): Promise<Cach
 }
 
 export async function getStormMapTile(request: UpstreamTileRequest) {
+  if (request.provider === 'tomorrow' && !isTomorrowStormMapsConfigured()) {
+    throw new Error('Tomorrow.io is paused');
+  }
+  if (request.provider === 'xweather' && !isXweatherConfigured()) {
+    throw new Error('Xweather is paused');
+  }
   const key = `tile:${request.provider}:${request.layerId}:${request.time}:${request.z}:${request.x}:${request.y}`;
   const cached = await getCachedStormValue<CachedTile>(key);
   if (cached) return { ...cached, stale: false };

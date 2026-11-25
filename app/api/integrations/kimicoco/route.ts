@@ -124,7 +124,7 @@ async function handle(request: NextRequest) {
             encrypted_key: encryptedKey,
             destination_workspace_id: verified.workspaceId,
             destination_workspace_name: verified.workspaceName || "KimiCoco",
-            auto_sync: body.autoSync !== false,
+            auto_sync: false,
             generation: randomUUID(),
           },
           { onConflict: "workspace_id" },
@@ -150,9 +150,10 @@ async function handle(request: NextRequest) {
           { error: "Only an owner or admin can change automatic sync" },
           403,
         );
+      if (body.autoSync) return json({ error: "Automatic KimiCoco sync has been removed." }, 410);
       const { error } = await admin
         .from("kimicoco_connections")
-        .update({ auto_sync: body.autoSync })
+        .update({ auto_sync: false })
         .eq("workspace_id", id);
       if (error) throw error;
       return json({ success: true });

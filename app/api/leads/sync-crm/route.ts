@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
       const { data: count, error } = await supabase.rpc('enqueue_kimicoco_workspace', { p_workspace: targetWorkspaceId });
       if (error) return NextResponse.json({ error: 'Connect KimiCoco before syncing contacts' }, { status: 400 });
       const result = await dispatchKimiCoco(targetWorkspaceId);
-      return NextResponse.json({ message: `${count} contacts queued for KimiCoco. Transfers continue in the background.`, count, failed: result.failed, details: { kimicoco: result } });
+      return NextResponse.json({ message: `${count} contacts queued for KimiCoco. Open the KimiCoco integration to continue any pending transfers.`, count, failed: result.failed, details: { kimicoco: result } });
     }
 
 
@@ -127,13 +127,12 @@ export async function POST(request: NextRequest) {
     const hasHubSpot = wantsProvider('hubspot') && (connections ?? []).some((connection) => connection.provider === 'hubspot');
     const hasZapier = wantsProvider('zapier') && (connections ?? []).some((connection) => connection.provider === 'zapier');
     const hasMonday = false;
-    const { data: kimiConnection } = !requestedProvider ? await supabase.from('kimicoco_connections').select('workspace_id').eq('workspace_id', targetWorkspaceId).maybeSingle() : { data: null };
     const contractorProviders = CONTRACTOR_PROVIDER_IDS.filter((provider) =>
       wantsProvider(provider) &&
       (connections ?? []).some((connection) => connection.provider === provider)
     ) as ContractorProviderId[];
 
-    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday && !kimiConnection && contractorProviders.length === 0) {
+    if (!hasFub && !hasBoldTrail && !hasHubSpot && !hasZapier && !hasMonday && contractorProviders.length === 0) {
       return NextResponse.json(
         {
           error: requestedProvider
@@ -168,15 +167,6 @@ export async function POST(request: NextRequest) {
     }
 
     const details: Record<string, { synced: number; failed: number; error?: string }> = {};
-    if (kimiConnection) {
-      const { error: queueError } = await supabase.rpc('enqueue_kimicoco_workspace', { p_workspace: targetWorkspaceId });
-      if (queueError) details.kimicoco = { synced: 0, failed: list.length, error: 'Could not queue KimiCoco transfers' };
-      else {
-        const result = await dispatchKimiCoco(targetWorkspaceId);
-        details.kimicoco = { synced: result.synced, failed: result.failed };
-      }
-    }
-
     const providerNames: Record<string, string> = {
       boldtrail: 'BoldTrail / kvCORE',
       followupboss: 'Follow Up Boss',
