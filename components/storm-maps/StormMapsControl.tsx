@@ -207,8 +207,22 @@ function StormWorkbench(props: Props) {
     layer => layer.id === 'radar' && layer.available && (layer.provider === 'iem' || layer.provider === 'eccc'),
   ) : undefined;
   const showPublicRadar = settings.radar && !selectedEvent && !windArchiveView && !savedTerritory;
+  const [publicRadarIndex, setPublicRadarIndex] = useState<number | null>(null);
+  const [publicRadarPlaying, setPublicRadarPlaying] = useState(false);
+  const publicRadarFrameCount = radar?.frames.length ?? 0;
+  const publicRadarFrameIndex = Math.max(0, Math.min(publicRadarIndex ?? publicRadarFrameCount - 1, publicRadarFrameCount - 1));
+  const publicRadarFrame = radar?.frames[publicRadarFrameIndex];
+
   useEffect(() => {
-    const frame = radar?.frames.at(-1);
+    if (!publicRadarPlaying || !showPublicRadar || publicRadarFrameCount < 2) return;
+    const interval = window.setInterval(() => {
+      if (!document.hidden) setPublicRadarIndex(index => ((index ?? publicRadarFrameCount - 1) + 1) % publicRadarFrameCount);
+    }, Math.max(350, settings.speed * 1000 / publicRadarFrameCount));
+    return () => window.clearInterval(interval);
+  }, [publicRadarPlaying, showPublicRadar, publicRadarFrameCount, settings.speed]);
+
+  useEffect(() => {
+    const frame = publicRadarFrame;
     if (!map || !mapLoaded || !open || !showPublicRadar || !radar || !frame || !manifest) return;
     const tileUrl = `/api/storm-maps/tiles/${radar.provider}/radar/${encodeURIComponent(frame.time)}/{z}/{x}/{y}.png?token=${encodeURIComponent(manifest.tileToken)}`;
     try {
@@ -216,7 +230,7 @@ function StormWorkbench(props: Props) {
       ensureStormDrawCasing(map);
     } catch { /* A style update may be in progress. Retry when style.load fires. */ }
     return () => { try { removeStormRaster(map); } catch { /* map removed */ } };
-  }, [map, mapLoaded, open, showPublicRadar, radar, manifest, settings.radarOpacity, revision]);
+  }, [map, mapLoaded, open, showPublicRadar, radar, manifest, publicRadarFrame, settings.radarOpacity, revision]);
 
   useEffect(() => {
     if (!open || !map || !mapLoaded || !glEnabled || !workspaceId || !glPath) return;
@@ -437,6 +451,18 @@ function StormWorkbench(props: Props) {
               {label}
             </label>
           ))}
+          {showPublicRadar && publicRadarFrameCount > 1 && (
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <span>Radar playback</span>
+                <button type="button" onClick={() => setPublicRadarPlaying(value => !value)} className="rounded-md border px-3 py-2">
+                  {publicRadarPlaying ? 'Pause' : 'Play'}
+                </button>
+              </div>
+              <Slider min={0} max={publicRadarFrameCount - 1} step={1} value={[publicRadarFrameIndex]} onValueChange={([index]) => { setPublicRadarPlaying(false); setPublicRadarIndex(index); }} aria-label="Radar frame" />
+              {publicRadarFrame && <p className="text-xs text-muted-foreground">{timeLabel(new Date(publicRadarFrame.label))}</p>}
+            </div>
+          )}
         </div>
       ) : <StormGLSettingsPanel settings={settings} onChange={setSettings} compact />}
       renderTerritory={onSelectionReady => <>
