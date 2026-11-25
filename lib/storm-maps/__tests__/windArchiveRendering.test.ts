@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { windDisplayPyramid } from '../intelligence/wind-archive-collector';
+import { windDisplayPyramid } from '../intelligence/wind-archive-rendering';
 import { windPixelColor, windGustKPH } from '../intelligence/wind-archive-format';
 import { windArchiveMaximum,windArchiveStatistics } from '../intelligence/wind-archive-rendering';
 async function main() {

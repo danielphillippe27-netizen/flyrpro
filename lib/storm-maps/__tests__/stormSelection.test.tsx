@@ -6,7 +6,6 @@ import { StormWorkbenchView } from '../../../components/storm-maps/StormWorkbenc
 import { StormOverlayPicker } from '../../../components/storm-maps/StormOverlayPicker';
 import { StormEventMap } from '../../../components/storm-maps/intelligence/StormEventMap';
 import { StormDiscoveryPanel } from '../../../components/storm-maps/intelligence/StormDiscoveryPanel';
-import { STRONGEST_STORM_SETTINGS } from '../gl-settings';
 
 async function main() {
   const dom = new JSDOM('<section id="workspace"><div id="canvas"></div><div id="root"></div></section>');
@@ -32,12 +31,9 @@ async function main() {
     return <p>Selected storm geometry</p>;
   }
   const root = createRoot(document.getElementById('root')!);
-  const range = { start: new Date('2026-10-13T00:00:00Z'), end: new Date('2026-10-13T23:59:59Z') };
   await act(async () => {
-    root.render(<StormWorkbenchView onSidebarWidth={width => { sidebarWidth = width; }} map={workbenchMap as never} settings={{ ...STRONGEST_STORM_SETTINGS, mode: 'history' }} selectedStorm onCreateTerritory={value => { selection = value; }}
-      timelineRange={range} onTimelineRange={() => {}} onTimelineSpeed={() => {}} onChange={() => {}} onArchive={() => {}}
-      ready={false} loading={false} error={null} playing={false} position={100} clock="7:59 PM" rangeTitle="Selected storm · Historical"
-      rangeLabels={{ start: 'Oct 13', end: 'Oct 13' }} onPlay={() => {}} onScrub={() => {}} onNow={() => {}} legendRef={{ current: null }}
+    root.render(<StormWorkbenchView onSidebarWidth={width => { sidebarWidth = width; }} map={workbenchMap as never} selectedStorm onCreateTerritory={value => { selection = value; }}
+      onArchive={() => {}} loading={false} error={null}
       renderArchive={onTerritory => <><Archive /><button onClick={onTerritory}>Select hail zone</button></>} renderSaved={() => <p>Saved territories</p>} renderTerritory={() => <p>Select zone</p>} renderLayers={() => null} />);
   });
   const click = async (label: string) => {
@@ -55,7 +51,7 @@ async function main() {
   assert.equal(selection, 'draw', 'Create storm territory still supports drawing');
   assert.equal(document.querySelector('[aria-label="Weather timeline"]'), null, 'The bottom playback bar is removed');
   assert.equal(document.querySelector('[aria-label="Play weather animation"]'), null);
-  assert.ok(document.querySelector('nav[aria-label="Map settings and timeline"] button[aria-label="Timeline settings"]'), 'Timeline settings remain in the top-right controls');
+  assert.ok(document.querySelector('nav[aria-label="Map settings and timeline"] button[aria-label="Weather layers"]'), 'Public weather layers remain in the top-right controls');
   assert.equal(Array.from(document.querySelectorAll('button')).some(node => node.textContent === 'Now'), false);
   assert.equal(sidebarWidth, 280, 'Desktop keeps its sidebar');
   await act(async () => { mobile = true; mediaListeners.forEach(listener => listener()); });
@@ -89,6 +85,7 @@ async function main() {
   assert.equal(workspace.classList.contains('storm-fullscreen-surface'), false);
   window.dispatchEvent(new dom.window.Event('resize'));
   assert.equal(resizeCalls, 3, 'Unmount removes fullscreen resize listeners');
+  const range = { start: new Date('2026-10-13T00:00:00Z'), end: new Date('2026-10-13T23:59:59Z') };
   // Selecting a storm fits the camera while its style may still be loading.
   let styleReady = true;
   const sources = new Map<string, unknown>(), layers = new Map<string, unknown>();

@@ -1,24 +1,8 @@
 import { loadTornadoSurveys } from './tornado-surveys';
 import { getCachedStormValue, setCachedStormValue } from '../cache';
-import { cycloneEvent, reportEvents, type CycloneResponse } from './normalize';
-import { isXweatherEnabled } from '../xweather-config';
+import { reportEvents } from './normalize';
 import type { StormHazard } from './model';
 
-export async function xweatherData<T>(path: string, params: Record<string,string>): Promise<T[]> {
-  if (!isXweatherEnabled()) throw new Error('Xweather is paused');
-  const id=process.env.XWEATHER_CLIENT_ID, secret=process.env.XWEATHER_CLIENT_SECRET;
-  if(!id||!secret)throw new Error('Xweather archive access is not configured');
-  const url=new URL(`https://data.api.xweather.com/${path}`);
-  Object.entries(params).forEach(([key,value])=>url.searchParams.set(key,value));
-  url.searchParams.set('client_id',id);url.searchParams.set('client_secret',secret);
-  // Never propagate upstream errors or URLs: they can include credentials.
-  let response:Response;
-  try {response=await fetch(url,{signal:AbortSignal.timeout(20000),cache:'no-store'});}catch{throw new Error('Xweather did not respond. Please retry.');}
-  if(!response.ok)throw new Error('Xweather archive request unavailable. Check provider access.');
-  const body=await response.json();
-  if(!body.success)throw new Error('This Xweather archive request is not available with the current provider access.');
-  return Array.isArray(body.response)?body.response:[];
-}
 export async function loadReportCollection(start:string,end:string) {
   const key=`intelligence:reports:${start}:${end}`;
   const cached=await getCachedStormValue<GeoJSON.FeatureCollection>(key);
@@ -41,9 +25,3 @@ export async function loadReportEvents(bbox:number[],start:string,end:string,haz
   try {const surveys=await loadTornadoSurveys(bbox,start,end);return [...surveys,...reports.map(event=>({...event,surveyStatus:'unavailable' as const}))];}
   catch {return reports.map(event=>({...event,surveyStatus:'error' as const}));}
 }
-export async function loadCyclones(start:string,end:string,center:[number,number],sourceId?:string,active=false) {
-  const path=sourceId?`tropicalcyclones/archive/${sourceId}`:active?'tropicalcyclones':'tropicalcyclones/archive/closest';
-  const params:Record<string,string>=sourceId?{}:active?{limit:'100'}:{p:`${center[1]},${center[0]}`,from:start,to:end,limit:'25',radius:'1500miles'};
-  return (await xweatherData<CycloneResponse>(path,{...params,filter:'geo,windfield'})).map(cycloneEvent);
-}
-export type HailArchiveRow={loc:{lat:number;long:number};periods:Array<{dateTimeISO:string;maxSizeMM:number|null;maxSizeIN:number|null;probSevere:number|null}>;profile?:{tz:string}};

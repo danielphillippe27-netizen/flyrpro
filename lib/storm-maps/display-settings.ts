@@ -1,4 +1,3 @@
-import type { MapUnits } from '@xweather/mapsgl';
 export const UNIT_OPTIONS = {
   temperature: ['C', 'F'], speed: ['km/h', 'kts', 'mph', 'm/s'], pressure: ['hPa', 'mb', 'inHg'],
   distance: ['km', 'mi'], height: ['m', 'ft'], intensity: ['mm/hr', 'in/hr'], precipitation: ['mm', 'in'], snowfall: ['cm', 'in'],
@@ -6,7 +5,7 @@ export const UNIT_OPTIONS = {
 export type StormUnitKey = keyof typeof UNIT_OPTIONS;
 export type StormDisplaySettings = {
   baseMap: 'auto' | 'streets' | 'light' | 'dark'; projection: 'mercator' | 'globe';
-  unitSystem: 'metric' | 'imperial' | 'custom'; customUnits: Pick<MapUnits, StormUnitKey>;
+  unitSystem: 'metric' | 'imperial' | 'custom'; customUnits: { [Key in StormUnitKey]: (typeof UNIT_OPTIONS)[Key][number] };
   alwaysShowNames: boolean; autoUpdateMinutes: 0 | 2 | 5 | 10; autoHideControls: boolean;
 };
 export const METRIC_UNITS: StormDisplaySettings['customUnits'] = { temperature: 'C', speed: 'km/h', pressure: 'hPa', distance: 'km', height: 'm', intensity: 'mm/hr', precipitation: 'mm', snowfall: 'cm' };

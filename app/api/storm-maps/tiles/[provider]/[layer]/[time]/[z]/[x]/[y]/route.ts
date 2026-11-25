@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function isProvider(value: string): value is StormMapsProvider {
-  return value === 'tomorrow' || value === 'iem' || value === 'eccc' || value === 'xweather';
+  return value === 'tomorrow' || value === 'iem' || value === 'eccc';
 }
 
 function parseTileCoordinate(value: string, stripPng = false) {
@@ -23,16 +23,17 @@ export async function GET(
     params: Promise<{ provider: string; layer: string; time: string; z: string; x: string; y: string }>;
   },
 ) {
+  const params = await context.params;
+  if (!isProvider(params.provider) || !isStormRasterLayerId(params.layer)) {
+    return NextResponse.json({ error: 'Unknown Storm Maps provider or layer' }, { status: 404 });
+  }
+
   const token = request.nextUrl.searchParams.get('token') || '';
   const tokenPayload = verifyStormMapsTileToken(token);
   if (!tokenPayload) {
     return NextResponse.json({ error: 'Invalid or expired Storm Maps token' }, { status: 401 });
   }
 
-  const params = await context.params;
-  if (!isProvider(params.provider) || !isStormRasterLayerId(params.layer)) {
-    return NextResponse.json({ error: 'Unknown Storm Maps provider or layer' }, { status: 404 });
-  }
   if (!isProviderAllowedForLayer(params.provider, params.layer)) {
     return NextResponse.json({ error: 'Provider is not allowed for this layer' }, { status: 400 });
   }

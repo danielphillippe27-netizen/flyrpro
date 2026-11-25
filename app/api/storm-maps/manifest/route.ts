@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server';
 import { isWorkspaceStormMapsActive } from '@/lib/storm-maps/addon';
 import { providerForLayer, STORM_RASTER_CATALOG } from '@/lib/storm-maps/catalog';
 import { issueStormMapsTileToken } from '@/lib/storm-maps/token';
-import { getEcccRadarFrameTimes, isTomorrowStormMapsConfigured, isXweatherConfigured } from '@/lib/storm-maps/providers';
+import { getEcccRadarFrameTimes, isTomorrowStormMapsConfigured } from '@/lib/storm-maps/providers';
 import type { StormMapsManifest, StormRasterLayer, StormRasterLayerId } from '@/lib/storm-maps/types';
 
 export const runtime = 'nodejs';
@@ -27,14 +27,7 @@ function radarProviderForCenter(lat: number, lon: number): 'iem' | 'eccc' {
   return likelyCanadaOrNorthernCoverage ? 'eccc' : 'iem';
 }
 
-function radarFrames(provider: 'iem' | 'eccc' | 'xweather', now: number, ecccTimes: string[] = []) {
-  if (provider === 'xweather') {
-    const current = roundedDate(now, 5);
-    return Array.from({ length: 13 }, (_, index) => {
-      const time = new Date(current.getTime() - (12 - index) * 5 * 60_000).toISOString();
-      return { key: time, time, label: time };
-    });
-  }
+function radarFrames(provider: 'iem' | 'eccc', now: number, ecccTimes: string[] = []) {
   if (provider === 'iem') {
     const current = roundedDate(now, 5, -5);
     return Array.from({ length: 12 }, (_, index) => {
@@ -99,8 +92,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({error:'Storm Maps covers Canada and the United States.'},{status:400});
   }
 
-  const xweatherConfigured = isXweatherConfigured();
-  const radarProvider = xweatherConfigured ? 'xweather' : radarProviderForCenter(lat, lon);
+  const radarProvider = radarProviderForCenter(lat, lon);
   const generatedAt = Date.now();
   const ecccTimes = radarProvider === 'eccc' ? await getEcccRadarFrameTimes() : [];
   const tomorrowConfigured = isTomorrowStormMapsConfigured();
@@ -129,24 +121,20 @@ export async function GET(request: NextRequest) {
 
   const approvedTiles = layers.filter((layer) => layer.available).flatMap((layer) => layer.frames.map((frame) => `${layer.provider}:${layer.id}:${frame.time}`));
   const issued = issueStormMapsTileToken(membership.workspaceId, approvedTiles, generatedAt);
-  const glToken = xweatherConfigured ? issueStormMapsTileToken(membership.workspaceId, ['xweather:gl'], generatedAt).token : undefined;
   const payload: StormMapsManifest = {
     enabled: true,
     generatedAt: new Date(generatedAt).toISOString(),
     expiresAt: issued.expiresAt,
     tileToken: issued.token,
-    glToken,
     radarProvider,
     layers,
     featureEndpoint: '/api/storm-maps/features',
     providerHealth: {
-      xweather: { available: xweatherConfigured, status: xweatherConfigured ? 'ready' : 'unconfigured' },
       tomorrow: { available: tomorrowConfigured, status: tomorrowConfigured ? 'ready' : 'unconfigured' },
       iem: { available: true, status: 'ready' },
       eccc: { available: true, status: 'ready' },
     },
     attribution: [
-      ...(xweatherConfigured ? [{ label: 'Weather data © Vaisala Xweather', url: 'https://www.xweather.com/' }] : []),
       ...(tomorrowConfigured ? [{ label: 'Tomorrow.io', url: 'https://www.tomorrow.io/' }] : []),
       { label: 'NOAA/NWS', url: 'https://www.weather.gov/' },
       { label: 'Iowa Environmental Mesonet', url: 'https://mesonet.agron.iastate.edu/' },
@@ -155,10 +143,5 @@ export async function GET(request: NextRequest) {
     disclaimer: 'Beta weather visualization—follow official authorities for safety decisions.',
   };
 
-  const response = NextResponse.json(payload, { headers: { 'Cache-Control': 'private, no-store' } });
-  if (glToken) response.cookies.set(`storm-gl-${membership.workspaceId}`, glToken, {
-    httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
-    path: `/api/storm-maps/gl/session-${membership.workspaceId}`, maxAge: 15 * 60,
-  });
-  return response;
+  return NextResponse.json(payload, { headers: { 'Cache-Control': 'private, no-store' } });
 }

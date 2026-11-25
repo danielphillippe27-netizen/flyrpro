@@ -15,9 +15,3 @@ export async function stormContext(request: NextRequest) {
 export function stormError(error: unknown) {
   return NextResponse.json({error:error instanceof Error?error.message:'Storm data unavailable'},{status:503,headers:{'Cache-Control':'no-store'}});
 }
-
-export async function consumeArchiveRequest(context: {admin: ReturnType<typeof createAdminClient>;workspaceId:string}) {
-  const {data,error}=await context.admin.rpc('consume_storm_archive_request',{p_workspace_id:context.workspaceId});
-  if(error)throw new Error('Archive request accounting is unavailable. Retry after Storm Intelligence is configured.');
-  if(data!==true)throw new Error('This workspace has reached its daily archive lookup limit. Saved storms and live maps remain available.');
-}

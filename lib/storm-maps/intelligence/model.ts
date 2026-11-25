@@ -4,7 +4,7 @@ export const hazardSchema = z.enum(['hail', 'wind', 'tornado', 'hurricane']);
 export type StormHazard = z.infer<typeof hazardSchema>;
 export const eventReferenceSchema = z.object({
   key: z.string().min(1).max(160), title: z.string().min(1).max(160),
-  hazard: hazardSchema, source: z.enum(['iem', 'xweather', 'noaa-dat']),
+  hazard: hazardSchema, source: z.enum(['iem', 'xweather', 'noaa-dat', 'manual']),
   start: z.iso.datetime({ offset: true }), end: z.iso.datetime({ offset: true }),
   sourceId: z.string().max(100),
 }).strict().refine(v => Date.parse(v.start) <= Date.parse(v.end), 'Invalid event dates');

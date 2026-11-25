@@ -27,7 +27,7 @@ export async function collectCountryArchive(now=new Date(),includeHistory=false)
   try{const csv=await fetchText('https://zenodo.org/records/17517119/files/integrated_canadian_hail_db_v1.1.csv?download=1');if(csv.trimStart().startsWith('<'))throw Error('Invalid CSV response.');const rows=parseCsv(csv,{columns:true,skip_empty_lines:true});if(!rows.length)throw Error('Empty Canadian hail archive.');await store('eccc-ichd','ca-hail-history-v1-1',csv,new Date('2024-12-31T23:59:59Z'),{country:'CA',evidence:'reported-observations',period:'2005–2024',rows:rows.length,sourceUrl:'https://zenodo.org/records/17517119',attribution:'Brunet and Brimelow; Contains information licensed under the Open Government Licence – Canada'});details.CanadianHailHistory={status:'stored',reports:rows.length};}catch{details.CanadianHailHistory={status:'unavailable',reason:'Published dataset download is unavailable; current access returned an error.'};failures.push('CA_historical_hail');}
 
  }
- details.limitations=['National warnings are not complete hail or tornado occurrence archives.','Location-based Xweather hail history requires configured watch locations.','CSSL/NTP surveyed tracks require confirmed commercial access.'];
+ details.limitations=['National warnings are not complete hail or tornado occurrence archives.','CSSL/NTP surveyed tracks require confirmed commercial access.'];
  const status=(details.CA as {status?:string})?.status==='failed'?'failed':failures.length?'partial':'complete';
  const {error}=await admin.from('storm_collection_runs').update({status,details:{...details,failures},completed_at:new Date().toISOString()}).eq('window_key',window);if(error)throw Error('Country collection result could not be recorded.');
  return {status,window,details,failures};

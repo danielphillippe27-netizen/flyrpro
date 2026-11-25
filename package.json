@@ -44,7 +44,7 @@
     "territory-iq:toronto": "python3 scripts/ingest_toronto_territory_iq.py --env-file .env.local",
     "test:territory-iq-data": "cd ../municipal_data/territory_iq_canada && python3 -m unittest discover -s acquisition/tests -v",
     "test:crm-integrations": "npx tsx scripts/test-crm-integrations.ts",
-    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts && npx tsx lib/storm-maps/__tests__/intelligence.test.ts && npx tsx lib/storm-maps/__tests__/territoryReview.test.ts && npx tsx lib/storm-maps/__tests__/tornadoSurveys.test.ts && npx tsx lib/storm-maps/__tests__/stormSelection.test.tsx && npx tsx lib/storm-maps/__tests__/stormBrowser.test.tsx && npx tsx lib/storm-maps/__tests__/stormTerritoryOverlay.test.tsx && npx tsx lib/storm-maps/__tests__/savedHistory.test.tsx",
+    "test:storm-maps": "npx tsx lib/storm-maps/__tests__/stormMaps.test.ts && npx tsx lib/storm-maps/__tests__/retiredProvider.test.ts && npx tsx lib/storm-maps/__tests__/glSettings.test.ts && npx tsx lib/storm-maps/__tests__/intelligence.test.ts && npx tsx lib/storm-maps/__tests__/territoryReview.test.ts && npx tsx lib/storm-maps/__tests__/tornadoSurveys.test.ts && npx tsx lib/storm-maps/__tests__/stormSelection.test.tsx && npx tsx lib/storm-maps/__tests__/stormBrowser.test.tsx && npx tsx lib/storm-maps/__tests__/stormTerritoryOverlay.test.tsx && npx tsx lib/storm-maps/__tests__/savedHistory.test.tsx",
     "test:mobile-storms": "npx tsx lib/storm-maps/__tests__/mobileStorms.test.ts && npx tsx lib/storm-maps/__tests__/mobileWind.test.tsx && npx tsx lib/storm-maps/__tests__/largeTerritory.test.tsx",
     "test:mobile-storms-browser": "node scripts/test-mobile-storms-browser.cjs"
   },
@@ -88,7 +88,6 @@
     "@types/rbush": "^4.0.0",
     "@types/three": "^0.181.0",
     "@vercel/functions": "^3.9.5",
-    "@xweather/mapsgl": "^1.10.2",
     "adm-zip": "^0.5.16",
     "axios": "^1.13.5",
     "class-variance-authority": "^0.7.1",

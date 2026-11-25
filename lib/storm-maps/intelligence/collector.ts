@@ -11,7 +11,7 @@ export async function collectStormArchive(now=new Date()){
  const admin=createAdminClient(),window=collectionWindow(now);
  const {error:claimError}=await admin.from('storm_collection_runs').insert({window_key:window});
  if(claimError){if(claimError.code==='23505')return {status:'already_attempted',window};throw Error('Archive collector database unavailable.');}
- const start=reportCollectionStart(now),details:Record<string,unknown>={cyclones:{status:'paused'}},failures:string[]=[];
+ const start=reportCollectionStart(now),details:Record<string,unknown>={},failures:string[]=[];
  async function asset(provider:string,product:string,bytes:Buffer,sourceTime:Date,metadata:Record<string,unknown>){
   const digest=hash(bytes),path=`${provider}/${product}/${sourceTime.toISOString().slice(0,10)}/${digest}.gz`;
   const {data:existing,error:readError}=await admin.from('storm_archive_assets').select('id').eq('provider',provider).eq('product',product).eq('content_hash',digest).maybeSingle();
@@ -45,7 +45,7 @@ export async function collectStormArchive(now=new Date()){
    details.hailGrid=await asset('noaa-mrms','mesh-max-1440min',bytes,reference,{evidence:'modeled-hail-grid',coverage:'CONUS MRMS grid',units:'mm',intervalMinutes:1440,sourceUrl:NOAA_URL,format:'GRIB2 gzip',mapIntegration:'pending'});
   }catch{failures.push('hail_grid');details.hailGrid={status:'failed'};}})(),
  ]);
- details.limitations=['Xweather native hail grid export is not connected.','Tornado reports are not surveyed impact tracks.','Coverage is limited to the named provider feeds; this cannot establish every storm worldwide.'];
+ details.limitations=['Tornado reports are not surveyed impact tracks.','Coverage is limited to the named provider feeds; this cannot establish every storm worldwide.'];
  const status=failures.length?['reports','hailGrid'].every(key=>(details[key] as {status?:string})?.status==='failed')?'failed':'partial':'complete';
  const {error}=await admin.from('storm_collection_runs').update({status,details:{...details,failures},completed_at:new Date().toISOString()}).eq('window_key',window);
  if(error)throw Error('Collector run record failed.');

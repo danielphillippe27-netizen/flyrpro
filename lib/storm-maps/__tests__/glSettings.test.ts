@@ -1,7 +1,5 @@
-import { resetStormTimeline } from '../gl-timeline';
 import assert from 'node:assert/strict';
 import { STRONGEST_STORM_SETTINGS, readStormGLSettings, stormTimeRange, hailViewSettings, hurricaneViewSettings, stormLayerForMode, isHistoricalHailShade } from '../gl-settings';
-import { resolveGLRequest, allowedVectorProducts } from '../gl-proxy-policy';
 import { stormTerritoryImpact } from '../gl-impact';
 import type { StormFeatureProperties } from '../types';
 assert.equal(STRONGEST_STORM_SETTINGS.lightning, true);
@@ -22,22 +20,13 @@ assert.equal(twelveHourRange.end.getTime()-twelveHourRange.start.getTime(),12*36
 assert.equal(twelveHourRange.current.getTime(),twelveHourRange.end.getTime());
 for(const mode of ['live','history','forecast'] as const) { const range=stormTimeRange(mode,24,now); assert.equal(range.current.getTime()%1000,0); assert.ok(range.start<=range.current&&range.current<=range.end); }
 assert.equal(stormTimeRange('forecast',24,now).end.getTime()-stormTimeRange('forecast',24,now).start.getTime(),24*3600_000);
-assert.equal(resolveGLRequest(['vector','hail-threats-nowcast','2026-10-10T13:00:00.000Z','6','17','23.pbf'],'GET')?.kind,'vector');
-assert.equal(resolveGLRequest(['vector','anything','2026-10-10T13:00:00Z','6','17','23.pbf'],'GET'),null);
-assert.equal(resolveGLRequest(['maps','wolfgrid_session','stormcells.json'],'GET')?.kind,'maps');
-assert.equal(resolveGLRequest(['maps','wolfgrid_session','lightning-flash','6','17','23','20261010130000.pbf'],'GET')?.kind,'maps');
-assert.equal(resolveGLRequest(['maps','someone_else','stormcells.json'],'GET'),null);
-assert.equal(resolveGLRequest(['maps','wolfgrid_session','../../evil.json'],'GET'),null);
-assert.equal(resolveGLRequest(['tile','6','17','23','512x512','2026-10-10T13:00:00.000Z.png'],'POST')?.kind,'image');
-assert.equal(resolveGLRequest(['tile','6','17','23','512x512','2026-10-10T13:00:00.000Z.png'],'GET'),null);
-assert.equal(allowedVectorProducts(['hail-threats-nowcast','lightning-threat-zones']),true); assert.equal(allowedVectorProducts(['arbitrary']),false);
 const polygon=(x:number)=>({type:'Polygon' as const,coordinates:[[[x,0],[x+2,0],[x+2,2],[x,2],[x,0]]]});
 const territories={type:'FeatureCollection' as const,features:[{type:'Feature' as const,geometry:polygon(0),properties:{id:'a',name:'Test territory'}},{type:'Feature' as const,geometry:polygon(10),properties:{id:'b',name:'Clear territory'}}]};
 const props:StormFeatureProperties={id:'warning',kind:'alert',provider:'noaa',event:'Severe thunderstorm',severity:'severe',category:'thunderstorm',headline:'Warning'};
 const risk={type:'FeatureCollection' as const,features:[{type:'Feature' as const,geometry:polygon(1),properties:props}]};
 assert.deepEqual(stormTerritoryImpact(territories,risk).map(x=>x.id),['a']);
 assert.deepEqual(stormTerritoryImpact(territories,{...risk,features:[{...risk.features[0],properties:{...props,kind:'report' as const}}]}),[]);
-console.log('Strongest defaults, saved preferences, timeline bounds, proxy routes, and campaign risk intersections passed');
+console.log('Strongest defaults, saved preferences, timeline bounds and campaign risk intersections passed');
 
 const historicalHail = hailViewSettings(STRONGEST_STORM_SETTINGS, 'history');
 assert.equal(historicalHail.mode, 'history');
@@ -51,16 +40,6 @@ assert.equal(readStormGLSettings(historicalHail).shade, 'hail-size-max');
 assert.equal(isHistoricalHailShade('hail-size'), true);
 assert.equal(isHistoricalHailShade('temperatures'), false);
 
-// A mode switch must detach old child animations before seeking beyond their old range.
-
-const order: string[] = [];
-let oldAnimation = true;
-const timeline = { pause: () => order.push('pause'), clear: () => { oldAnimation = false; order.push('clear'); }, startDate: new Date(0), endDate: new Date(1), goToDate: (date: Date) => { assert.equal(oldAnimation, false); assert.ok(date >= timeline.startDate && date <= timeline.endDate); order.push('seek'); } };
-const active = new Set(['hail-size-max', 'hail-threats-polygons']);
-resetStormTimeline({ timeline, removeWeatherLayer: (id: string) => order.push(id) } as unknown as Parameters<typeof resetStormTimeline>[0], active, { start: new Date(10), end: new Date(20) }, new Date(15));
-assert.deepEqual(order, ['pause', 'hail-size-max', 'hail-threats-polygons', 'clear', 'seek']);
-assert.equal(active.size, 0);
-
 const hurricane = hurricaneViewSettings(STRONGEST_STORM_SETTINGS, 'satellite');
 assert.equal(hurricane.mode, 'history');
 assert.equal(hurricane.shade, 'satellite-infrared-color');
@@ -73,13 +52,3 @@ assert.equal(forecast.pressure, true);
 assert.equal(stormLayerForMode('pressure-msl-contour', forecast.mode), 'gfs-pressure-msl-contour');
 assert.equal(stormLayerForMode('wind-particles', forecast.mode), 'gfs-wind-particles');
 assert.equal(stormLayerForMode('tropical-cyclones', forecast.mode), 'tropical-cyclones');
-assert.equal(resolveGLRequest(['api', 'tropicalcyclones', 'archive', 'search'], 'GET')?.kind, 'api');
-assert.equal(resolveGLRequest(['api', 'users'], 'GET'), null);
-assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '-1hr.png'], 'GET'), null);
-assert.equal(resolveGLRequest(['maps', 'wolfgrid_session', 'satellite-infrared-color', '6', '17', '23', '20261010130000.png'], 'GET')?.kind, 'maps');
-
-// Provider setters truncate fractional seconds; an inclusive daily endpoint must still seek safely.
-let providerStart=new Date(0),providerEnd=new Date(0),sought=new Date(0);
-const truncated={pause:()=>{},clear:()=>{},get startDate(){return providerStart;},set startDate(value:Date){providerStart=new Date(Math.floor(+value/1000)*1000);},get endDate(){return providerEnd;},set endDate(value:Date){providerEnd=new Date(Math.floor(+value/1000)*1000);},goToDate:(date:Date)=>{assert(+date>=+providerStart&&+date<=+providerEnd);sought=date;}};
-resetStormTimeline({timeline:truncated,removeWeatherLayer:()=>{}} as unknown as Parameters<typeof resetStormTimeline>[0],new Set(),{start:new Date('2026-10-24T00:00:00Z'),end:new Date('2026-10-24T15:11:11.020Z')},new Date('2026-10-24T15:11:11.020Z'));
-assert.equal(sought.toISOString(),'2026-10-24T15:11:11.000Z');

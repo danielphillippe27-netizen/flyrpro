@@ -1,15 +1,12 @@
 'use client';
-import { useCallback, useEffect, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type mapboxgl from 'mapbox-gl';
 import { Settings2, MapPin, Bookmark, X, Layers, Scan, Pencil, Info, Check } from 'lucide-react';
 import { StormListSidebar } from './StormListSidebar';
-import { StormTimelineSettings } from './StormTimelineSettings';
 import { StormFullscreenButton } from './StormFullscreenButton';
-import { StormWeatherRail } from './StormWeatherRail';
-import type { StormGLSettings } from '@/lib/storm-maps/gl-settings';
 type Panel = 'storms' | 'territory' | 'layers' | 'saved' | null;
 export type StormWindActions = { inspect: () => void; review: () => void };
-type Props = { publicWeather?: boolean; historicHail?: boolean; archivedWind?: boolean; mobileCampaign?: boolean; initiallyOpenDiscovery?: boolean; drawingRequest?: number; selectedStorm?: boolean; onCreateTerritory?: (selection: 'draw' | 'weather') => void; onSidebarWidth?: (width: number) => void; timelineRange: { start: Date; end: Date }; onTimelineRange: (range: { start: Date; end: Date }) => void; onTimelineSpeed: (duration: number) => void; map: mapboxgl.Map; settings: StormGLSettings; onChange: (settings: StormGLSettings) => void; onSettings?: () => void; onArchive: (active: boolean) => void; alwaysShowNames?: boolean; ready: boolean; loading: boolean; error: string | null; playing: boolean; position: number; clock: string; rangeTitle: string; rangeLabels: { start: string; end: string }; onPlay: () => void; onScrub: (value: number) => void; onNow: () => void; legendRef: RefObject<HTMLDivElement | null>; renderSaved: () => ReactNode; renderTerritory: (onSelectionReady?: () => void) => ReactNode; renderArchive: (onTerritory: () => void, browseOnly?: boolean, onSelected?: () => void, windActions?: StormWindActions) => ReactNode; renderLayers: () => ReactNode };
+type Props = { historicHail?: boolean; archivedWind?: boolean; mobileCampaign?: boolean; initiallyOpenDiscovery?: boolean; drawingRequest?: number; selectedStorm?: boolean; onCreateTerritory?: (selection: 'draw' | 'weather') => void; onSidebarWidth?: (width: number) => void; map: mapboxgl.Map; onSettings?: () => void; onArchive: (active: boolean) => void; loading: boolean; error: string | null; renderSaved: () => ReactNode; renderTerritory: (onSelectionReady?: () => void) => ReactNode; renderArchive: (onTerritory: () => void, browseOnly?: boolean, onSelected?: () => void, windActions?: StormWindActions) => ReactNode; renderLayers: () => ReactNode };
 import { useMobileLayout } from '@/lib/hooks/useMobileLayout';
 export function StormWorkbenchView(props: Props) {
   const narrowLayout = useMobileLayout();
@@ -57,7 +54,6 @@ export function StormWorkbenchView(props: Props) {
     setPanel('territory'); setCollapsed(false); setMobilePanelOpen(!props.mobileCampaign); setMobileLayersOpen(false);
     onArchive(true);
   }, [drawingRequest, onCreateTerritory, onArchive, props.mobileCampaign]);
-  const apply = (settings: StormGLSettings) => { props.onChange(settings); props.onArchive(false); };
   const mobilePanelVisible = mobilePanelOpen && dashboard;
   return <>
     {props.mobileCampaign && <>
@@ -82,11 +78,12 @@ export function StormWorkbenchView(props: Props) {
       <button type="button" aria-label="Saved storm maps" aria-expanded={mobilePanelVisible && panel === 'saved'} onClick={() => open('saved')} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold"><Bookmark className="h-4 w-4" />{props.mobileCampaign && 'Saved storms'}</button>
       <button type="button" aria-label="Map settings" onClick={props.onSettings} className="flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-lg text-xs font-semibold"><Settings2 className="h-4 w-4" />{props.mobileCampaign && 'Map settings'}</button>
     </nav>}
-    {!props.mobileCampaign && mobileLayersOpen && (props.publicWeather ? (
+    {!props.mobileCampaign && mobileLayersOpen && (
       <section aria-label="Weather layers" className="absolute inset-x-2 top-16 z-40 rounded-xl bg-background p-4 shadow-xl md:hidden">
+        <div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold">Weather layers</h2><button type="button" aria-label="Close weather layers" onClick={() => setMobileLayersOpen(false)} className="rounded-full p-2 hover:bg-muted"><X className="h-4 w-4" /></button></div>
         {props.renderLayers()}
       </section>
-    ) : <StormWeatherRail compact settings={props.settings} alwaysShowNames={false} onChange={apply} mobileOpen={mobileLayersOpen} onMobileClose={() => setMobileLayersOpen(false)} />)}
+    )}
     {!props.mobileCampaign && (!dashboard || collapsed) && <button type="button" aria-label="Find storm" aria-expanded={panel === 'storms' && !collapsed} onClick={() => { if (collapsed && panel === 'storms') setCollapsed(false); else open('storms'); }} className="absolute left-12 top-4 z-30 hidden h-14 items-center gap-3 rounded-xl bg-[#a9d7d5] px-6 text-base font-semibold text-[#0c202c] shadow-xl md:flex"><MapPin className="h-5 w-5" />Find storm</button>}
     <div hidden={!dashboard}>
       <StormListSidebar title={props.mobileCampaign && panel === 'storms' && showInfo ? 'Storm info' : undefined} mobileCampaign={props.mobileCampaign} collapsed={sidebarCollapsed} onCollapse={collapse} tab={dashboard ? panel as 'storms'|'saved'|'territory' : 'storms'} onTab={value => { setPanel(value); props.onArchive(value === 'storms'); }} onCreate={() => createTerritory('draw')}>
@@ -102,19 +99,17 @@ export function StormWorkbenchView(props: Props) {
     </section>}
     {!props.mobileCampaign && !props.archivedWind && <aside aria-label="Weather legends" className={`absolute bottom-44 left-2 z-20 max-h-[25%] max-w-[calc(100%-5rem)] overflow-y-auto rounded-lg bg-white p-2 text-slate-800 shadow-xl md:bottom-28 md:left-auto md:right-24 md:w-72 ${mobilePanelVisible || mobileLayersOpen ? 'max-md:hidden' : ''}`}>
       <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)} className="min-h-11 text-xs font-medium md:hidden">{legendOpen ? 'Hide legend' : 'Show legend'}</button>
-      <div className={legendOpen ? '' : 'max-md:hidden'}><div hidden={props.historicHail}><div ref={props.legendRef} className="text-xs" /></div>
+      <div className={legendOpen ? '' : 'max-md:hidden'}>
         {props.historicHail ? <>
           <p className="text-xs font-semibold">Estimated hail size</p>
           <div aria-hidden="true" className="mt-1 h-2 rounded-sm" style={{background: 'linear-gradient(to right, #311d85, #1f59b8, #0d9e9a, #6fbf3a, #edd91f, #fba310, #f44f11)'}} />
           <div className="flex justify-between text-[9px]"><span>0 in</span><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3+</span></div>
           <p className="mt-1 text-[9px] text-slate-500">Daily maximum · Derived from NOAA MRMS</p>
-        </> : <p className="mt-1 text-[9px] text-slate-500">{props.publicWeather ? 'Radar and alerts · ECCC, NOAA and Iowa Environmental Mesonet' : 'Weather estimates · Vaisala Xweather'}</p>}</div>
+        </> : <p className="mt-1 text-[9px] text-slate-500">Radar and alerts · ECCC, NOAA and Iowa Environmental Mesonet</p>}</div>
     </aside>}
     {!props.mobileCampaign && <nav aria-label="Map settings and timeline" className="absolute right-4 top-20 z-40 flex items-center gap-2 rounded-2xl border border-border bg-white/95 p-2 text-slate-900 shadow-xl dark:border-white/10 dark:bg-[#0c202c]/95 dark:text-white md:top-4">
       <button type="button" aria-label="Map settings" onClick={props.onSettings} className="hidden h-11 w-11 items-center justify-center rounded-full hover:bg-slate-900/5 dark:hover:bg-white/10 md:flex"><Settings2 className="h-5 w-5" /></button>
-      {props.publicWeather ? (
         <button type="button" aria-label="Weather layers" aria-expanded={panel === 'layers'} onClick={() => open('layers')} className="hidden h-11 w-11 items-center justify-center rounded-full hover:bg-slate-900/5 dark:hover:bg-white/10 md:flex"><Layers className="h-5 w-5" /></button>
-      ) : <StormTimelineSettings range={props.timelineRange} duration={props.settings.speed} settings={props.settings} onChange={props.onChange} onRange={props.onTimelineRange} onSpeed={props.onTimelineSpeed} />}
       <StormFullscreenButton map={props.map} />
     </nav>}
     {(props.error || props.loading) && <p role={props.error ? 'alert' : 'status'} className="storm-mobile-status pointer-events-none absolute left-2 right-2 top-16 z-40 rounded-lg bg-white/95 dark:bg-[#0c202c]/95 px-4 py-2 text-xs text-slate-900 dark:text-white md:bottom-28 md:left-1/2 md:right-auto md:top-auto md:-translate-x-1/2">{props.error || 'Loading weather…'}</p>}

@@ -1,6 +1,5 @@
 import { aggregationHoursForLayer, mapGradientForLayer, STORM_RASTER_CATALOG, tomorrowFieldForLayer } from './catalog';
 import { getCachedStormValue, getStaleStormValue, setCachedStormValue } from './cache';
-import { isXweatherEnabled } from './xweather-config';
 import type { StormFeatureProperties, StormMapsProvider, StormRasterLayerId } from './types';
 
 const TILE_SIZE = 256;
@@ -113,29 +112,6 @@ export function buildTomorrowUrl(request: UpstreamTileRequest, apiKey: string) {
   const gradient = gradientForLayer(request.layerId);
   if (gradient) url.searchParams.set('gradient', gradient);
   return url.toString();
-}
-
-export function isXweatherConfigured() {
-  return isXweatherEnabled() && Boolean(process.env.XWEATHER_API_KEY || (process.env.XWEATHER_CLIENT_ID && process.env.XWEATHER_CLIENT_SECRET));
-}
-
-export function buildXweatherUrl(request: UpstreamTileRequest, clientId: string, clientSecret?: string) {
-  if (request.layerId !== 'radar') throw new Error('Xweather only supports radar in this integration');
-  const date = new Date(request.time);
-  if (request.time !== 'now' && Number.isNaN(date.getTime())) throw new Error('Invalid Xweather tile time');
-  const time = request.time === 'now' ? 'current' : date.toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-  const credential = clientSecret ? `${encodeURIComponent(clientId)}_${encodeURIComponent(clientSecret)}` : encodeURIComponent(clientId);
-  return `https://maps.api.xweather.com/${credential}/radar/${request.z}/${request.x}/${request.y}/${time}.png`;
-}
-
-export async function validateXweatherAccess() {
-  if (!isXweatherConfigured()) return { ok: false };
-  try {
-    await fetchTileFromProvider({ provider: 'xweather', layerId: 'radar', time: 'now', z: 8, x: 73, y: 92 });
-    return { ok: true };
-  } catch {
-    return { ok: false };
-  }
 }
 
 function buildIemUrl(request: UpstreamTileRequest) {
@@ -265,11 +241,6 @@ async function fetchTileFromProvider(request: UpstreamTileRequest): Promise<Cach
     if (!apiKey) throw new Error('Tomorrow.io is not configured');
     if (!(await consumeTomorrowBudget())) throw new Error('Tomorrow.io daily tile budget reached');
     url = buildTomorrowUrl(request, apiKey);
-  } else if (request.provider === 'xweather') {
-    if (!isXweatherConfigured()) throw new Error('Xweather is not configured');
-    url = process.env.XWEATHER_API_KEY
-      ? buildXweatherUrl(request, process.env.XWEATHER_API_KEY)
-      : buildXweatherUrl(request, process.env.XWEATHER_CLIENT_ID!, process.env.XWEATHER_CLIENT_SECRET!);
   } else if (request.provider === 'iem') {
     url = buildIemUrl(request);
   } else {
@@ -290,9 +261,6 @@ async function fetchTileFromProvider(request: UpstreamTileRequest): Promise<Cach
 export async function getStormMapTile(request: UpstreamTileRequest) {
   if (request.provider === 'tomorrow' && !isTomorrowStormMapsConfigured()) {
     throw new Error('Tomorrow.io is paused');
-  }
-  if (request.provider === 'xweather' && !isXweatherConfigured()) {
-    throw new Error('Xweather is paused');
   }
   const key = `tile:${request.provider}:${request.layerId}:${request.time}:${request.z}:${request.x}:${request.y}`;
   const cached = await getCachedStormValue<CachedTile>(key);
