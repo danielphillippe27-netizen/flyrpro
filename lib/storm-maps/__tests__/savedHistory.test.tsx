@@ -11,7 +11,7 @@ async function main() {
   assert.equal(savedStormArchiveOffset('200'), 200);
   assert.equal(savedStormArchiveFilter('US', 'hail')?.source, 'iem');
   assert.equal(savedStormArchiveFilter('AU', 'hail'), null);
-  assert.equal(savedStormArchiveFilter('CA', 'hail')?.keyPattern, 'xweather:ca:hail:%');
+  assert.equal(savedStormArchiveFilter('CA', 'hail')?.keyPattern, 'noaa-mrms:ca:hail:%');
   assert.equal(savedStormArchiveFilter('NZ', 'hail'), null);
 
   const dom = new JSDOM('<div id="root"></div>', { url: 'https://wolfgrid.app/campaigns/create' });

@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import { windCountryCell } from './wind-country-mask';
 import { area, featureCollection, polygon, union } from '@turf/turf';
-import { canonicalWindTime, WIND_COUNTRIES, windGustKPH, type WindArchiveBundle } from './wind-archive-format';
+import { canonicalWindTime, PUBLIC_WIND_DATASET, PUBLIC_WIND_PROVIDER, WIND_COUNTRIES, windGustKPH, type WindArchiveBundle } from './wind-archive-format';
 import { loadWindArchive } from './wind-archive-history';
 import { stormGeometrySchema } from './geometry';
 import type { StormCampaignContext } from './model';
@@ -63,9 +63,11 @@ export async function traceWindZone(bundle: WindArchiveBundle, lon: number, lat:
   if (!boundary || !stormGeometrySchema.safeParse(boundary).success) throw Error('This gust area has too complex a boundary. Select a smaller wind pocket.');
   return {boundary,clickedKPH,minimumKPH:min,maximumKPH:max,areaKM2:squareMeters/1e6,cellMeters:Math.round(40075016.686/size*Math.cos(lat*Math.PI/180))};
 }
-export async function archivedWindZone(country: WindArchiveBundle['country'], time: string, lon: number, lat: number, minimum?: number, bandOnly=true) {
+export async function archivedWindZone(country: WindArchiveBundle['country'], time: string, lon: number, lat: number, minimum?: number, bandOnly=true, provider?: typeof PUBLIC_WIND_PROVIDER | 'xweather') {
   time=canonicalWindTime(time);
-  const result=await traceWindZone(await loadWindArchive(country,time),lon,lat,minimum,bandOnly);
-  const context: StormCampaignContext={version:2,event:{key:`xweather:wind:${country}:${time}`,title:`${WIND_COUNTRIES[country].name} wind gusts · ${time.slice(0,16)} UTC`,hazard:'wind',source:'xweather',sourceId:'conditions_GUST_10-HTGL',start:time,end:time},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'intensity-zone',evidenceKind:'wind-sampled',gustSelection:{country,time,longitude:lon,latitude:lat,minimumKPH:result.minimumKPH,maximumKPH:result.maximumKPH,method:'archived-native-grid'}};
+  const bundle = await loadWindArchive(country, time, provider);
+  const source = bundle.dataset === PUBLIC_WIND_DATASET ? PUBLIC_WIND_PROVIDER : 'xweather';
+  const result = await traceWindZone(bundle, lon, lat, minimum, bandOnly);
+  const context: StormCampaignContext={version:2,event:{key:`${source}:wind:${country}:${time}`,title:`${WIND_COUNTRIES[country].name} wind gusts · ${time.slice(0,16)} UTC`,hazard:'wind',source,sourceId:bundle.dataset,start:time,end:time},selectedAt:new Date().toISOString(),minimumHailMM:null,selection:'intensity-zone',evidenceKind:'wind-sampled',gustSelection:{country,time,longitude:lon,latitude:lat,minimumKPH:result.minimumKPH,maximumKPH:result.maximumKPH,method:'archived-native-grid'}};
   return {...result,context};
 }

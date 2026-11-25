@@ -1,5 +1,8 @@
 export const WIND_PRODUCT = 'wind-gust-history-v1';
 export const WIND_DATASET = 'conditions_GUST_10-HTGL';
+export type WindCoverageBounds = [west: number, south: number, east: number, north: number];
+export const PUBLIC_WIND_PROVIDER = 'noaa-hrrr';
+export const PUBLIC_WIND_DATASET = 'HRRR:GUST:surface:analysis';
 export const WIND_ZOOM = 4;
 export const WIND_TILE_SIZE = 512;
 export const WIND_COUNTRIES = {
@@ -11,7 +14,7 @@ export const WIND_COUNTRIES = {
 export type WindCountry = keyof typeof WIND_COUNTRIES;
 export const WIND_ENCODING = { minimumMPS: 0, maximumMPS: 100, outputMin: 1, outputMax: 255, noData: 0, band: 0 } as const;
 export type WindArchiveBundle = {
-  version: 1; country: WindCountry; time: string; dataset: typeof WIND_DATASET;
+  version: 1; country: WindCountry; time: string; dataset: typeof WIND_DATASET | typeof PUBLIC_WIND_DATASET;
   evidence: 'gridded-wind-estimate'; zoom: number; tileSize: number;
   encoding: typeof WIND_ENCODING; numericTiles: Record<string, string>; displayTiles: Record<string, string>;
 };

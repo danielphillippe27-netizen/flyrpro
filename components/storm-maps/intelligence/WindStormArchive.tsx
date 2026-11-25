@@ -3,16 +3,16 @@ import { useContext, useEffect, useState } from 'react';
 import { useStormTerritoryDisplay } from '@/lib/storm-maps/territory-display';
 import type mapboxgl from 'mapbox-gl';
 import { isStormCountry, STORM_COUNTRIES, type StormCountry } from '@/lib/storm-maps/storm-countries';
-import { WIND_COUNTRIES } from '@/lib/storm-maps/intelligence/wind-archive-format';
+import { WIND_COUNTRIES, type WindCoverageBounds } from '@/lib/storm-maps/intelligence/wind-archive-format';
 import { WindZoneSelector, type SaveWindTerritory } from './WindZoneSelector';
 import type { StormWindActions } from '../StormWorkbenchView';
 import { StormLocationSearch } from '../StormLocationSearch';
 import { StormMobileMapContext } from '@/lib/storm-maps/mobile-session';
 
-type Archive = { indexingPending?: boolean; times: string[]; archiveStartsAt: string | null; coverage: string; health: { available: boolean; message: string; latestAvailable?: string | null } };
+type Archive = { boundsByTime?: Record<string, WindCoverageBounds>; indexingPending?: boolean; times: string[]; archiveStartsAt: string | null; coverage: string; latestSavedAt?: string | null; health: { available: boolean; message: string; latestAvailable?: string | null } };
 const field = 'min-h-11 w-full rounded-lg border border-border bg-background p-2 text-base text-foreground md:text-xs';
 const layerId = 'wolfgrid-saved-wind', sourceId = 'wolfgrid-saved-wind-source';
-export function WindStormArchive({ map, workspaceId, onView, active, onSave, windActions, simple=false, selectedCountry, selectedTime, selectedMinimum=93.341952, selectedRegions=[] }: { map: mapboxgl.Map; workspaceId: string; onView: () => void; active: boolean; onSave: SaveWindTerritory; windActions?: StormWindActions; simple?: boolean; selectedCountry?: StormCountry; selectedTime?: string; selectedMinimum?: number; selectedRegions?:string[] }) {
+export function WindStormArchive({ map, workspaceId, onView, active, onSave, windActions, simple=false, selectedCountry, selectedTime, selectedBounds, selectedMinimum=93.341952, selectedRegions=[] }: { map: mapboxgl.Map; workspaceId: string; onView: () => void; active: boolean; onSave: SaveWindTerritory; windActions?: StormWindActions; simple?: boolean; selectedCountry?: StormCountry; selectedTime?: string; selectedBounds?: WindCoverageBounds; selectedMinimum?: number; selectedRegions?:string[] }) {
   const territoryDisplay = useStormTerritoryDisplay();
   const mobileSessionRevision = useContext(StormMobileMapContext)?.revision ?? 0;
   const [minimum,setMinimum]=useState(String(selectedMinimum));
@@ -26,18 +26,20 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
     if(simple)return;
     const query=new URLSearchParams(window.location.search), region=query.get('country'), requested=query.get('windTime');
     const threshold=query.get('minimum'); if(threshold && ['40','60','93.341952','120','160'].includes(threshold))setMinimum(threshold);
-    if(!selectedCountry && region && Object.hasOwn(WIND_COUNTRIES,region))setCountry(region as StormCountry);
+    if(!selectedCountry && isStormCountry(region))setCountry(region);
     if(requested && /^\d{4}-\d{2}-\d{2}T/.test(requested))setDate(requested.slice(0,10));
   }, [simple, selectedCountry]);
+  const frameBounds = selectedBounds ?? archive?.boundsByTime?.[time];
   useEffect(() => {
-    const bounds = [...WIND_COUNTRIES[country].bounds[0]];
+    const bounds = frameBounds ?? WIND_COUNTRIES[country].bounds[0];
     map.setProjection('mercator');
     map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: 35, duration: 500 });
-  }, [map, country]);
+  }, [map, country, frameBounds]);
   useEffect(() => {
     if(simple&&selectedTime){setTime(selectedTime);return;}
     const abort = new AbortController(); setBusy(true); setError(''); setArchive(null); setTime('');
     const query = new URLSearchParams({ workspaceId, country, minimum, from: date, to: date });
+    if (new URLSearchParams(window.location.search).has('windTime')) query.set('legacy', '1');
     fetch(`/api/storm-maps/intelligence/wind?${query}`, { signal: abort.signal, cache: 'no-store' }).then(async response => {
       const data = await response.json(); if (!response.ok) throw Error(data.error || 'Wind history unavailable.');
       if (!abort.signal.aborted) { setArchive(data); const requested=new URLSearchParams(window.location.search).get('windTime'); setTime(data.times.includes(requested) ? requested : data.times[0] ?? ''); }
@@ -50,15 +52,15 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
       if (!map.isStyleLoaded()) return;
       clear(); if (!time || !active || territoryDisplay) return;
       const query = new URLSearchParams({ workspaceId, country, time, minimum, rendering: 'land-no-alaska-v3' });
-      map.addSource(sourceId, { type: 'raster', tiles: [`${window.location.origin}/api/storm-maps/intelligence/wind/map?${query}&z={z}&x={x}&y={y}`], tileSize: 512, maxzoom: 4, attribution: 'Wind estimates: Vaisala Xweather · WolfGrid archive' });
-      map.addLayer({ id: layerId, type: 'raster', source: sourceId, paint: { 'raster-opacity': 0.85, 'raster-resampling': 'nearest', 'raster-fade-duration': 0 } });
+      map.addSource(sourceId, { type: 'raster', tiles: [`${window.location.origin}/api/storm-maps/intelligence/wind/map?${query}&z={z}&x={x}&y={y}`], tileSize: 512, maxzoom: 4, attribution: frameBounds ? 'Wind gust estimates · NOAA HRRR' : 'Wind estimates · WolfGrid archive' });
+      map.addLayer({ id: layerId, type: 'raster', source: sourceId, paint: { 'raster-opacity': 0.85, 'raster-resampling': frameBounds ? 'linear' : 'nearest', 'raster-fade-duration': 0 } });
     };
     const recover = () => { if (time && active && !territoryDisplay && !map.getSource(sourceId) && map.isStyleLoaded()) apply(); };
     apply(); map.on('style.load', apply); map.on('idle', recover);
     return () => { map.off('style.load', apply); map.off('idle', recover); clear(); };
-  }, [map, workspaceId, country, time, active, minimum, mobileSessionRevision, territoryDisplay]);
+  }, [map, workspaceId, country, time, active, minimum, mobileSessionRevision, territoryDisplay, frameBounds]);
   if(simple)return <section aria-label="Selected wind map" className="space-y-3 rounded-lg border border-border p-3">
-    <p className="text-sm font-semibold">Selected wind map</p><p className="text-xs">{selectedTime?.slice(0,10)} · {selectedTime?.slice(11,16)} UTC · {Math.round(selectedMinimum)} km/h+</p><p className="text-sm font-medium">{selectedRegions.join(', ')}</p><p className="text-xs text-muted-foreground">Estimated gust field over land. Broad weather areas can span many kilometres; this is not a mapped damage path.</p>
+    <p className="text-sm font-semibold">Selected wind map</p><p className="text-xs">{selectedTime?.slice(0,10)} · {selectedTime?.slice(11,16)} UTC · {Math.round(selectedMinimum)} km/h+</p><p className="text-sm font-medium">{selectedRegions.join(', ')}</p><p className="text-xs text-muted-foreground">{frameBounds ? 'NOAA HRRR estimated gusts over land.' : 'Estimated gusts from the saved WolfGrid archive.'} Property-level damage requires separate confirmation.</p>
     {time&&(active?<>{windActions&&<button type="button" onClick={windActions.inspect} className="min-h-11 w-full rounded-lg bg-primary px-3 py-3 text-sm font-semibold text-primary-foreground">Select wind area on map</button>}<WindZoneSelector simple key={`${country}:${time}`} map={map} workspaceId={workspaceId} country={country} time={time} minimumKPH={selectedMinimum} onSelected={windActions?.review} onSave={onSave}/></>:<button type="button" onClick={onView} className="min-h-11 w-full rounded-lg border border-border text-sm">Show selected wind map</button>)}
   </section>;
   return <section aria-label="Saved wind maps" className="space-y-3">
@@ -72,6 +74,8 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
     {error && <p role="alert" className="text-xs text-amber-500">{error}</p>}
     {archive && <>
       <p role="status" className="text-xs text-muted-foreground">{archive.health.message}</p>
+      {!archive.times.length && archive.latestSavedAt && archive.latestSavedAt.slice(0, 10) !== date &&
+        <button type="button" className="text-sm text-primary" onClick={() => setDate(archive.latestSavedAt!.slice(0, 10))}>Open latest saved date</button>}
       {archive.archiveStartsAt && <p className="text-xs">Saved history begins {new Date(archive.archiveStartsAt).toLocaleString()}.</p>}
       {!!archive.times.length ? <label className="block text-xs">High-wind hour<select aria-label="Wind archive hour" className={field} value={time} onChange={event => setTime(event.target.value)}>{archive.times.map(value => <option key={value} value={value}>{new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })} · {value.slice(11, 16)} UTC</option>)}</select></label> : <p className="text-xs">No saved hours meet this threshold on this date. Lower the threshold or choose another date. Missing data does not mean calm wind.</p>}
       {time && (active ? <><p className="text-xs">Tap a shaded wind area to select it for a campaign.</p><div aria-label="Wind gust legend" className="grid grid-cols-2 gap-1 text-[11px]">{[[40,'#22c55e', '40–60 km/h'], [60,'#facc15', '60–93 km/h'], [93.341952,'#f97316', '93–120 km/h'], [120,'#ef4444', '120–160 km/h'], [160,'#a855f7', '160+ km/h']].filter(([threshold])=>Number(threshold)>=Number(minimum)).map(([,color, label]) => <span key={label} className="flex items-center gap-1"><i aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: String(color) }} />{label}</span>)}</div></> : <button type="button" onClick={onView} className="min-h-11 w-full rounded-lg border border-border px-3 text-xs">Show selected wind map</button>)}
@@ -79,6 +83,6 @@ export function WindStormArchive({ map, workspaceId, onView, active, onSave, win
     {time && active && windActions && <button type="button" onClick={windActions.inspect} className="min-h-11 w-full rounded-lg bg-primary px-3 py-3 text-sm font-semibold text-primary-foreground">Select wind area on map</button>}
     {time && active && <WindZoneSelector key={`${workspaceId}:${country}:${time}:${minimum}`} map={map} workspaceId={workspaceId} country={country} time={time} minimumKPH={Number(minimum)} onSelected={windActions?.review} onSave={onSave} />}
     <button type="button" disabled={busy} onClick={() => setRefresh(value => value + 1)} className="min-h-11 w-full rounded-lg border border-border px-3 text-xs disabled:opacity-40">Refresh saved hours</button>
-    <p className="text-[11px] text-muted-foreground">Regional wind estimates from Xweather, saved permanently as new hours become available. Local gusts can differ. These maps do not confirm property damage.</p>
+    <p className="text-[11px] text-muted-foreground">Estimated wind gusts for selected storm dates. Local gusts can differ. These maps do not confirm property damage.</p>
   </section>;
 }

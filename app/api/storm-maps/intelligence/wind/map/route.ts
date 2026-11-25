@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const minimum=Number(params.get('minimum')??'0');
     if(![0,40,60,93.341952,120,160].includes(minimum))return NextResponse.json({error:'Invalid wind threshold.'},{status:400});
     const bundle = await loadWindArchive(country, time);
-    const key=`${country}:${time}:${minimum}`;
+    const key=`${bundle.dataset}:${country}:${time}:${minimum}`;
     let rendering=filteredFrames.get(key);
     {
       if(!rendering){

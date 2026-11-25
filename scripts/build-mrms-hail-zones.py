@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare reviewable storm_severity_zones rows from NOAA's daily CONUS hail grid.
+"""Prepare reviewable storm_severity_zones rows from NOAA's daily MRMS hail grid.
 
 uv run --with rasterio --with shapely --with pillow --env-file .env.local scripts/build-mrms-hail-zones.py iem:hail:2026-10-21:AZ > zones.json
 
@@ -57,10 +57,11 @@ def grid_bytes(end):
 
 
 def report_points(event):
+    kinds = {"report", "position"} if event["source"] == "noaa-mrms" else {"report"}
     return [
         Point(feature["geometry"]["coordinates"])
         for feature in event["features"]
-        if feature["properties"]["kind"] == "report" and feature["geometry"]["type"] == "Point"
+        if feature["properties"]["kind"] in kinds and feature["geometry"]["type"] == "Point"
     ]
 
 
@@ -98,12 +99,12 @@ def render_overlay(event_key, rows, values, transform, directory):
     }
 
 
-def event_zones(event, day, overlay_directory, overlays):
+def event_zones(event, day, overlay_directory, overlays, frame_end=None):
     reports = report_points(event)
     if not reports:
         return []
     # The 00 UTC frame on the following day represents the report group's UTC day.
-    end = datetime.combine(day + timedelta(days=1), time(), timezone.utc)
+    end = frame_end or datetime.combine(day + timedelta(days=1), time(), timezone.utc)
     url, data = grid_bytes(end)
     with MemoryFile(data) as source, source.open() as grid:
         tags = grid.tags(1)
@@ -119,7 +120,8 @@ def event_zones(event, day, overlay_directory, overlays):
         # Select same-day swaths within about 30 km of a report. Keep the entire
         # connected area and reject a crop that would cut one short.
         nearby = [p.buffer(0.3) for p in reports]
-        west, east = min(p.x for p in reports) - 2, max(p.x for p in reports) + 2
+        longitude_pad = 6 if event["source"] == "noaa-mrms" else 2
+        west, east = min(p.x for p in reports) - longitude_pad, max(p.x for p in reports) + longitude_pad
         south, north = min(p.y for p in reports) - 2, max(p.y for p in reports) + 2
         window = from_bounds(west, south, east, north, grid.transform).round_offsets().round_lengths()
         window = window.intersection(Window(0, 0, grid.width, grid.height))
@@ -168,31 +170,43 @@ def main():
     parser.add_argument("event_keys", nargs="+")
     parser.add_argument("--overlay-directory", type=Path)
     parser.add_argument("--overlay-index", type=Path)
+    parser.add_argument("--event-file", type=Path, help="A reviewed local storm event to prepare before saving it")
+    parser.add_argument("--frame-end", help="Optional UTC end of a reviewed 24-hour frame for a single event")
     args = parser.parse_args()
     if bool(args.overlay_directory) != bool(args.overlay_index):
         parser.error("Supply both overlay output paths")
     if args.overlay_directory:
         args.overlay_directory.mkdir(parents=True, exist_ok=True)
     keys = sorted(set(args.event_keys))
-    if any(not re.fullmatch(r"iem:hail:\d{4}-\d{2}-\d{2}:[A-Z]{2}", key) for key in keys):
-        parser.error("Use saved IEM hail event keys (iem:hail:YYYY-MM-DD:ST)")
-
-    base = os.environ["NEXT_PUBLIC_SUPABASE_URL"].rstrip("/")
-    service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    query = urlencode({"select": "metadata", "event_key": f"in.({','.join(keys)})"})
-    events = {
-        row["metadata"]["key"]: row["metadata"]
-        for row in json.loads(fetch(
-            f"{base}/rest/v1/storm_events?{query}",
-            {"apikey": service_key, "Authorization": f"Bearer {service_key}"},
-        ))
-    }
+    if any(not re.fullmatch(r"(?:iem:hail:|noaa-mrms:ca:hail:)\d{4}-\d{2}-\d{2}:[A-Z]{2}", key) for key in keys):
+        parser.error("Choose saved IEM or Canadian MRMS hail event keys")
+    frame_end = None
+    if args.frame_end:
+        if len(keys) != 1:
+            parser.error("Specify an explicit frame for one event at a time")
+        frame_end = datetime.fromisoformat(args.frame_end.replace("Z", "+00:00"))
+        if frame_end.utcoffset() != timedelta(0):
+            parser.error("Frame end must be UTC")
+    if args.event_file:
+        event = json.loads(args.event_file.read_text())
+        events = {event["key"]: event}
+    else:
+        base = os.environ["NEXT_PUBLIC_SUPABASE_URL"].rstrip("/")
+        service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        query = urlencode({"select": "metadata", "event_key": f"in.({','.join(keys)})"})
+        events = {
+            row["metadata"]["key"]: row["metadata"]
+            for row in json.loads(fetch(
+                f"{base}/rest/v1/storm_events?{query}",
+                {"apikey": service_key, "Authorization": f"Bearer {service_key}"},
+            ))
+        }
     if set(events) != set(keys):
         parser.error(f"Saved storms missing: {', '.join(set(keys) - set(events))}")
     overlays = {}
     rows = [
         row for key in keys
-        for row in event_zones(events[key], date.fromisoformat(key.split(":")[2]), args.overlay_directory, overlays)
+        for row in event_zones(events[key], date.fromisoformat(key.split(":")[-2]), args.overlay_directory, overlays, frame_end)
     ]
     if args.overlay_index:
         args.overlay_index.write_text(json.dumps(overlays, indent=2) + "\n")

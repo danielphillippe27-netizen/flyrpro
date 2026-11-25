@@ -36,7 +36,7 @@ async function main(){
  assert.equal(sources.has('wolfgrid-saved-wind-source'),false,'Country change opens a clean recent-map list');
  const row=[...document.querySelectorAll('button')].find(button=>button.textContent?.includes('2026-10-23 · Wind'));assert(row);await act(async()=>{row.click();});
  tile=sources.get('wolfgrid-saved-wind-source')!.tiles![0];assert(tile.includes('country=CA'));assert(tile.includes('minimum=93.341952'),'A different country returns to the standard wind level');assert(!window.location.search.includes('windTime='),'Changing country clears a saved evidence link');
- await change('Storm type','hail');assert.equal(reportRenders,0,'U.S. reports never appear under Canada');assert(document.body.textContent!.includes('Recent hail maps are unavailable for Canada.'));assert.equal(document.querySelectorAll('select').length,2);
+ await change('Storm type','hail');assert.equal(reportRenders,0,'U.S. reports never appear under Canada');assert(document.body.textContent!.includes('All saved storms for CA'));assert.equal(document.querySelectorAll('select').length,2);
  assert.equal(document.querySelector('option[value="NZ"]'),null,'New Zealand is not offered');
  assert.equal(document.querySelector('option[value="AU"]'),null,'Australia is not offered');
  await change('Storm country','US');assert(reportRenders>0);assert(document.body.textContent!.includes('U.S. hail reports'));assert.equal(document.querySelectorAll('select').length,2);

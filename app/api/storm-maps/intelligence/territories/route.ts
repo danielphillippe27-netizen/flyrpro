@@ -28,7 +28,9 @@ export async function POST(request: NextRequest) {
   if(parsed.data.context.gustSelection){
     const gust=parsed.data.context.gustSelection;
     try {
-      const verified=await archivedWindZone(gust.country,gust.time,gust.longitude,gust.latitude,gust.minimumKPH,gust.maximumKPH!=null);
+      const source = parsed.data.context.event.source;
+      const verified = await archivedWindZone(gust.country, gust.time, gust.longitude, gust.latitude, gust.minimumKPH, gust.maximumKPH != null,
+        source === 'noaa-hrrr' || source === 'xweather' ? source : undefined);
       if(JSON.stringify(parsed.data.boundary)!==JSON.stringify(verified.boundary)||gust.maximumKPH!==verified.maximumKPH||parsed.data.context.event.key!==verified.context.event.key)return NextResponse.json({error:'Reselect the saved gust area before saving.'},{status:400});
       parsed.data.context=verified.context;
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Saved gust area unavailable.'},{status:422});}
