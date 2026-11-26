@@ -2,14 +2,14 @@ import Image from 'next/image';
 import { LandingVideo } from '@/components/landing/LandingVideo';
 
 type PhoneVideoFrameProps = {
-  videoId: string;
+  videoUrl: string;
   label: string;
   orientation: 'landscape' | 'portrait';
   className?: string;
 };
 
 export function PhoneVideoFrame({
-  videoId,
+  videoUrl,
   label,
   orientation,
   className = '',
@@ -41,7 +41,7 @@ export function PhoneVideoFrame({
         }
       >
         <LandingVideo
-          videoId={videoId}
+          videoUrl={videoUrl}
           label={label}
           className="h-full w-full scale-[1.24] rounded-none shadow-none"
           videoClassName="object-cover"

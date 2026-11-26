@@ -55,7 +55,8 @@ import {
   type Demo100Metrics,
   type Demo100Stage,
 } from '@/lib/demo100/flow';
-import { CloudflareChapterPlayer } from './CloudflareChapterPlayer';
+import type { SiteVideo } from '@/lib/demo/siteVideos';
+import { ChapterVideoPlayer } from './ChapterVideoPlayer';
 import { IphoneChapterExperience, type IphoneChapter } from './IphoneChapterExperience';
 
 const BUILDING_SOURCE_ID = 'demo100-buildings';
@@ -73,21 +74,20 @@ type Demo100Building = DemoBuildingCandidate & {
   feature: GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon, Record<string, unknown>>;
 };
 
-type VideoUids = {
-  intro?: string;
-  postCreate?: string;
-  fieldGuideIntro?: string;
-  iphone?: string;
-  outro?: string;
-  team?: string;
-  solo?: string;
-  magic?: string;
-  end?: string;
+type DemoVideos = {
+  intro?: SiteVideo;
+  postCreate?: SiteVideo;
+  fieldGuideIntro?: SiteVideo;
+  iphone?: SiteVideo;
+  outro?: SiteVideo;
+  team?: SiteVideo;
+  solo?: SiteVideo;
+  magic?: SiteVideo;
+  end?: SiteVideo;
 };
 
 type Demo100ExperienceProps = {
-  customerCode?: string;
-  videoUids: VideoUids;
+  videos: DemoVideos;
   founderCallHref: string;
   referralCode?: string;
   variant?: 'demo100' | 'demo1';
@@ -111,18 +111,18 @@ const SOLO_MEMBER: Demo100Member = { id: 'demo1-solo', name: 'You', color: '#ef4
 const SOLO_MEMBERS: readonly Demo100Member[] = [SOLO_MEMBER];
 
 const VIDEO_STAGES: Partial<Record<Demo100Stage, {
-  uidKey: keyof VideoUids;
+  videoKey: keyof DemoVideos;
   title: string;
   eyebrow: string;
 }>> = {
-  intro_video: { uidKey: 'intro', title: 'Meet WolfGrid', eyebrow: 'Chapter 1 · The field, connected' },
-  post_create_video: { uidKey: 'postCreate', title: 'From territory to outcomes', eyebrow: 'Chapter 3 · Your campaign' },
-  team_video: { uidKey: 'team', title: 'Team leader workflow', eyebrow: 'Team leader · Run the field' },
-  solo_video: { uidKey: 'solo', title: 'Solo owner workflow', eyebrow: 'Solo owner · Work your own market' },
-  magic_video: { uidKey: 'magic', title: 'Magic', eyebrow: 'One system · Bring it together' },
-  end_video: { uidKey: 'end', title: 'The WolfGrid difference', eyebrow: 'Your next step · See what comes next' },
-  field_guide_intro_video: { uidKey: 'fieldGuideIntro', title: 'WolfGrid at the door', eyebrow: 'Chapter 8 · Take it into the field' },
-  outro_video: { uidKey: 'outro', title: 'One system from map to CRM', eyebrow: 'Final chapter · Put it to work' },
+  intro_video: { videoKey: 'intro', title: 'Meet WolfGrid', eyebrow: 'Chapter 1 · The field, connected' },
+  post_create_video: { videoKey: 'postCreate', title: 'From territory to outcomes', eyebrow: 'Chapter 3 · Your campaign' },
+  team_video: { videoKey: 'team', title: 'Team leader workflow', eyebrow: 'Team leader · Run the field' },
+  solo_video: { videoKey: 'solo', title: 'Solo owner workflow', eyebrow: 'Solo owner · Work your own market' },
+  magic_video: { videoKey: 'magic', title: 'Magic', eyebrow: 'One system · Bring it together' },
+  end_video: { videoKey: 'end', title: 'The WolfGrid difference', eyebrow: 'Your next step · See what comes next' },
+  field_guide_intro_video: { videoKey: 'fieldGuideIntro', title: 'WolfGrid at the door', eyebrow: 'Chapter 8 · Take it into the field' },
+  outro_video: { videoKey: 'outro', title: 'One system from map to CRM', eyebrow: 'Final chapter · Put it to work' },
 };
 
 const IPHONE_CHAPTERS = [
@@ -317,7 +317,7 @@ function MetricTile({
   );
 }
 
-export function Demo100Experience({ customerCode, videoUids, founderCallHref, referralCode, variant = 'demo100' }: Demo100ExperienceProps) {
+export function Demo100Experience({ videos, founderCallHref, referralCode, variant = 'demo100' }: Demo100ExperienceProps) {
   const router = useRouter();
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -1165,10 +1165,9 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       <StageProgress stage={stage} />
 
       {video ? (
-        <CloudflareChapterPlayer
+        <ChapterVideoPlayer
           key={stage}
-          customerCode={customerCode}
-          videoUid={videoUids[video.uidKey]}
+          video={videos[video.videoKey]}
           title={video.title}
           eyebrow={video.eyebrow}
           showChapterHeader={variant !== 'demo1'}
@@ -1202,8 +1201,7 @@ export function Demo100Experience({ customerCode, videoUids, founderCallHref, re
       {stage === 'iphone_chapters' ? (
         <IphoneChapterExperience
           chapters={iphoneChapters}
-          customerCode={customerCode}
-          videoUid={videoUids.iphone}
+          video={videos.iphone}
           playbackEndSeconds={58}
           onChapterStarted={(chapterIndex) => track('iphone_chapter_started', 8, { chapter: chapterIndex + 1 })}
           onChapterCompleted={(chapterIndex) => track('iphone_chapter_completed', 8, { chapter: chapterIndex + 1 })}

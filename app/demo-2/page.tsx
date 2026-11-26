@@ -1,13 +1,16 @@
 import type { Metadata } from 'next';
+import { siteVideo } from '@/lib/demo/siteVideos';
 import { DialerVideoLanding } from '../power-dialer/DialerVideoLanding';
 import { normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 
 const FOUNDER_CALL_HREF =
   process.env.NEXT_PUBLIC_FOUNDER_CALL_URL ||
   'https://calendly.com/daniel-phillippe';
-const DEMO_TWO_STREAM_VIDEO_UID =
-  process.env.NEXT_PUBLIC_DEMO_TWO_STREAM_VIDEO_UID ||
-  '244ac3821805b94bfa36585ba804d24e';
+const VIDEO = siteVideo(
+  'demo-two',
+  process.env.NEXT_PUBLIC_DEMO_TWO_VIDEO_URL,
+  process.env.NEXT_PUBLIC_DEMO_TWO_VIDEO_POSTER_URL,
+);
 const DEMO_TWO_CTA_AT_SECONDS = 77;
 
 export const metadata: Metadata = {
@@ -69,8 +72,8 @@ export default async function DemoTwoPage({ searchParams }: DemoTwoPageProps) {
 
   return (
     <DialerVideoLanding
-      videoUid={DEMO_TWO_STREAM_VIDEO_UID}
-      posterUrl={process.env.NEXT_PUBLIC_DEMO_TWO_STREAM_POSTER_URL}
+      videoUrl={VIDEO.src}
+      posterUrl={VIDEO.poster}
       videoOrientation="portrait"
       videoTitle="WolfGrid individual agent listing demo"
       redirectAtSeconds={DEMO_TWO_CTA_AT_SECONDS}

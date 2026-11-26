@@ -1,30 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Script from 'next/script';
-import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRight, CalendarDays, Play, Volume2 } from 'lucide-react';
 
-declare global {
-  interface Window {
-    Stream?: (element: HTMLIFrameElement | null) => CloudflareStreamPlayer;
-  }
-}
-
-type CloudflareStreamPlayer = {
-  muted: boolean;
-  currentTime: number;
-  duration?: number;
-  play: () => Promise<void>;
-  pause?: () => void;
-  addEventListener: (event: string, handler: () => void) => void;
-  removeEventListener?: (event: string, handler: () => void) => void;
-};
-
 type DialerVideoLandingProps = {
-  videoUrl?: string;
-  customerCode?: string;
-  videoUid?: string;
+  videoUrl: string;
   posterUrl?: string;
   videoOrientation?: 'landscape' | 'portrait';
   videoTitle?: string;
@@ -55,30 +35,8 @@ type DemoEventType =
   | 'founder_call_click'
   | 'page_exit';
 
-function buildStreamUrl(
-  customerCode: string | undefined,
-  videoUid: string,
-  posterUrl?: string,
-  mutedAutoplay = false
-) {
-  const url = customerCode
-    ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
-    : new URL(`https://iframe.videodelivery.net/${videoUid}`);
-  url.searchParams.set('autoplay', mutedAutoplay ? 'true' : 'false');
-  url.searchParams.set('muted', mutedAutoplay ? 'true' : 'false');
-  url.searchParams.set('preload', mutedAutoplay ? 'auto' : 'metadata');
-  url.searchParams.set('primaryColor', '#dc2626');
-  url.searchParams.set('letterboxColor', 'transparent');
-  if (posterUrl) {
-    url.searchParams.set('poster', posterUrl);
-  }
-  return url.toString();
-}
-
 export function DialerVideoLanding({
   videoUrl,
-  customerCode,
-  videoUid,
   posterUrl,
   videoOrientation = 'landscape',
   videoTitle = 'WolfGrid power dialer demo',
@@ -96,15 +54,12 @@ export function DialerVideoLanding({
   demoLinkToken,
 }: DialerVideoLandingProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const streamPlayerRef = useRef<CloudflareStreamPlayer | null>(null);
   const ctaShownRef = useRef(false);
   const sessionIdRef = useRef<string>('');
   const sentEventsRef = useRef<Set<string>>(new Set());
   const maxWatchSecondsRef = useRef(0);
   const watchSecondsRef = useRef(0);
   const durationSecondsRef = useRef(0);
-  const [scriptReady, setScriptReady] = useState(false);
   const [showEndCtas, setShowEndCtas] = useState(false);
   const [soundPromptVisible, setSoundPromptVisible] = useState(true);
   const isPortraitVideo = videoOrientation === 'portrait';
@@ -191,26 +146,10 @@ export function DialerVideoLanding({
     if (ctaShownRef.current) return;
     ctaShownRef.current = true;
     video?.pause();
-    streamPlayerRef.current?.pause?.();
     sendOnce('cta_shown', { reason });
     setSoundPromptVisible(false);
     setShowEndCtas(true);
   }, [sendOnce]);
-
-  const streamUrl = useMemo(() => {
-    if (!videoUid) return null;
-    return buildStreamUrl(customerCode, videoUid, posterUrl, mutedAutoplay);
-  }, [customerCode, mutedAutoplay, posterUrl, videoUid]);
-
-  useEffect(() => {
-    if (!videoUrl || !mutedAutoplay) return;
-
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.muted = true;
-    video.play().catch(() => undefined);
-  }, [mutedAutoplay, videoUrl]);
 
   useEffect(() => {
     sendOnce('page_view');
@@ -234,46 +173,6 @@ export function DialerVideoLanding({
     };
   }, [sendDemoEvent]);
 
-  useEffect(() => {
-    if (videoUrl || !scriptReady || !streamUrl || typeof window.Stream !== 'function') return;
-
-    const player = window.Stream(iframeRef.current);
-    if (!player) return;
-    streamPlayerRef.current = player;
-
-    const handleEnded = () => {
-      handlePlaybackProgress(player.currentTime, player.duration);
-      sendOnce('video_complete');
-      showCtas(null, 'complete');
-    };
-
-    const handleTimeUpdate = () => {
-      handlePlaybackProgress(player.currentTime, player.duration);
-      if (!redirectAtSeconds || player.currentTime < redirectAtSeconds) return;
-      showCtas(null, 'threshold');
-    };
-
-    player.addEventListener('ended', handleEnded);
-    player.addEventListener('timeupdate', handleTimeUpdate);
-    if (mutedAutoplay) {
-      player
-        .play()
-        .then(() => sendOnce('video_started', { player: 'cloudflare_stream' }))
-        .catch(() => {
-          player.muted = true;
-          player.play().then(() => sendOnce('video_started', { player: 'cloudflare_stream' })).catch(() => undefined);
-        });
-    }
-
-    return () => {
-      player.removeEventListener?.('ended', handleEnded);
-      player.removeEventListener?.('timeupdate', handleTimeUpdate);
-      if (streamPlayerRef.current === player) {
-        streamPlayerRef.current = null;
-      }
-    };
-  }, [handlePlaybackProgress, mutedAutoplay, redirectAtSeconds, scriptReady, sendOnce, showCtas, streamUrl, videoUrl]);
-
   const handleVideoTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -294,25 +193,13 @@ export function DialerVideoLanding({
   };
 
   const handleStartWithSound = () => {
+    const video = videoRef.current;
+    if (!video) return;
     sendOnce('play_with_sound');
-    if (videoUrl) {
-      const video = videoRef.current;
-      if (!video) return;
-      video.currentTime = 0;
-      video.muted = false;
-      video.volume = 1;
-      video.play().catch(() => undefined);
-      setSoundPromptVisible(false);
-      return;
-    }
-
-    const player =
-      streamPlayerRef.current ||
-      (typeof window !== 'undefined' && window.Stream ? window.Stream(iframeRef.current) : null);
-    if (!player) return;
-    player.muted = false;
-    player.play().catch(() => undefined);
-    setSoundPromptVisible(false);
+    video.currentTime = 0;
+    video.muted = false;
+    video.volume = 1;
+    void video.play().then(() => setSoundPromptVisible(false)).catch(() => undefined);
   };
 
   const handleStartTrialClick = (location: 'top' | 'end_modal') => {
@@ -320,39 +207,8 @@ export function DialerVideoLanding({
     window.location.assign(onboardingHref);
   };
 
-  if (!videoUrl && !streamUrl) {
-    return (
-      <main className="min-h-screen bg-zinc-950 px-5 py-8 text-white md:px-8">
-        <div className="mx-auto flex max-w-5xl flex-col gap-8">
-          <Link href="/" className="text-4xl font-black leading-none tracking-tight text-red-500">WolfGrid</Link>
-          <section className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-300">
-              Power dialer video
-            </p>
-            <h1 className="mt-4 text-4xl font-black leading-tight md:text-6xl">
-              Add your dialer demo video URL.
-            </h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-zinc-300">
-              Set `NEXT_PUBLIC_DIALER_VIDEO_URL` for a CDN-hosted MP4, or set
-              `NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE` and `NEXT_PUBLIC_DIALER_STREAM_VIDEO_UID`
-              for Cloudflare Stream playback.
-            </p>
-          </section>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
-      {!videoUrl && (
-        <Script
-          src="https://embed.cloudflarestream.com/embed/sdk.latest.js"
-          strategy="afterInteractive"
-          onLoad={() => setScriptReady(true)}
-        />
-      )}
-
       <section className="relative min-h-[100dvh] overflow-hidden bg-black">
         <div
           className={`${
@@ -380,36 +236,25 @@ export function DialerVideoLanding({
               } relative w-full`}
             >
               <div className="dialer-aspect relative w-full bg-black pt-[56.25%]">
-                {videoUrl ? (
-                  <video
-                    ref={videoRef}
-                    id="flyr-power-dialer-video"
-                    title={videoTitle}
-                    src={videoUrl}
-                    poster={posterUrl}
-                    className="absolute inset-0 h-full w-full bg-black object-contain"
-                    autoPlay={mutedAutoplay}
-                    muted={mutedAutoplay}
-                    playsInline
-                    preload={mutedAutoplay ? 'auto' : 'metadata'}
-                    controlsList="nodownload noplaybackrate noremoteplayback"
-                    disablePictureInPicture
-                    disableRemotePlayback
-                    onEnded={handleVideoEnded}
-                    onPlay={handleVideoPlay}
-                    onTimeUpdate={handleVideoTimeUpdate}
-                  />
-                ) : (
-                  <iframe
-                    ref={iframeRef}
-                    id="flyr-power-dialer-stream"
-                    title={videoTitle}
-                    src={streamUrl ?? undefined}
-                    className="absolute inset-0 h-full w-full border-0"
-                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-                    allowFullScreen
-                  />
-                )}
+                <video
+                  ref={videoRef}
+                  id="flyr-power-dialer-video"
+                  title={videoTitle}
+                  src={videoUrl}
+                  poster={posterUrl}
+                  className="absolute inset-0 h-full w-full bg-black object-contain"
+                  autoPlay={mutedAutoplay}
+                  muted={mutedAutoplay}
+                  playsInline
+                  controls={!soundPromptVisible}
+                  preload={mutedAutoplay ? 'auto' : 'metadata'}
+                  controlsList="nodownload noplaybackrate noremoteplayback"
+                  disablePictureInPicture
+                  disableRemotePlayback
+                  onEnded={handleVideoEnded}
+                  onPlay={handleVideoPlay}
+                  onTimeUpdate={handleVideoTimeUpdate}
+                />
               </div>
 
               {soundPromptVisible && (

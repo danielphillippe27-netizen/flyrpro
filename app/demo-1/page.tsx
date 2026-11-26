@@ -1,17 +1,16 @@
 import type { Metadata } from 'next';
+import { siteVideo } from '@/lib/demo/siteVideos';
 import { DialerVideoLanding } from '../power-dialer/DialerVideoLanding';
 import { normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 
 const FOUNDER_CALL_HREF =
   process.env.NEXT_PUBLIC_FOUNDER_CALL_URL ||
   'https://calendly.com/daniel-phillippe';
-const DIALER_STREAM_CUSTOMER_CODE = process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE;
-const DIALER_STREAM_VIDEO_UID = process.env.NEXT_PUBLIC_DIALER_STREAM_VIDEO_UID;
-const configuredDialerVideoUrl = process.env.NEXT_PUBLIC_DIALER_VIDEO_URL;
-const DIALER_VIDEO_URL =
-  DIALER_STREAM_CUSTOMER_CODE && DIALER_STREAM_VIDEO_UID
-    ? undefined
-    : configuredDialerVideoUrl;
+const VIDEO = siteVideo(
+  'power-dialer',
+  process.env.NEXT_PUBLIC_DIALER_VIDEO_URL,
+  process.env.NEXT_PUBLIC_DIALER_VIDEO_POSTER_URL,
+);
 const configuredCtaAtSeconds = Number(process.env.NEXT_PUBLIC_DIALER_VIDEO_CTA_AT_SECONDS);
 const DIALER_VIDEO_CTA_AT_SECONDS =
   Number.isFinite(configuredCtaAtSeconds) && configuredCtaAtSeconds > 0
@@ -77,10 +76,8 @@ export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
 
   return (
     <DialerVideoLanding
-      videoUrl={DIALER_VIDEO_URL}
-      customerCode={DIALER_STREAM_CUSTOMER_CODE}
-      videoUid={DIALER_STREAM_VIDEO_UID}
-      posterUrl={process.env.NEXT_PUBLIC_DIALER_STREAM_POSTER_URL}
+      videoUrl={VIDEO.src}
+      posterUrl={VIDEO.poster}
       onboardingHref={await buildOnboardingHref(searchParams)}
       primaryCtaLabel="Create FREE WolfGrid Map"
       founderCallHref={FOUNDER_CALL_HREF}

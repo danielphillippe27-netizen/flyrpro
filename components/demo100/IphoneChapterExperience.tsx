@@ -1,7 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Script from 'next/script';
+import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import {
   ArrowRight,
   Check,
@@ -12,16 +11,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-type Demo100StreamPlayer = {
-  muted: boolean;
-  currentTime: number;
-  duration: number;
-  play: () => Promise<void>;
-  pause?: () => void;
-  addEventListener: (event: string, handler: () => void) => void;
-  removeEventListener?: (event: string, handler: () => void) => void;
-};
+import type { SiteVideo } from '@/lib/demo/siteVideos';
 
 export type IphoneChapter = {
   title: string;
@@ -31,38 +21,22 @@ export type IphoneChapter = {
 
 type IphoneChapterExperienceProps = {
   chapters: readonly IphoneChapter[];
-  customerCode?: string;
-  videoUid?: string;
+  video?: SiteVideo;
   playbackEndSeconds?: number;
   onComplete: () => void;
   onChapterStarted?: (chapterIndex: number) => void;
   onChapterCompleted?: (chapterIndex: number) => void;
 };
 
-function streamUrl(customerCode: string | undefined, videoUid: string) {
-  const url = customerCode
-    ? new URL(`https://customer-${customerCode}.cloudflarestream.com/${videoUid}/iframe`)
-    : new URL(`https://iframe.videodelivery.net/${videoUid}`);
-  url.searchParams.set('autoplay', 'true');
-  url.searchParams.set('muted', 'false');
-  url.searchParams.set('controls', 'false');
-  url.searchParams.set('preload', 'auto');
-  url.searchParams.set('primaryColor', '#ef4444');
-  url.searchParams.set('letterboxColor', '#000000');
-  return url.toString();
-}
-
 export function IphoneChapterExperience({
   chapters,
-  customerCode,
-  videoUid,
+  video,
   playbackEndSeconds,
   onComplete,
   onChapterStarted,
   onChapterCompleted,
 }: IphoneChapterExperienceProps) {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const playerRef = useRef<Demo100StreamPlayer | null>(null);
+  const playerRef = useRef<HTMLVideoElement>(null);
   const pendingSeekSecondsRef = useRef<number | null>(null);
   const cutReachedRef = useRef(false);
   const startedIndexesRef = useRef<Set<number>>(new Set());
@@ -71,24 +45,11 @@ export function IphoneChapterExperience({
   const [highestUnlockedIndex, setHighestUnlockedIndex] = useState(0);
   const [completedIndexes, setCompletedIndexes] = useState<Set<number>>(() => new Set());
   const [playbackProgress, setPlaybackProgress] = useState(0);
-  const [scriptReady, setScriptReady] = useState(false);
-  const [sdkFailed, setSdkFailed] = useState(false);
+  const [mediaFailed, setMediaFailed] = useState(false);
   const [needsSoundGesture, setNeedsSoundGesture] = useState(true);
   const [startingSound, setStartingSound] = useState(false);
   const [soundError, setSoundError] = useState(false);
   const activeChapter = chapters[activeIndex];
-  const url = useMemo(
-    () => videoUid ? streamUrl(customerCode, videoUid) : null,
-    [customerCode, videoUid],
-  );
-
-  useEffect(() => {
-    const streamFactory = (window as typeof window & {
-      Stream?: (element: HTMLIFrameElement | null) => Demo100StreamPlayer;
-    }).Stream;
-    if (typeof streamFactory === 'function') setScriptReady(true);
-  }, []);
-
   const markStarted = useCallback((chapterIndex: number) => {
     if (startedIndexesRef.current.has(chapterIndex)) return;
     startedIndexesRef.current.add(chapterIndex);
@@ -103,14 +64,9 @@ export function IphoneChapterExperience({
   }, [onChapterCompleted]);
 
   const playWithSound = useCallback(async () => {
-    const streamFactory = (window as typeof window & {
-      Stream?: (element: HTMLIFrameElement | null) => Demo100StreamPlayer;
-    }).Stream;
-    const player = playerRef.current
-      ?? (typeof streamFactory === 'function' ? streamFactory(iframeRef.current) : null);
+    const player = playerRef.current;
     if (!player) return;
 
-    playerRef.current = player;
     setStartingSound(true);
     setSoundError(false);
     try {
@@ -155,87 +111,74 @@ export function IphoneChapterExperience({
     goToChapter(activeIndex + 1);
   }, [activeIndex, chapters.length, goToChapter, markCompleted, onComplete]);
 
+  function handleEnded() {
+    for (let index = 0; index < chapters.length; index += 1) markCompleted(index);
+    setActiveIndex(chapters.length - 1);
+    setHighestUnlockedIndex(chapters.length - 1);
+    setPlaybackProgress(100);
+  }
+
+  function syncToPlayback(event: SyntheticEvent<HTMLVideoElement>) {
+    const player = event.currentTarget;
+    if (!Number.isFinite(player.duration) || player.duration <= 0) return;
+    const playbackDuration = playbackEndSeconds && playbackEndSeconds > 0
+      ? Math.min(player.duration, playbackEndSeconds)
+      : player.duration;
+    if (playbackEndSeconds && playbackEndSeconds > 0 && player.currentTime >= playbackEndSeconds) {
+      if (!cutReachedRef.current) {
+        cutReachedRef.current = true;
+        player.pause();
+        if (player.currentTime > playbackEndSeconds) player.currentTime = playbackEndSeconds;
+        handleEnded();
+      }
+      return;
+    }
+
+    const ratio = Math.max(0, Math.min(1, player.currentTime / playbackDuration));
+    let chapterIndex = 0;
+    for (let index = 1; index < chapters.length; index += 1) {
+      if (player.currentTime < chapters[index].startSeconds) break;
+      chapterIndex = index;
+    }
+    setPlaybackProgress(ratio * 100);
+    setActiveIndex(chapterIndex);
+    setHighestUnlockedIndex((current) => Math.max(current, chapterIndex));
+    for (let index = 0; index < chapterIndex; index += 1) markCompleted(index);
+    markStarted(chapterIndex);
+  }
+
+  function handleLoadedMetadata(event: SyntheticEvent<HTMLVideoElement>) {
+    const player = event.currentTarget;
+    const pendingSeekSeconds = pendingSeekSecondsRef.current;
+    if (pendingSeekSeconds === null || !Number.isFinite(player.duration) || player.duration <= 0) return;
+    const seekLimit = playbackEndSeconds && playbackEndSeconds > 0
+      ? Math.min(player.duration, playbackEndSeconds)
+      : player.duration;
+    cutReachedRef.current = false;
+    player.currentTime = Math.min(pendingSeekSeconds, seekLimit);
+    pendingSeekSecondsRef.current = null;
+    void player.play().catch(() => undefined);
+  }
+
+  const src = video?.src;
   useEffect(() => {
-    const streamFactory = (window as typeof window & {
-      Stream?: (element: HTMLIFrameElement | null) => Demo100StreamPlayer;
-    }).Stream;
-    if (!url || !scriptReady || typeof streamFactory !== 'function') return;
-    const player = streamFactory(iframeRef.current);
+    const player = playerRef.current;
     if (!player) return;
-    playerRef.current = player;
-    const handleEnded = () => {
-      for (let index = 0; index < chapters.length; index += 1) markCompleted(index);
-      setActiveIndex(chapters.length - 1);
-      setHighestUnlockedIndex(chapters.length - 1);
-      setPlaybackProgress(100);
-    };
-    const syncToPlayback = () => {
-      if (!Number.isFinite(player.duration) || player.duration <= 0) return;
-      const playbackDuration = playbackEndSeconds && playbackEndSeconds > 0
-        ? Math.min(player.duration, playbackEndSeconds)
-        : player.duration;
-      if (playbackEndSeconds && playbackEndSeconds > 0 && player.currentTime >= playbackEndSeconds) {
-        if (!cutReachedRef.current) {
-          cutReachedRef.current = true;
-          player.pause?.();
-          player.currentTime = playbackEndSeconds;
-          handleEnded();
-        }
-        return;
-      }
-      const ratio = Math.max(0, Math.min(1, player.currentTime / playbackDuration));
-      let chapterIndex = 0;
-      for (let index = 1; index < chapters.length; index += 1) {
-        if (player.currentTime < chapters[index].startSeconds) break;
-        chapterIndex = index;
-      }
-      setPlaybackProgress(ratio * 100);
-      setActiveIndex(chapterIndex);
-      setHighestUnlockedIndex((current) => Math.max(current, chapterIndex));
-      for (let index = 0; index < chapterIndex; index += 1) markCompleted(index);
-      markStarted(chapterIndex);
-    };
-    const handlePlay = () => syncToPlayback();
-    const handleLoadedMetadata = () => {
-      const pendingSeekSeconds = pendingSeekSecondsRef.current;
-      if (pendingSeekSeconds !== null && Number.isFinite(player.duration) && player.duration > 0) {
-        const seekLimit = playbackEndSeconds && playbackEndSeconds > 0
-          ? Math.min(player.duration, playbackEndSeconds)
-          : player.duration;
-        cutReachedRef.current = false;
-        player.currentTime = Math.min(pendingSeekSeconds, seekLimit);
-        pendingSeekSecondsRef.current = null;
-        void player.play().catch(() => undefined);
-      }
-      syncToPlayback();
-    };
-    player.addEventListener('ended', handleEnded);
-    player.addEventListener('play', handlePlay);
-    player.addEventListener('timeupdate', syncToPlayback);
-    player.addEventListener('loadedmetadata', handleLoadedMetadata);
+    let active = true;
     player.muted = false;
     player.play()
       .then(() => {
-        markStarted(0);
-        setNeedsSoundGesture(false);
+        if (active) setNeedsSoundGesture(false);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        if (!active || !(error instanceof DOMException) || error.name !== 'NotAllowedError') return;
         player.muted = true;
-        setNeedsSoundGesture(true);
-        void player.play()
-          .then(() => markStarted(0))
-          .catch(() => undefined);
+        void player.play().catch(() => undefined);
       });
-
     return () => {
-      player.removeEventListener?.('ended', handleEnded);
-      player.removeEventListener?.('play', handlePlay);
-      player.removeEventListener?.('timeupdate', syncToPlayback);
-      player.removeEventListener?.('loadedmetadata', handleLoadedMetadata);
-      player.pause?.();
-      if (playerRef.current === player) playerRef.current = null;
+      active = false;
     };
-  }, [chapters, markCompleted, markStarted, playbackEndSeconds, scriptReady, url]);
+  }, [src]);
 
   if (!activeChapter) return null;
 
@@ -243,13 +186,6 @@ export function IphoneChapterExperience({
 
   return (
     <div className="fixed inset-0 z-[120] overflow-y-auto bg-[#050505] text-white">
-      <Script
-        src="https://embed.cloudflarestream.com/embed/sdk.latest.js"
-        strategy="afterInteractive"
-        onReady={() => setScriptReady(true)}
-        onError={() => setSdkFailed(true)}
-      />
-
       <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1440px] flex-col px-4 pb-6 pt-[max(5rem,calc(env(safe-area-inset-top)+4rem))] sm:px-6 lg:h-[100dvh] lg:flex-row lg:gap-8 lg:overflow-hidden lg:px-10 lg:pb-6 lg:pt-16">
         <section className="order-2 mt-8 flex min-h-0 flex-1 flex-col lg:order-1 lg:mt-0 lg:max-w-[600px]">
           <div className="shrink-0">
@@ -307,13 +243,20 @@ export function IphoneChapterExperience({
           <div className="w-full max-w-[480px]">
             <div className="relative mx-auto aspect-[9/16] h-[min(78dvh,880px)] max-w-full overflow-hidden rounded-[3.5rem] border-[8px] border-[#202126] bg-black shadow-[0_30px_90px_rgba(0,0,0,.75),0_0_0_1px_rgba(255,255,255,.16)]">
               <div className="pointer-events-none absolute left-1/2 top-2 z-30 h-7 w-28 -translate-x-1/2 rounded-full bg-black" />
-              {url && !sdkFailed ? (
-                <iframe
-                  ref={iframeRef}
+              {video && !mediaFailed ? (
+                <video
+                  ref={playerRef}
                   title="WolfGrid iPhone walkthrough video"
-                  src={url}
-                  className="pointer-events-none absolute inset-0 size-full border-0"
-                  allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+                  src={video.src}
+                  poster={video.poster}
+                  className="pointer-events-none absolute inset-0 size-full object-contain"
+                  playsInline
+                  preload="metadata"
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onPlaying={syncToPlayback}
+                  onTimeUpdate={syncToPlayback}
+                  onEnded={handleEnded}
+                  onError={() => setMediaFailed(true)}
                 />
               ) : (
                 <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(circle_at_50%_28%,rgba(239,68,68,.2),transparent_35%),linear-gradient(180deg,#17181c,#070708)] px-7 text-center">
@@ -326,12 +269,12 @@ export function IphoneChapterExperience({
                 </div>
               )}
 
-              {url && !sdkFailed && needsSoundGesture ? (
+              {video && !mediaFailed && needsSoundGesture ? (
                 <div className="absolute inset-0 z-40 grid place-items-center bg-black/15 px-6">
                   <button
                     type="button"
                     onClick={() => void playWithSound()}
-                    disabled={!scriptReady || startingSound}
+                    disabled={startingSound}
                     className="flex min-h-14 items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white px-6 text-sm font-black text-black shadow-2xl transition hover:scale-[1.02] hover:bg-zinc-100 disabled:cursor-wait disabled:opacity-70"
                   >
                     {startingSound ? (

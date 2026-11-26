@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { siteVideo } from '@/lib/demo/siteVideos';
 import { Demo100Experience } from '@/components/demo100/Demo100Experience';
 
 export const metadata: Metadata = {
@@ -21,55 +22,41 @@ function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
-function demo1VideoUid(demo1EnvName: string, demo100EnvName: string, fallback: string) {
-  return process.env[demo1EnvName] || process.env[demo100EnvName] || fallback;
-}
-
 export default async function DemoOnePage({ searchParams }: DemoOnePageProps) {
   const params = await searchParams;
-  const iphoneOverviewUid = demo1VideoUid(
-    'NEXT_PUBLIC_DEMO1_IPHONE_STREAM_VIDEO_UID',
-    'NEXT_PUBLIC_DEMO100_IPHONE_STREAM_VIDEO_UID',
-    '667f3cc919bb749d35801c545fbf0ec5',
-  );
-
   return (
     <Demo100Experience
-      customerCode={process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE}
-      videoUids={{
-        intro: process.env.NEXT_PUBLIC_DEMO1_INTRO_STREAM_VIDEO_UID || '2995c8470dd67f6306b07c73bf4f0880',
-        postCreate: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_POST_CREATE_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_POST_CREATE_STREAM_VIDEO_UID',
-          'abe827017c08f0d40dd57d84ca88bf8c',
+      videos={{
+        intro: siteVideo('interactive-intro', process.env.NEXT_PUBLIC_DEMO1_INTRO_VIDEO_URL),
+        postCreate: siteVideo(
+          'interactive-post-create',
+          process.env.NEXT_PUBLIC_DEMO1_POST_CREATE_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_POST_CREATE_VIDEO_URL,
         ),
-        fieldGuideIntro: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_FIELD_GUIDE_INTRO_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_FIELD_GUIDE_INTRO_STREAM_VIDEO_UID',
-          'c0872931ae8d5c162b3387c56bc5ce67',
+        fieldGuideIntro: siteVideo(
+          'field-guide-intro',
+          process.env.NEXT_PUBLIC_DEMO1_FIELD_GUIDE_INTRO_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_FIELD_GUIDE_INTRO_VIDEO_URL,
         ),
-        iphone: iphoneOverviewUid,
-        outro: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_OUTRO_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_OUTRO_STREAM_VIDEO_UID',
-          '751b31f589947a56f250585bd93d9e82',
+        iphone: siteVideo(
+          'iphone-field-guide',
+          process.env.NEXT_PUBLIC_DEMO1_IPHONE_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_IPHONE_VIDEO_URL,
         ),
-        team: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_TEAM_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_TEAM_STREAM_VIDEO_UID',
-          '562f1c79a5db940327f32588978bbb33',
+        outro: siteVideo(
+          'demo-outro',
+          process.env.NEXT_PUBLIC_DEMO1_OUTRO_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_OUTRO_VIDEO_URL,
         ),
-        solo: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_SOLO_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_SOLO_STREAM_VIDEO_UID',
-          'a28d08cb98f3202d4d270e3feb1d1017',
+        team: siteVideo(
+          'interactive-team',
+          process.env.NEXT_PUBLIC_DEMO1_TEAM_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_TEAM_VIDEO_URL,
         ),
-        magic: demo1VideoUid(
-          'NEXT_PUBLIC_DEMO1_MAGIC_STREAM_VIDEO_UID',
-          'NEXT_PUBLIC_DEMO100_MAGIC_STREAM_VIDEO_UID',
-          '50e2ff07612338e37cf17adb68c0c81d',
+        solo: siteVideo(
+          'interactive-solo',
+          process.env.NEXT_PUBLIC_DEMO1_SOLO_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_SOLO_VIDEO_URL,
         ),
-        end: process.env.NEXT_PUBLIC_DEMO1_END_STREAM_VIDEO_UID || '3bbfc9234b70afd03648dd8e351908cf',
+        magic: siteVideo(
+          'interactive-magic',
+          process.env.NEXT_PUBLIC_DEMO1_MAGIC_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO100_MAGIC_VIDEO_URL,
+        ),
+        end: siteVideo('interactive-end', process.env.NEXT_PUBLIC_DEMO1_END_VIDEO_URL),
       }}
       founderCallHref={process.env.NEXT_PUBLIC_FOUNDER_CALL_URL || 'https://calendly.com/daniel-phillippe'}
       referralCode={first(params?.referralCode ?? params?.ref)}

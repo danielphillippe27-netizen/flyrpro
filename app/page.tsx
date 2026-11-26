@@ -11,6 +11,9 @@ import {
 import { PublicSiteFooter } from '@/components/landing/PublicSiteFooter';
 import { PublicSiteHeader } from '@/components/landing/PublicSiteHeader';
 import { landingAuthRedirect } from '@/lib/auth/landing-redirect';
+import { siteVideo } from '@/lib/demo/siteVideos';
+
+const overviewVideo = siteVideo('demo-overview');
 
 export default function LandingPage() {
   const router = useRouter();
@@ -85,13 +88,14 @@ export default function LandingPage() {
               <p className="max-w-lg text-lg leading-8 text-zinc-400">Explore your campaign in 3D. Keep addresses and activity in one view, so you can see where to work and where to return.</p>
             </div>
             <div id="demo" className="mt-9 scroll-mt-28 overflow-hidden rounded-2xl border border-white/15 bg-zinc-900">
-              <iframe
-                src="https://iframe.videodelivery.net/efb7769ec5cdce81732b3d3f669bc30e?controls=true&preload=metadata"
+              <video
+                src={overviewVideo.src}
+                poster={overviewVideo.poster}
                 title="Watch the WolfGrid demo"
                 className="aspect-video w-full border-0"
-                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-                allowFullScreen
-                loading="lazy"
+                controls
+                playsInline
+                preload="none"
               />
             </div>
             <div className="mt-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">

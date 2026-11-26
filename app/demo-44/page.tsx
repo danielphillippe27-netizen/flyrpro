@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { siteVideo } from '@/lib/demo/siteVideos';
 import { DialerVideoLanding } from '../power-dialer/DialerVideoLanding';
 import { normalizeSalespersonReferralCodeInput } from '@/app/lib/billing/salespeople';
 import {
@@ -9,12 +10,11 @@ import {
 const FOUNDER_CALL_HREF =
   process.env.NEXT_PUBLIC_FOUNDER_CALL_URL ||
   'https://calendly.com/daniel-phillippe';
-const DEMO_FORTY_FOUR_STREAM_CUSTOMER_CODE =
-  process.env.NEXT_PUBLIC_CLOUDFLARE_STREAM_CUSTOMER_CODE;
-const DEMO_FORTY_FOUR_STREAM_VIDEO_UID =
-  process.env.NEXT_PUBLIC_DEMO_FORTY_FOUR_STREAM_VIDEO_UID ||
-  process.env.NEXT_PUBLIC_DEMO_THREE_STREAM_VIDEO_UID ||
-  'efb7769ec5cdce81732b3d3f669bc30e';
+const VIDEO = siteVideo(
+  'demo-overview',
+  process.env.NEXT_PUBLIC_DEMO_FORTY_FOUR_VIDEO_URL || process.env.NEXT_PUBLIC_DEMO_THREE_VIDEO_URL,
+  process.env.NEXT_PUBLIC_DEMO_FORTY_FOUR_VIDEO_POSTER_URL || process.env.NEXT_PUBLIC_DEMO_THREE_VIDEO_POSTER_URL,
+);
 const configuredDemoFortyFourCtaAtSeconds = Number(
   process.env.NEXT_PUBLIC_DEMO_FORTY_FOUR_VIDEO_CTA_AT_SECONDS ??
     process.env.NEXT_PUBLIC_DEMO_THREE_VIDEO_CTA_AT_SECONDS
@@ -95,12 +95,8 @@ export default async function DemoFortyFourPage({
 
   return (
     <DialerVideoLanding
-      customerCode={DEMO_FORTY_FOUR_STREAM_CUSTOMER_CODE}
-      videoUid={DEMO_FORTY_FOUR_STREAM_VIDEO_UID}
-      posterUrl={
-        process.env.NEXT_PUBLIC_DEMO_FORTY_FOUR_STREAM_POSTER_URL ||
-        process.env.NEXT_PUBLIC_DEMO_THREE_STREAM_POSTER_URL
-      }
+      videoUrl={VIDEO.src}
+      posterUrl={VIDEO.poster}
       videoTitle="WolfGrid team lead demo"
       redirectAtSeconds={DEMO_FORTY_FOUR_CTA_AT_SECONDS}
       onboardingHref={await buildOnboardingHref(searchParams)}

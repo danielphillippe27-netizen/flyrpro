@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { siteVideo } from '@/lib/demo/siteVideos';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight, CloudLightning, MapPinned, Route } from 'lucide-react';
@@ -24,6 +25,8 @@ const steps = [
   { icon: Route, title: 'Take it to the field.', copy: 'Create a campaign and keep your addresses, conversations, and follow-ups together.', image: '/landing/storms/field-campaign.webp', height: 2004, alt: 'A WolfGrid campaign in Mississauga showing 1,040 addresses and a 3D neighborhood map.' },
 ];
 
+const stormVideo = siteVideo('storms');
+
 export default function StormsFeaturePage() {
   return (
     <div className="min-h-screen bg-[#f7f5f2] text-zinc-950">
@@ -44,12 +47,14 @@ export default function StormsFeaturePage() {
             </div>
             <div className="mx-auto w-full max-w-[340px]">
             <div id="storm-demo" className="scroll-mt-36 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/15 md:scroll-mt-24">
-              <iframe
-                src="https://iframe.videodelivery.net/ad6fbe3e521a550ac1a276c1a34f1a14?controls=true&preload=metadata"
+              <video
+                src={stormVideo.src}
+                poster={stormVideo.poster}
                 title="WolfGrid Storms demo — from storm map to field campaign"
                 className="block aspect-[9/16] w-full border-0"
-                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-                allowFullScreen
+                controls
+                playsInline
+                preload="none"
               />
             </div>
             <p className="mt-5 text-center text-sm text-zinc-500">Watch WolfGrid Storms in action.</p>
