@@ -57,9 +57,15 @@ export async function GET(request: NextRequest) {
     .eq('user_id', requestUser.id)
     .not('fub_appointment_id', 'is', null);
   if (workspace.workspaceId) appointmentQuery = appointmentQuery.eq('workspace_id', workspace.workspaceId);
-  const appointmentRes = await appointmentQuery;
+  const [appointmentRes, fieldBookings] = await Promise.all([
+    appointmentQuery,
+    supabase.rpc('field_sales_personal_booking_count', { p_user: requestUser.id, p_workspace: workspace.workspaceId }),
+  ]);
+  if (fieldBookings.error && fieldBookings.error.code !== 'PGRST202') {
+    return NextResponse.json({ error: fieldBookings.error.message }, { status: 500 });
+  }
 
-  if (appointmentRes.error && !isMissingRelation(appointmentRes.error, 'crm_events')) {
+  if (fieldBookings.data == null && appointmentRes.error && !isMissingRelation(appointmentRes.error, 'crm_events')) {
     return NextResponse.json({ error: appointmentRes.error.message }, { status: 500 });
   }
 
@@ -75,7 +81,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     knocks: totals.knocks,
     leads: totals.leads,
-    appointments: appointmentRes.error ? 0 : appointmentRes.data?.length ?? 0,
+    appointments: fieldBookings.data ?? appointmentRes.data?.length ?? 0,
     distanceMeters: totals.distanceMeters,
   });
 }

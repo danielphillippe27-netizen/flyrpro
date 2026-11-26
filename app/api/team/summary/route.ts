@@ -299,6 +299,7 @@ export async function GET(request: NextRequest) {
       currentAppointmentsRes,
       previousAppointmentsRes,
       contactsRes,
+      bookingCountsRes,
     ] = await Promise.all([
       supabase
         .from('sessions')
@@ -329,6 +330,12 @@ export async function GET(request: NextRequest) {
         .gte('created_at', previousStart)
         .lt('created_at', previousEnd),
       fetchContactRows(supabase, resolution.workspaceId, selectedUserIds),
+      supabase.rpc('field_sales_team_booking_counts', {
+        p_workspace: resolution.workspaceId,
+        p_members: requestedMemberIds.length ? selectedUserIds : null,
+        p_previous: previousStart, p_start: start, p_end: end,
+        p_lifetime: searchParams.get('includeLifetimeBookings') === 'true',
+      }),
     ]);
 
     if (currentSessionsRes.error) {
@@ -341,15 +348,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: previousSessionsRes.error.message }, { status: 500 });
     }
 
+    if (bookingCountsRes.error && bookingCountsRes.error.code !== 'PGRST202') {
+      return NextResponse.json({ error: bookingCountsRes.error.message }, { status: 500 });
+    }
+    const bookings = bookingCountsRes.data;
     let currentAppointments = currentAppointmentsRes.data ?? [];
     let previousAppointments = previousAppointmentsRes.data ?? [];
 
-    if (currentAppointmentsRes.error && !isMissingRelation(currentAppointmentsRes.error, 'crm_events')) {
+    if (!bookings && currentAppointmentsRes.error && !isMissingRelation(currentAppointmentsRes.error, 'crm_events')) {
       console.error('[team/summary] current appointments error:', currentAppointmentsRes.error);
       return NextResponse.json({ error: currentAppointmentsRes.error.message }, { status: 500 });
     }
 
-    if (previousAppointmentsRes.error && !isMissingRelation(previousAppointmentsRes.error, 'crm_events')) {
+    if (!bookings && previousAppointmentsRes.error && !isMissingRelation(previousAppointmentsRes.error, 'crm_events')) {
       console.error('[team/summary] previous appointments error:', previousAppointmentsRes.error);
       return NextResponse.json({ error: previousAppointmentsRes.error.message }, { status: 500 });
     }
@@ -368,9 +379,9 @@ export async function GET(request: NextRequest) {
     const currentContactSummary = summarizeContacts(contacts, start, end);
     const previousContactSummary = summarizeContacts(contacts, previousStart, previousEnd);
     const currentAppointmentsCount =
-      contacts.length > 0 ? currentContactSummary.appointments : countAppointments(currentAppointments as AppointmentRow[]);
+      bookings?.current ?? (contacts.length > 0 ? currentContactSummary.appointments : countAppointments(currentAppointments as AppointmentRow[]));
     const previousAppointmentsCount =
-      contacts.length > 0 ? previousContactSummary.appointments : countAppointments(previousAppointments as AppointmentRow[]);
+      bookings?.previous ?? (contacts.length > 0 ? previousContactSummary.appointments : countAppointments(previousAppointments as AppointmentRow[]));
     const currentLeadCount = contacts.length > 0 ? currentContactSummary.leads : currentSummary.leads;
     const previousLeadCount = contacts.length > 0 ? previousContactSummary.leads : previousSummary.leads;
 
@@ -379,6 +390,7 @@ export async function GET(request: NextRequest) {
       .map(([date, doors]) => ({ date, doors }));
 
     return NextResponse.json({
+      lifetimeAppointments: bookings?.lifetime,
       period: { start, end },
       goals,
       totals: {

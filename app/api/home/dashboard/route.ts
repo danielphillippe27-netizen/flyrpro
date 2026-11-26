@@ -217,7 +217,7 @@ export async function GET(request: Request) {
     const startOfWeek = getStartOfWeekUTC();
 
     // Run independent fetches in parallel
-    const [userStatsRes, profileRes, campaignsRes, weekSessionsRes, appointmentsRes, contactsRes] = await Promise.all([
+    const [userStatsRes, profileRes, campaignsRes, weekSessionsRes, appointmentsRes, contactsRes, doorMetricsRes] = await Promise.all([
       supabase
         .from('user_stats')
         .select('doors_knocked, time_tracked, day_streak, conversations')
@@ -246,6 +246,10 @@ export async function GET(request: Request) {
         .not('fub_appointment_id', 'is', null)
         .gte('created_at', startOfWeek),
       fetchContactMetricsRows(supabase, targetWorkspaceId, userId, startOfWeek),
+      authClient.rpc('wolfy_home_metrics', {
+        p_workspace: targetWorkspaceId, p_week: startOfWeek, p_day: startOfWeek,
+        p_until: new Date().toISOString(),
+      }),
     ]);
 
     const userStats = userStatsRes.data;
@@ -369,7 +373,9 @@ export async function GET(request: Request) {
     const minutesThisWeek = 0;
     const sessionsThisWeek = 0;
     const weekSessions = (weekSessionsRes.data ?? []) as SessionMetricRow[];
-    const doorsThisWeek = weekSessions.reduce((sum, row) => sum + (Number(row.doors_hit ?? 0) || 0), 0);
+    if (doorMetricsRes.error) throw new Error(doorMetricsRes.error.message);
+    const doorsThisWeek = doorMetricsRes.data?.weekly_doors;
+    if (typeof doorsThisWeek !== 'number') throw new Error('Weekly door total unavailable');
     const metricConvos = weekSessions.reduce((sum, row) => sum + (Number(row.conversations ?? 0) || 0), 0);
     const fallbackLeadCount = weekSessions.reduce((sum, row) => sum + (Number(row.leads_created ?? 0) || 0), 0);
     const metricsPeriodEnd = new Date().toISOString();
@@ -386,6 +392,9 @@ export async function GET(request: Request) {
       metricLeads = contactSummary.leads;
       metricAppointments = contactSummary.appointments;
     }
+
+    const fieldBookings = doorMetricsRes.data?.appointments_set;
+    if (typeof fieldBookings === 'number') metricAppointments = fieldBookings;
 
     const body = {
       user: { firstName, fullName },

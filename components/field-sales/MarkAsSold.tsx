@@ -73,9 +73,9 @@ function percentageCommission(valueMinor: string, percentage: string): string {
   const rate = percentage.trim();
   if (!/^\d+(?:\.\d{1,2})?$/.test(rate)) throw new Error("Enter a commission percentage from 0 to 100, with up to two decimal places.");
   const [whole, fraction = ""] = rate.split(".");
-  const rateHundredths = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  if (rateHundredths > 10000n) throw new Error("Enter a commission percentage from 0 to 100, with up to two decimal places.");
-  return ((BigInt(valueMinor) * rateHundredths + 5000n) / 10000n).toString();
+  const rateHundredths = BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"));
+  if (rateHundredths > BigInt(10000)) throw new Error("Enter a commission percentage from 0 to 100, with up to two decimal places.");
+  return ((BigInt(valueMinor) * rateHundredths + BigInt(5000)) / BigInt(10000)).toString();
 }
 
 function commissionPreview(value: string, percentage: string, currency: string): string {

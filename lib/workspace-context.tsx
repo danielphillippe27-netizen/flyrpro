@@ -337,6 +337,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             : null;
       }
 
+      const accessState = await accessStatePromise;
+      const accessWorkspace = accessState?.workspaceId ?? accessState?.workspace_id;
+      if (accessState?.userId === user.id && accessWorkspace && workspaceIds.includes(accessWorkspace)
+          && typeof accessState.memberCount === 'number') {
+        // The membership policy can limit a browser roster query to the viewer's own row.
+        countMap[accessWorkspace] = accessState.memberCount;
+      }
       setMemberCountByWorkspaceId(countMap);
       setMemberships(
         safeMembershipRows.map((row) => ({
@@ -396,7 +403,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           window.localStorage.removeItem(legacyNamespacedKey);
         }
       }
-      applyAccessState(await accessStatePromise);
+      applyAccessState(accessState);
     } catch (err) {
       try {
         const data = await accessStatePromise;
@@ -475,6 +482,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         throw new Error(payload?.error ?? 'Failed to save workspace selection');
       }
       setError(null);
+      const accessResponse = await fetch(`/api/access/state?workspaceId=${encodeURIComponent(workspaceId)}`, {
+        credentials: 'include',
+      }).catch(() => null);
+      if (!accessResponse?.ok) return;
+      const access: AccessStateRow | null = await accessResponse.json().catch(() => null);
+      if (access?.userId === currentUserId && currentAuthUserIdRef.current === currentUserId
+          && access?.workspaceId === workspaceId && typeof access.memberCount === 'number') {
+        const memberCount = access.memberCount;
+        setMemberCountByWorkspaceId(counts => ({ ...counts, [workspaceId]: memberCount }));
+      }
     }).catch((err) => {
       setError(err instanceof Error ? err.message : 'Failed to save workspace selection');
       void refreshWorkspaces();

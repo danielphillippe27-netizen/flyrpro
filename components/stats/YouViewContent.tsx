@@ -49,6 +49,7 @@ type TeamRosterResponse = {
 };
 
 type TeamSummaryResponse = {
+  lifetimeAppointments?: number;
   totals?: {
     leads?: number;
     appointments?: number;
@@ -167,7 +168,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
 
         const [statsRows, summaryResponse] = await Promise.all([
           StatsService.fetchUserStatsForUsers(memberIds),
-          fetch(`/api/team/summary?workspaceId=${encodeURIComponent(currentWorkspaceId)}`),
+          fetch(`/api/team/summary?workspaceId=${encodeURIComponent(currentWorkspaceId)}&includeLifetimeBookings=true`),
         ]);
 
         if (!summaryResponse.ok) {
@@ -176,9 +177,10 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
         }
 
         const summary = (await summaryResponse.json()) as TeamSummaryResponse;
-        setStats(StatsService.aggregateUserStats(statsRows, 'team'));
+        const teamStats = StatsService.aggregateUserStats(statsRows, 'team');
+        setStats(teamStats);
         setLeadCount(summary.totals?.leads ?? 0);
-        setAppointmentCount(summary.totals?.appointments ?? 0);
+        setAppointmentCount(summary.lifetimeAppointments ?? Math.max(teamStats?.appointments ?? 0, summary.totals?.appointments ?? 0));
       } else {
         const [statsResult, leadCountResult, appointmentResult] = await Promise.allSettled([
           StatsService.fetchUserStats(userId),
@@ -192,7 +194,8 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
 
         setStats(statsResult.value);
         setLeadCount(leadCountResult.status === 'fulfilled' ? leadCountResult.value : 0);
-        setAppointmentCount(appointmentResult.status === 'fulfilled' ? appointmentResult.value : 0);
+        const bookings = appointmentResult.status === 'fulfilled' ? appointmentResult.value : undefined;
+        setAppointmentCount(bookings?.canonical ? bookings.count : Math.max(statsResult.value?.appointments ?? 0, bookings?.count ?? 0));
       }
 
       const financeResult = await financePromise;
@@ -228,9 +231,8 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
   const effectiveLeadsCreated = Math.max(displayStats.leads_created, leadCount);
   const effectiveLeadPerConversation =
     displayStats.conversations > 0 ? (effectiveLeadsCreated / displayStats.conversations) * 100 : 0;
-  const effectiveAppointmentCount = Math.max(displayStats.appointments, appointmentCount);
   const appointmentPerConversation =
-    displayStats.conversations > 0 ? (effectiveAppointmentCount / displayStats.conversations) * 100 : 0;
+    displayStats.conversations > 0 ? (appointmentCount / displayStats.conversations) * 100 : 0;
   const heading = scope === 'team' ? 'Team stats' : 'Your stats';
   const description =
     scope === 'team'
@@ -376,7 +378,7 @@ export function YouViewContent({ userId, authChecked = false }: { userId: string
         <StatCard label="Flyers Delivered" value={displayStats.flyers} />
         <StatCard label="Conversations" value={displayStats.conversations} />
         <StatCard label="Leads Created" value={effectiveLeadsCreated} />
-        <StatCard label="Appointments Set" value={effectiveAppointmentCount} />
+        <StatCard label="Appointments Set" value={appointmentCount} />
         <StatCard label="QR Codes Scanned" value={displayStats.qr_codes_scanned} />
         <BusinessCardOpenedStat workspaceId={currentWorkspaceId} userId={userId} scope={canViewTeamMetrics ? scope : 'self'} />
         <StatCard label="Distance Walked" value={`${formatDistanceWalked(displayStats.distance_walked)} km`} />

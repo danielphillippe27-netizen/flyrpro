@@ -33,6 +33,11 @@ const dateInput = (date, seconds = false) => new Intl.DateTimeFormat('sv-SE', {
     await actor(2, '/appointments');
     await page.getByRole('button', { name: 'Book appointment', exact: true }).click();
     let dialog = page.getByRole('dialog');
+    const typePicker = page.getByRole('combobox', { name: /Appointment type/ });
+    await typePicker.waitFor();
+    assert.equal(await typePicker.inputValue(), 'Inspection');
+    assert.deepEqual(await typePicker.locator('option').allTextContents(), ['Inspection', 'Estimate', 'Follow-up']);
+    await typePicker.selectOption('Estimate');
     await dialog.getByRole('combobox', { name: 'Contact' }).selectOption(id(30));
     await dialog.getByLabel('Date and time').fill(dateInput(new Date(Date.now() - 15 * 60_000)));
     const booking = await runRpc('field_appointment_command', 'book', () =>
@@ -49,6 +54,7 @@ const dateInput = (date, seconds = false) => new Intl.DateTimeFormat('sv-SE', {
 
     await actor(3, '/appointments?booking=' + booking.id);
     dialog = page.getByRole('dialog');
+    await dialog.getByText(/Estimate · 7 Test Street/).waitFor();
     await dialog.getByRole('button', { name: 'Mark held' }).waitFor();
     await runRpc('field_appointment_command', 'held', () => dialog.getByRole('button', { name: 'Mark held' }).click());
     await dialog.getByRole('link', { name: 'Record sale' }).click();
@@ -75,6 +81,22 @@ const dateInput = (date, seconds = false) => new Intl.DateTimeFormat('sv-SE', {
     await sessionSales.waitFor({ state: 'hidden' });
     await page.getByRole('heading', { name: 'Team Sales' }).waitFor({ state: 'hidden' });
     assert.equal(await salesToggle.isChecked(), false);
+    await actor(2, '/field-booking-test');
+    const [setting] = await Promise.all([
+      page.waitForResponse(response => response.url().endsWith('/rpc/field_sales_workspace_command')),
+      page.getByRole('button', { name: 'Book appointment' }).click(),
+    ]);
+    assert.equal((await setting.json()).data.enabled, false);
+    dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Create a contact').check();
+    await dialog.getByLabel('Name', { exact: true }).fill('Sales disabled booking');
+    assert.equal(await typePicker.count(), 0);
+    const [regularRequest] = await Promise.all([
+      page.waitForRequest(request => request.url().endsWith('/rpc/field_appointment_command')),
+      runRpc('field_appointment_command', 'book', () => dialog.getByRole('button', { name: 'Save appointment' }).click()),
+    ]);
+    assert.equal(Object.hasOwn(regularRequest.postDataJSON().p_data, 'appointment_type'), false);
+    await actor(1, '/visibility-test');
     await salesToggle.click();
     await sessionSales.getByText(/20,000/).waitFor();
     assert.ok(await salesToggle.isChecked());
@@ -97,6 +119,19 @@ const dateInput = (date, seconds = false) => new Intl.DateTimeFormat('sv-SE', {
     await approvedFee.getByLabel('External payment reference').fill('Fixture pay run 42');
     await runRpc('field_earnings_command', 'settle', () => approvedFee.getByRole('button', { name: 'Mark paid' }).click());
     await page.locator('summary').filter({ hasText: 'Held fee · Paid' }).waitFor();
+    await actor(2, '/field-booking-test');
+    await page.getByRole('button', { name: 'Book appointment' }).click();
+    dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Create a contact').check();
+    await dialog.getByLabel('Name', { exact: true }).fill('Web field resident');
+    await typePicker.waitFor();
+    assert.equal(await typePicker.inputValue(), 'Inspection');
+    await typePicker.selectOption('Follow-up');
+    const fieldBooking = await runRpc('field_appointment_command', 'book', () =>
+      dialog.getByRole('button', { name: 'Save appointment' }).click());
+    await actor(2, '/appointments?booking=' + fieldBooking.id);
+    await page.getByRole('dialog').getByText('Web field resident', { exact: true }).first().waitFor();
+    await page.getByRole('dialog').getByText(/Follow-up · 7 Test Street/).waitFor();
     assert.deepEqual(pageErrors, []);
     console.log('PASS web fixture: book, reassign, hold, convert, verify, record cash, view both earnings, approve and settle');
   } catch (error) {

@@ -313,7 +313,10 @@ export class StatsService {
     }, emptyStats);
   }
 
-  static async fetchAppointmentCount(userId: string): Promise<number> {
+  static async fetchAppointmentCount(userId: string) {
+    const { data, error } = await this.client.rpc('field_sales_personal_booking_count', { p_user: userId });
+    if (typeof data === 'number') return { count: data, canonical: true };
+    if (error && error.code !== 'PGRST202') throw new Error(error.message);
     const rows = await fetchLeadCandidateRows(this.client, userId);
 
     const signatures = new Set<string>();
@@ -327,7 +330,7 @@ export class StatsService {
       count += 1;
     }
 
-    return count;
+    return { count, canonical: false };
   }
 
   static async fetchLeadCount(userId: string): Promise<number> {

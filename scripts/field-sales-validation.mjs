@@ -36,6 +36,7 @@ if (roofing) {
         WHERE c.id=campaign AND m.user_id=actor)
     $$;
     ALTER TABLE contacts ADD COLUMN appointment_at timestamptz, ADD COLUMN address_id uuid, ADD COLUMN address text, ADD COLUMN phone text;
+    CREATE TABLE session_participants(session_id uuid,campaign_id uuid,user_id uuid,joined_at timestamptz,left_at timestamptz);
     CREATE TABLE calendar_events (id uuid PRIMARY KEY, workspace_id uuid, user_id uuid, contact_id uuid, event_type text);
     CREATE TABLE campaign_addresses (id uuid PRIMARY KEY, campaign_id uuid, formatted text);
     INSERT INTO campaign_addresses VALUES ('${id(47)}','${id(20)}','7 Test Street');
@@ -47,9 +48,10 @@ if (roofing) {
   `);
   for (const migration of [
     "20261110120000_roofing_appointments.sql","20261110121000_roofing_appointment_reminders.sql",
-    "20261110122000_roofing_sales.sql","20261110123000_roofing_earnings.sql","20261110124000_roofing_entry_and_reporting.sql", "20261110125000_workspace_sales_visibility.sql",
+    "20261110122000_roofing_sales.sql","20261110123000_roofing_earnings.sql","20261110124000_roofing_entry_and_reporting.sql", "20261110125000_workspace_sales_visibility.sql", "20261126170000_field_booking_attribution.sql",
   ]) await db.exec(await readFile(resolve(root, "supabase/migrations", migration), "utf8"));
   await db.exec(`
+    UPDATE workspace_members SET role='member' WHERE workspace_id='${id(10)}' AND user_id='${id(3)}';
     UPDATE field_sales_settings SET roofing_appointments_enabled=true,roofing_appointment_writes_enabled=true,
       roofing_sales_enabled=true,roofing_sale_writes_enabled=true,
       roofing_earnings_enabled=true,roofing_earnings_writes_enabled=true;
@@ -67,7 +69,7 @@ if (roofing) {
 const dir = await mkdtemp(join(tmpdir(), "wolfgrid-sales-browser-"));
 await writeFile(
   join(dir, "workspace.ts"),
-  `export function useWorkspace(){return {currentWorkspaceId:'${id(10)}',membershipsByWorkspaceId:{'${id(10)}':({'1':'owner','2':'member','3':'admin'})[localStorage.getItem('actor')||'1']}}}`,
+  `export function useWorkspace(){return {currentWorkspaceId:'${id(10)}',membershipsByWorkspaceId:{'${id(10)}':({'1':'owner','2':'member','3':'${roofing ? 'member' : 'admin'}'})[localStorage.getItem('actor')||'1']}}}`,
 );
 await writeFile(
   join(dir, "navigation.ts"),
@@ -98,12 +100,12 @@ import {ProSalesLeaderboard} from '${join(root, "components/field-sales/ProSales
 import {SalesGoals} from '${join(root, "components/field-sales/SalesGoals.tsx")}';
 import {ProSalesReport} from '${join(root, "components/field-sales/ProSalesReport.tsx")}';
 import {SaleRecordPanel} from '${join(root, "components/field-sales/SaleRecordPanel.tsx")}';
-import {RoofingAppointments} from '${join(root, "components/appointments/RoofingAppointments.tsx")}';
+import {BookingButton,RoofingAppointments} from '${join(root, "components/appointments/RoofingAppointments.tsx")}';
 import {EarningsPage} from '${join(root, "components/field-sales/EarningsPage.tsx")}';
 import {SalesCard} from '${join(root, "components/field-sales/SalesCard.tsx")}';
 import {WorkspaceSalesSettings} from '${join(root, "components/field-sales/WorkspaceSalesSettings.tsx")}';
 import {SessionSales} from '${join(root, "components/field-sales/SessionSales.tsx")}';
-createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">Admin</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname === "/visibility-test" ? <><WorkspaceSalesSettings/><SalesCard/><SessionSales sessionId="${id(48)}"/></> : location.pathname === "/appointments" ? <RoofingAppointments workspace="${id(10)}" legacy={<p>Legacy appointments</p>} /> : location.pathname === "/sales/earnings" ? <EarningsPage/> : location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
+createRoot(document.getElementById('root')).render(<><header style={{padding:16,background:'#eef2ff'}}><strong>Local Sales acceptance environment</strong> <label>Test identity <select onChange={e=>window.testActor(e.target.value)} defaultValue={localStorage.getItem('actor')||'1'}><option value="1">Owner</option><option value="2">Representative</option><option value="3">${roofing ? "Closer" : "Admin"}</option></select></label></header><div style={{maxWidth:1100,margin:'auto',padding:24}}>{location.pathname === "/field-booking-test" ? <BookingButton context={{campaignId:"${id(20)}",addressId:"${id(47)}",propertyLabel:"7 Test Street",contacts:[]}}/> : location.pathname === "/visibility-test" ? <><WorkspaceSalesSettings/><SalesCard/><SessionSales sessionId="${id(48)}"/></> : location.pathname === "/appointments" ? <RoofingAppointments workspace="${id(10)}" legacy={<p>Legacy appointments</p>} /> : location.pathname === "/sales/earnings" ? <EarningsPage/> : location.pathname.includes("goals") ? <SalesGoals/> : location.pathname.includes("leaderboards") ? <ProSalesLeaderboard/> : location.pathname.includes("reports") ? <ProSalesReport/> : location.pathname.split("/").pop()?.length === 36 ? <SaleRecordPanel saleId={location.pathname.split("/").pop()}/> : location.pathname.includes("opportunities") ? <SalesWorkbench/> : <><SalesCard/><SalesDashboard/></>}</div></>);
 `,
 );
 await build({

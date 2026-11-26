@@ -1,3 +1,4 @@
+import { salesChanged } from './client';
 import { createClient } from '@/lib/supabase/client';
 
 export type Appointment = {
@@ -42,6 +43,9 @@ export const appointmentsChanged = 'wolfgrid:appointments-changed';
 export async function appointmentRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await createClient().rpc(name, args);
   if (error) throw error;
+  if (name === 'field_appointment_command' && !data?.conflict) {
+    window.dispatchEvent(new Event(salesChanged));
+  }
   return data as T;
 }
 

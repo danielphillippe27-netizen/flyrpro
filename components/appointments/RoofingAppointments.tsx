@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useRoofingSaleEnabled } from '@/components/field-sales/RoofingSaleEntry';
+import { useFieldSales } from '@/lib/field-sales/client';
 import { useWorkspace } from '@/lib/workspace-context';
 import {
   appointmentDate, appointmentError, appointmentRpc, appointmentsChanged,
@@ -23,6 +24,7 @@ type BookingContext = {
   initialDate?: Date;
 };
 
+const roofingAppointmentTypes = ['Inspection', 'Estimate', 'Follow-up'] as const;
 const selectClass = 'w-full rounded-md border bg-background px-3 py-2 text-sm';
 const statusLabels: Record<Appointment['status'], string> = {
   scheduled: 'Scheduled', confirmed: 'Confirmed', held: 'Held', no_show: 'No show',
@@ -51,7 +53,7 @@ export function BookingTrigger({ workspace, context, onSaved }: { workspace: str
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader><DialogTitle>Book appointment</DialogTitle></DialogHeader>
-        {open ? <BookingForm workspace={workspace} context={context} onSaved={() => {
+        {open ? <BookingForm key={workspace} workspace={workspace} context={context} onSaved={() => {
           setOpen(false);
           onSaved?.();
         }} /> : null}
@@ -61,6 +63,9 @@ export function BookingTrigger({ workspace, context, onSaved }: { workspace: str
 }
 
 function BookingForm({ workspace, context, onSaved }: { workspace: string; context?: BookingContext; onSaved: () => void }) {
+  const { data: sales, workspaceId, loading: loadingSales } = useFieldSales<{ enabled: boolean; roofing_default: boolean }>({}, false, 'field_sales_workspace_command');
+  const showType = workspaceId === workspace && sales?.enabled && sales.roofing_default;
+  const [appointmentType, setAppointmentType] = useState<string>(roofingAppointmentTypes[0]);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<AppointmentOptions>();
@@ -86,7 +91,7 @@ function BookingForm({ workspace, context, onSaved }: { workspace: string; conte
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || loadingSales) return;
     setBusy(true);
     setError('');
     try {
@@ -98,6 +103,7 @@ function BookingForm({ workspace, context, onSaved }: { workspace: string; conte
         assignee_id: assignee || undefined,
         campaign_id: context?.campaignId,
         campaign_address_id: context?.addressId,
+        appointment_type: showType ? appointmentType : undefined,
         start_at: appointmentDate(date),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         notes,
@@ -145,6 +151,11 @@ function BookingForm({ workspace, context, onSaved }: { workspace: string; conte
       </label>
     </>}
     {context?.propertyLabel ? <p className="text-sm text-muted-foreground">{context.propertyLabel}</p> : null}
+    {showType ? <label className="block space-y-1 text-sm">Appointment type
+      <select className={selectClass} value={appointmentType} onChange={event => setAppointmentType(event.target.value)}>
+        {roofingAppointmentTypes.map(type => <option key={type}>{type}</option>)}
+      </select>
+    </label> : null}
     <label className="block space-y-1 text-sm">Date and time
       <Input type="datetime-local" required value={date} onChange={event => setDate(event.target.value)} />
     </label>
@@ -162,7 +173,7 @@ function BookingForm({ workspace, context, onSaved }: { workspace: string; conte
       </label>
     </details>
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-    <Button type="submit" disabled={busy || (newContact ? !newName.trim() : !contactId)}>{busy ? 'Saving…' : 'Save appointment'}</Button>
+    <Button type="submit" disabled={busy || loadingSales || (newContact ? !newName.trim() : !contactId)}>{busy ? 'Saving…' : 'Save appointment'}</Button>
   </form>;
 }
 
@@ -333,7 +344,7 @@ export function AppointmentDialog({ workspace, id, canWrite, onClose, onUpdated 
       <DialogHeader><DialogTitle>{item?.contact_name ?? 'Appointment'}</DialogTitle></DialogHeader>
       {item ? <>
         <p>{statusLabels[item.status]} · {new Date(item.start_at).toLocaleString()}</p>
-        <p className="text-sm text-muted-foreground">{item.property_label ?? item.appointment_type}</p>
+        <p className="text-sm text-muted-foreground">{[item.appointment_type, item.property_label].filter(Boolean).join(' · ')}</p>
         {item.setter_name ? <p className="text-sm">Booked by {item.setter_name}</p> : null}
         {item.assignee_name ? <p className="text-sm">Assigned to {item.assignee_name}</p> : null}
         {item.status === 'held' && saleGate?.canWrite ? <Button asChild>
